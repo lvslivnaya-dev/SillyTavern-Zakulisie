@@ -1,0 +1,386 @@
+@import url('./style/pud.css');
+/*
+ * Only what lives in SillyTavern's own DOM: the settings drawer and the message menu.
+ * The Studio and the widget style themselves inside their shadow roots (src/ui/theme.js).
+ * Colours come from the active SillyTavern theme only.
+ */
+.ku-label { display: grid; gap: .3rem; margin-bottom: .6rem; }
+
+.ku-warning {
+  padding: .65rem;
+  border: 1px solid color-mix(in srgb, var(--golden) 60%, var(--SmartThemeBodyColor));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--golden) 14%, transparent);
+}
+
+/* "Check this reply" button lives in every message menu; it makes sense only for bot replies. */
+.mes[is_user="true"] .kulisy-check,
+.mes[is_system="true"] .kulisy-check { display: none; }
+
+/* The scene drawer above the message box: a slim bar, opened it stays until its arrow. */
+#ku-scene-chips {
+  margin: 0 6px 6px;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 92%, transparent);
+  backdrop-filter: blur(var(--SmartThemeBlurStrength, 10px));
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--SmartThemeShadowColor) 40%, transparent);
+  font-size: calc(var(--mainFontSize) * 0.85);
+  color: var(--SmartThemeBodyColor);
+  overflow: hidden;
+}
+#ku-scene-chips .ku-dir-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 3px 8px;
+  overflow: hidden;
+}
+#ku-scene-chips:not(.open) .ku-dir-head { cursor: pointer; }
+#ku-scene-chips:not(.open) .ku-dir-head:hover { background: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent); }
+#ku-scene-chips.open .ku-dir-head { flex-wrap: wrap; border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 50%, transparent); }
+#ku-scene-chips .ku-dir-arrow {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, transparent);
+  color: var(--SmartThemeBodyColor);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+#ku-scene-chips .ku-dir-arrow:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 26%, transparent); }
+#ku-scene-chips .ku-dir-summary { display: flex; gap: 10px; min-width: 0; overflow: hidden; white-space: nowrap; opacity: .85; }
+#ku-scene-chips .ku-dir-name { display: inline-flex; align-items: center; gap: 3px; }
+#ku-scene-chips .ku-dir-tools { display: flex; gap: 6px; margin-left: auto; }
+/* The body slides like a blind: grid rows 0fr → 1fr. */
+#ku-scene-chips .ku-dir-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .25s ease; }
+#ku-scene-chips.open .ku-dir-body { grid-template-rows: 1fr; }
+#ku-scene-chips .ku-dir-inner { min-height: 0; overflow: hidden; }
+#ku-scene-chips.open .ku-dir-inner { max-height: 45vh; overflow-y: auto; padding: 6px 8px 8px; display: grid; gap: 8px; }
+#ku-scene-chips .ku-dir-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#ku-scene-chips .ku-dir-caption { color: color-mix(in srgb, var(--SmartThemeBodyColor) 60%, transparent); }
+#ku-scene-chips .ku-dir-gap { margin-left: 8px; }
+#ku-scene-chips .ku-dir-btn,
+#ku-scene-chips .ku-dir-seg,
+#ku-scene-chips .ku-dir-fav-text {
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 20%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeBodyColor) 6%, transparent);
+  color: var(--SmartThemeBodyColor);
+  font: inherit;
+  cursor: pointer;
+}
+#ku-scene-chips .ku-dir-btn:hover,
+#ku-scene-chips .ku-dir-seg:hover,
+#ku-scene-chips .ku-dir-fav-text:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 18%, transparent); }
+#ku-scene-chips .ku-dir-btn.on,
+#ku-scene-chips .ku-dir-seg.on {
+  border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 70%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor) 24%, transparent);
+}
+#ku-scene-chips .ku-dir-kick {
+  border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 70%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor) 30%, transparent);
+  font-weight: 600;
+}
+#ku-scene-chips .ku-dir-add { border-style: dashed; }
+/* The tiles: every tool and every value of the scene is one square button; the picked one opens its panel below. */
+#ku-scene-chips .ku-dir-title { margin-left: 2px; }
+#ku-scene-chips .ku-dir-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+#ku-scene-chips .ku-tile {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 1px;
+  min-width: 0;
+  min-height: 62px;
+  padding: 6px 4px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 20%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeBodyColor) 6%, transparent);
+  color: var(--SmartThemeBodyColor);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+#ku-scene-chips .ku-tile:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 16%, transparent); }
+#ku-scene-chips .ku-tile:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+#ku-scene-chips .ku-tile.on { border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 70%, transparent); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 22%, transparent); }
+#ku-scene-chips .ku-tile.kick { border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 80%, transparent); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 38%, transparent); font-weight: 600; }
+/* One tile cut across into thin strips: time (edits the clock), place and secrets (open their pages). */
+#ku-scene-chips .ku-tile-stack {
+  display: grid;
+  align-content: stretch;
+  gap: 3px;
+  min-width: 0;
+  min-height: 62px;
+  padding: 3px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 20%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
+}
+#ku-scene-chips .ku-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
+  color: var(--SmartThemeBodyColor);
+  font: inherit;
+  font-size: .92em;
+  text-align: left;
+  cursor: pointer;
+}
+#ku-scene-chips .ku-strip:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 16%, transparent); }
+#ku-scene-chips .ku-strip:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+#ku-scene-chips .ku-strip.on { border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 70%, transparent); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 22%, transparent); }
+#ku-scene-chips .ku-strip-ico { flex: none; }
+#ku-scene-chips .ku-strip-val { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#ku-scene-chips .ku-dice-label { flex: 0 0 8.5em; }
+#ku-scene-chips .ku-dice-chips { flex: 1 1 14em; min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+#ku-scene-chips .ku-dice-chip { max-width: 100%; text-align: left; white-space: normal; }
+#ku-scene-chips .ku-dice-chip.on { box-shadow: 0 0 8px color-mix(in srgb, var(--SmartThemeQuoteColor) 70%, transparent); font-weight: 600; }
+#ku-scene-chips .ku-stage-chip { white-space: normal; }
+#ku-scene-chips .ku-tile-ico { font-size: 1.5em; line-height: 1.1; }
+#ku-scene-chips .ku-tile-name { font-size: .72em; letter-spacing: .08em; text-transform: uppercase; opacity: .65; }
+#ku-scene-chips .ku-tile-val { font-size: .92em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#ku-scene-chips .ku-dir-seg { border-radius: 20px; padding: 2px 9px; }
+#ku-scene-chips .ku-dir-card {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 40%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor) 7%, transparent);
+}
+#ku-scene-chips .ku-dir-card-head { display: flex; align-items: baseline; gap: 8px; }
+#ku-scene-chips .ku-dir-sub {
+  padding-top: 6px;
+  border-top: 1px dashed color-mix(in srgb, var(--SmartThemeBodyColor) 18%, transparent);
+  display: grid;
+  gap: 6px;
+}
+#ku-scene-chips .ku-dir-row.ku-dir-sub { display: flex; }
+#ku-scene-chips .ku-dir-field { flex-wrap: nowrap; }
+#ku-scene-chips .ku-dir-input { flex: 1; min-width: 0; margin: 0; }
+#ku-scene-chips .ku-dir-textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 4em; font: inherit; }
+#ku-scene-chips .ku-dir-select { width: auto; max-width: 45%; margin: 0; }
+#ku-scene-chips .ku-dir-fav,
+#ku-scene-chips .ku-dir-tag { display: inline-flex; align-items: center; gap: 2px; }
+#ku-scene-chips .ku-dir-tag {
+  padding: 2px 4px 2px 10px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, transparent);
+}
+#ku-scene-chips .ku-dir-tag.used { border-style: dashed; opacity: .8; }
+#ku-scene-chips .ku-dir-fav-del {
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor) 60%, transparent);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 6px;
+}
+#ku-scene-chips .ku-dir-fav-del:hover { color: var(--SmartThemeBodyColor); }
+#ku-scene-chips .ku-chip-badge { font-size: .9em; }
+#ku-scene-chips .ku-chip-badge.used { opacity: .55; }
+#ku-scene-chips .ku-chip.selected { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+#ku-scene-chips .ku-chip.sleepy { opacity: .7; }
+#ku-scene-chips button:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { #ku-scene-chips .ku-dir-body { transition: none; } }
+#ku-scene-chips .ku-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 20px;
+  border: 1px dashed color-mix(in srgb, var(--SmartThemeBodyColor) 30%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--SmartThemeBodyColor) 60%, transparent);
+  font: inherit;
+  cursor: pointer;
+}
+#ku-scene-chips .ku-chip.on {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 60%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, transparent);
+  color: var(--SmartThemeBodyColor);
+}
+#ku-scene-chips .ku-chip:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+#ku-scene-chips .ku-chip-note { font-size: 0.8em; opacity: .7; }
+/* Time and place: small solid pills before the cast; they open the control desk. */
+#ku-scene-chips .ku-chips-place {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeBodyColor) 6%, transparent);
+  color: var(--SmartThemeBodyColor);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+#ku-scene-chips .ku-chips-place:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+
+/* A leak the chronicler found, under the reply. */
+.mes_block .ku-leak {
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--golden) 60%, var(--SmartThemeBodyColor));
+  background: color-mix(in srgb, var(--golden) 12%, transparent);
+  font-size: calc(var(--mainFontSize) * 0.9);
+}
+.mes_block .ku-leak-text i { color: color-mix(in srgb, var(--golden) 70%, var(--SmartThemeBodyColor)); }
+.mes_block .ku-leak-quote { font-style: italic; opacity: .85; }
+.mes_block .ku-leak-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.mes_block .ku-leak-button { margin: 0; padding: 3px 10px; font-size: 0.9em; }
+
+/* «Создать секрет»: the button over a selected passage and the window that checks the result. */
+#ku-secret-chip {
+  position: fixed;
+  z-index: 3000;
+  padding: 6px 12px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 10px;
+  background: var(--SmartThemeBlurTintColor);
+  color: var(--SmartThemeBodyColor);
+  font: inherit;
+  font-size: calc(var(--mainFontSize) * 0.9);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--SmartThemeShadowColor) 55%, transparent);
+}
+#ku-secret-chip:hover { border-color: var(--SmartThemeQuoteColor); }
+#ku-secret-chip:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 2px; }
+.mes[is_system="true"] .kulisy-secret { display: none; }
+
+.ku-sd { display: flex; flex-direction: column; gap: 12px; text-align: left; }
+.ku-sd-title { margin: 0; }
+.ku-sd-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ku-sd-label { font-weight: 700; font-size: calc(var(--mainFontSize) * 0.9); }
+.ku-sd-hint { font-size: calc(var(--mainFontSize) * 0.8); opacity: .75; }
+.ku-sd-input, .ku-sd-text { width: 100%; box-sizing: border-box; resize: vertical; }
+.ku-sd-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.ku-sd-pill {
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  background: transparent;
+  color: var(--SmartThemeBodyColor);
+  font: inherit;
+  font-size: calc(var(--mainFontSize) * 0.9);
+  cursor: pointer;
+}
+.ku-sd-pill small { opacity: .7; }
+.ku-sd-pill.on { border-color: var(--SmartThemeQuoteColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 22%, transparent); font-weight: 700; }
+.ku-sd-pill:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 2px; }
+.ku-sd-posts { display: flex; flex-direction: column; }
+.ku-sd-post { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 60%, transparent); font-size: calc(var(--mainFontSize) * 0.88); }
+.ku-sd-post:last-child { border-bottom: 0; }
+.ku-sd-post input { margin-top: 3px; }
+.ku-sd-preview {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 10px;
+  font-family: var(--monoFontFamily, monospace);
+  font-size: calc(var(--mainFontSize) * 0.82);
+  overflow-wrap: anywhere;
+}
+.ku-sd-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ku-sd-again { margin: 0; }
+.ku-sd-status { font-size: calc(var(--mainFontSize) * 0.85); opacity: .85; min-height: 1.2em; }
+
+/* A secret the chronicler thinks it found: the same note as a leak, with its own two answers. */
+.mes_block .ku-secret-hint { margin: 8px 0 4px; }
+
+/* The intimacy dice: groups are cut apart by lines, so «who leads» and «kind of sex» do not run together. */
+#ku-scene-chips .ku-dir-dice-row { padding-top: 8px; margin-top: 2px; border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent); align-items: flex-start; }
+#ku-scene-chips .ku-dir-dice .ku-dir-card-head + .ku-dir-row { padding-bottom: 6px; }
+#ku-scene-chips .ku-dice-label { padding-top: 4px; font-weight: 600; }
+
+/* Квесты в шторке */
+.ku-dir-quests{display:flex;flex-direction:column;gap:8px}
+.ku-dir-songs{display:flex;flex-direction:column;gap:8px}
+.ku-dir-quest{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-top:1px solid color-mix(in srgb,currentColor 14%,transparent)}
+.ku-dir-quest:first-of-type{border-top:0}
+.ku-dir-quest-title{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.ku-dir-quest-step{opacity:.9;overflow-wrap:anywhere}
+
+/* Накал в шторке */
+.ku-heat-bar{height:10px;border-radius:999px;background:color-mix(in srgb,currentColor 14%,transparent);overflow:hidden;margin:4px 0 8px}
+.ku-heat-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--SmartThemeQuoteColor),var(--SmartThemeUnderlineColor));transition:width .2s}
+
+/* The scene drawer is a side panel: a rail of tabs on the left wall of the browser, and the panel that slides out beside it. */
+#ku-scene-chips.ku-side { position: fixed; left: 0; top: var(--topBarBlockSize, 45px); bottom: 0; z-index: 1990; margin: 0; display: flex; align-items: stretch; border-left: none; border-radius: 0 14px 14px 0; max-width: calc(100vw - 8px); }
+/* The same drawer at the right wall: the panel slides out to the left of the rail. */
+#ku-scene-chips.ku-side.ku-side-right { left: auto; right: 0; flex-direction: row-reverse; border-radius: 14px 0 0 14px; }
+#ku-scene-chips.ku-side-right .ku-panel { border-left: none; border-right: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent); }
+#ku-scene-chips.ku-side-right .ku-rail .ku-tile,
+#ku-scene-chips.ku-side-right .ku-rail .ku-strip { border-left: none; border-right: 3px solid transparent; }
+#ku-scene-chips.ku-side-right .ku-rail .ku-tile.on,
+#ku-scene-chips.ku-side-right .ku-rail .ku-strip.on { border-right-color: var(--SmartThemeQuoteColor); }
+#ku-scene-chips .ku-rail { flex: 0 0 64px; width: 64px; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; }
+#ku-scene-chips .ku-rail-toggle { position: relative; flex: none; min-height: 36px; border: none; border-radius: 0; background: none; color: var(--SmartThemeBodyColor); font: inherit; font-size: 1.1em; cursor: pointer; opacity: .8; }
+#ku-scene-chips .ku-rail-toggle:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 16%, transparent); opacity: 1; }
+#ku-scene-chips .ku-rail-badge { position: absolute; top: 3px; right: 9px; min-width: 16px; padding: 0 4px; border-radius: 999px; background: var(--SmartThemeQuoteColor); color: var(--SmartThemeBlurTintColor); font-size: .7em; line-height: 16px; }
+#ku-scene-chips .ku-rail .ku-tile,
+#ku-scene-chips .ku-rail .ku-strip { min-height: 0; padding: 8px 2px; gap: 3px; border: none; border-left: 3px solid transparent; border-radius: 0; background: none; text-align: center; }
+#ku-scene-chips .ku-rail .ku-tile:hover,
+#ku-scene-chips .ku-rail .ku-strip:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 16%, transparent); }
+#ku-scene-chips .ku-rail .ku-tile.on,
+#ku-scene-chips .ku-rail .ku-strip.on { border-left-color: var(--SmartThemeQuoteColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 16%, transparent); }
+#ku-scene-chips .ku-rail .ku-tile.kick { margin-top: auto; }
+#ku-scene-chips .ku-rail .ku-tile-val { display: none; }
+#ku-scene-chips .ku-rail .ku-tile-name { font-size: .64em; letter-spacing: .02em; opacity: .85; }
+#ku-scene-chips .ku-rail .ku-tile-stack { display: contents; }
+#ku-scene-chips .ku-rail .ku-strip { flex-direction: column; justify-content: center; }
+#ku-scene-chips .ku-rail .ku-strip-val { max-width: 100%; font-size: .68em; }
+#ku-scene-chips .ku-panel { display: none; flex-direction: column; width: min(400px, calc(100vw - 80px)); border-left: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent); }
+#ku-scene-chips.open .ku-panel { display: flex; }
+#ku-scene-chips .ku-panel .ku-dir-body { display: block; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+#ku-scene-chips.open .ku-panel .ku-dir-inner { max-height: none; height: 100%; align-content: start; padding: 8px 10px 10px; }
+#ku-scene-chips .ku-dir-title { font-weight: 600; margin-right: 4px; }
+#ku-scene-chips .ku-dice-cols { display: grid; gap: 10px; }
+#ku-scene-chips .ku-dice-cols.with-ladder { grid-template-columns: 112px minmax(0, 1fr); }
+#ku-scene-chips .ku-dice-ladder { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding-right: 8px; border-right: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 60%, transparent); }
+#ku-scene-chips .ku-dice-ladder .ku-dir-row { flex-direction: column; align-items: stretch; }
+#ku-scene-chips .ku-dice-ladder .ku-dice-chips { flex: none; flex-direction: column; }
+#ku-scene-chips .ku-dice-ladder .ku-dice-label { flex: none; }
+#ku-scene-chips .ku-stage-chip { text-align: left; white-space: normal; }
+#ku-scene-chips .ku-stage-chip.on { box-shadow: 0 0 8px color-mix(in srgb, var(--SmartThemeQuoteColor) 70%, transparent); font-weight: 600; }
+#ku-scene-chips .ku-dice-rollcol { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+#ku-scene-chips .ku-dice-rollcol .ku-dice-label { flex: 0 0 100%; }
+#ku-scene-chips .ku-dice-foot { position: sticky; bottom: -10px; padding: 8px 0 4px; background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 100%, transparent); border-top: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 60%, transparent); }
+#ku-scene-chips .ku-dice-chip.ahead { border-style: dashed; opacity: .8; }
+
+/* The reminder to set Kulisy up for this chat (above the message box). */
+.ku-setup-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; width: calc(100% - 12px); box-sizing: border-box; margin: 0 6px 4px; padding: 6px 12px; border: 1px solid var(--SmartThemeQuoteColor); border-radius: 10px; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, var(--SmartThemeBlurTintColor)); font-size: .92em; }
+.ku-setup-banner .ku-sb-text { flex: 1 1 220px; min-width: 0; }
+.ku-setup-banner .ku-sb-go { font-weight: 600; }
+
+/* The strip above the message box: the scene in one glance and what goes to the model with the next post. */
+.ku-scene-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; width: calc(100% - 12px); box-sizing: border-box; margin: 0 6px 4px; padding: 4px 12px; border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 92%, transparent); backdrop-filter: blur(var(--SmartThemeBlurStrength, 10px)); color: var(--SmartThemeBodyColor); font: inherit; font-size: calc(var(--mainFontSize) * 0.8); text-align: left; cursor: pointer; }
+.ku-scene-strip:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, var(--SmartThemeBlurTintColor)); }
+.ku-scene-strip .ku-ss-item { white-space: nowrap; opacity: .85; }
+.ku-scene-strip .ku-ss-stage { color: var(--SmartThemeQuoteColor); opacity: 1; font-weight: 600; }
+.ku-scene-strip .ku-ss-out { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; flex: 1 1 auto; }
+.ku-scene-strip .ku-ss-tag { max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; padding: 2px 10px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, transparent); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, transparent); }
+.ku-scene-strip .ku-ss-none { opacity: .6; }
+.ku-scene-strip .ku-ss-ver { margin-left: auto; font-size: .85em; opacity: .5; }
+.ku-scene-strip .ku-ss-last { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; opacity: .8; border-top: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent); padding-top: 3px; }

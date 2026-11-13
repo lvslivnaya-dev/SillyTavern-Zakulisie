@@ -1,0 +1,19 @@
+{
+  "name": "sillytavern-zakulisie",
+  "version": "0.2.0",
+  "private": false,
+  "type": "module",
+  "description": "Zakulisie for SillyTavern: who knows what, relationships, locations, wardrobe, cards, lorebook tools, theme and assistants for narrator-card chats.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check index.js && node --test",
+    "pack:zip": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack.ps1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}

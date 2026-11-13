@@ -1,0 +1,252 @@
+/**
+ * Describing a picture: a wardrobe card, a place or a thing of the library — one model
+ * for all three (settings.wardrobeVision). Not every model sees
+ * pictures, so the model is chosen separately (settings.wardrobeVision):
+ *   - 'main':    the chat model SillyTavern uses now (Chat Completion APIs only),
+ *                through SillyTavern's own request service — its key stays in its secrets;
+ *   - 'profile': a Connection Manager profile;
+ *   - 'custom':  an OpenAI-compatible endpoint (URL + key + model), sent through the
+ *                SillyTavern server like the auxiliary API.
+ * The picture travels as an OpenAI-style `image_url` part; SillyTavern's server
+ * converts it for Claude, Gemini and the rest.
+ */
+import { auxGenerate } from './llm.js';
+import { WARDROBE_CATEGORIES } from '../core/index.js';
+
+/** A 16×16 red square: enough to check that a model sees pictures at all. */
+export const TEST_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAF0lEQVR4nGO4oKBAEmIY1TCqQWHYagAAS38QED44ZPAAAAAASUVORK5CYII=';
+export const TEST_PROMPT = 'What colour is this picture? Answer with one English word.';
+
+export const VISION_MODES = Object.freeze({ main: 'Как у таверны', profile: 'Профиль подключения', custom: 'Свой API' });
+
+export const VISION_DEFAULTS = Object.freeze({ mode: 'main', profileId: '', url: '', key: '', model: '', maxTokens: 700 });
+
+const CATEGORY_LIST = WARDROBE_CATEGORIES.map(([id, label]) => `${id} (${label})`).join(', ');
+
+/**
+ * What each section covers, and what it must leave out. A card describes ONE thing:
+ * a hairstyle card keeps the clips in the hair but not the necklace; a top card never
+ * mentions hair or skin. Pictures show whole people, so the boundary is spelled out.
+ */
+export const SECTION_SCOPE = Object.freeze({
+  hair: 'the HAIRSTYLE only: length, texture, cut, how it is styled; anything worn IN the hair (clips, pins, ribbons, hair ties, flowers, hair chains) is part of it, with their colours. NEVER name the colour of the hair itself (no "чёрные", "рыжие", "блонд", "светлые", "тёмные", no dyed tips or highlights): the hair colour comes from the character, not from the card, so write "волосы" without a colour. Leave out the face, eyes, skin, make-up, earrings, neck jewellery and all clothing.',
+  top: 'the TOP garment only (shirt, T-shirt, blouse, sweater, hoodie, tank top, crop top, corset worn as a top). Leave out jackets and coats worn over it, trousers, skirts, hair, skin, body, jewellery.',
+  pants: 'the TROUSERS only (trousers, jeans, shorts, leggings) including a belt sewn into them. Leave out the top, shoes, a separate belt, hair, skin, body.',
+  skirts: 'the SKIRT only. Leave out the top, tights, shoes, hair, skin, body.',
+  dresses: 'the DRESS only (a dress, a sundress, a jumpsuit or overalls as one piece). Leave out a jacket over it, tights, shoes, jewellery, hair, skin, body.',
+  outerwear: 'the OUTER LAYER only (coat, jacket, blazer, cardigan, kimono, cape, uniform coat, vest worn over clothes). Leave out what is worn under it, trousers, shoes, hair, skin, body.',
+  underwear: 'the UNDERWEAR, lingerie, nightwear, socks, tights or stockings only. Leave out other clothing, hair, skin and the body itself; describe the garment, never the body.',
+  shoes: 'the SHOES only (shoes, boots, sneakers, sandals, heels). Leave out socks, tights, trousers, the legs.',
+  headwear: 'the HEADWEAR only (hat, cap, beanie, beret, helmet, bandana or scarf worn on the head, a hood that is a separate piece). Leave out the hair, the face and clothing.',
+  bags: 'the BAG only (handbag, backpack, shoulder bag, clutch, sports bag), with its charms and straps. Leave out clothing, hands, the body.',
+  jewelry: 'the JEWELLERY only (earrings, piercings, necklaces, chains, pendants, rings, bracelets, anklets, brooches). Leave out hair accessories (they belong to the hairstyle), the nails, clothing, skin, the body.',
+  accessories: 'the ACCESSORY only (belt, gloves, scarf, tie, glasses, watch, mask, armband, choker made of fabric, suspenders). Leave out clothing it is worn with, hair, skin, the body.',
+  makeup: 'the MAKE-UP only: eyes (shadow, liner, lashes), brows if styled, lips, blush, highlight, contour — products, colours, finish, placement. Leave out the nails (they have their own section), natural skin tone, face shape, eye colour, tattoos, hair, jewellery and clothing.',
+  nails: 'the MANICURE only: nail length and shape (almond, square, stiletto…), colour, finish (glossy, matte, chrome), design and nail art, extensions or press-ons, decorations on the nails. Leave out rings, bracelets, the hands themselves, skin tone, tattoos and clothing.',
+  tattoos: 'the TATTOOS only: what each design shows, its style (fine line, blackwork, colour, Japanese irezumi, lettering…), colours, size and where it sits (the placement is part of the tattoo, e.g. "on the left forearm"). Leave out the body itself, skin tone, scars, piercings, jewellery, make-up, hair and clothing.',
+  sets: 'the WHOLE OUTFIT shown together, as one card: every garment, the shoes and the accessories that are part of it, listed from top to bottom with colours and materials. Leave out the hair, make-up, skin, body, face, pose and background.',
+});
+
+// Catalogue, not prose: the narrator needs the facts, briefly.
+const STYLE = 'Write like a precise shop catalogue, not like a novel: plain factual Russian, short sentences, concrete terms (garment type, colour, material, cut, fit, length, fastenings, print, details). No metaphors, no comparisons, no evaluative or emotional words (элегантный, изысканный, нежный, дерзкий, подчёркивает, создаёт образ), no impressions or mood. Say each fact once; skip what is not visible.';
+const NEVER = 'Never describe the person: no body, skin colour, face, age, figure, pose, mood, setting or background, and nothing outside the section (a tattoo may say where on the body it is, nothing more). If the thing of the section is not visible, say so in the description.';
+
+/**
+ * The prompt for describing a picture for a card of `category` (null: the model picks the section first).
+ * `placement`: where a tattoo is, as the user wrote it — the model uses it instead of guessing.
+ */
+export function describePrompt(category = null, { placement = '' } = {}) {
+  const scope = category && SECTION_SCOPE[category];
+  const where = category === 'tattoos' && String(placement ?? '').trim()
+    ? `\nThe user says this tattoo is on: "${String(placement).trim().slice(0, 120)}". Use exactly this placement in the description (in Russian); do not guess another one, even if the picture shows a different body part.`
+    : '';
+  if (scope) {
+    const contents = category === 'hair'
+      ? 'length, texture, cut, how it is styled, what is worn in the hair; never the hair colour'
+      : 'what it is, colour, material, cut or shape, notable details, how it is worn';
+    return `You fill a card of a roleplay wardrobe from this picture. Section: ${category}. Describe ${scope}${where}
+${NEVER}
+${STYLE}
+Return JSON only: {"name":"short Russian name of this piece, 2-6 words${category === 'hair' ? ', without the hair colour' : ''}","gender":"female, unisex or male (unisex: worn by anyone the same way)","description":"Russian, 1-3 short factual sentences, at most 300 characters: ${contents}"}.`;
+  }
+  return `You fill a card of a roleplay wardrobe from this picture. First decide which ONE section the picture is about: ${CATEGORY_LIST}. A picture of a complete outfit the user wants as one card is "sets".
+Then describe only what that section covers:
+${Object.entries(SECTION_SCOPE).map(([id, text]) => `- ${id}: ${text}`).join('\n')}
+${NEVER}
+${STYLE}
+Return JSON only: {"name":"short Russian name, 2-6 words","category":"the section ID","gender":"female, unisex or male (unisex: worn by anyone the same way)","description":"Russian, 1-3 short factual sentences, at most 300 characters: what it is, colour, material, cut or shape, notable details, how it is worn"}.`;
+}
+
+/** A picture of a place for the location library: the place itself, never the people in it. */
+export const PLACE_PROMPT = `You fill a card of a roleplay location library from this picture. Describe the PLACE only: what kind of place it is, its layout and size, light and time of day if clear, colours and materials, the notable objects and furniture, the condition (new, worn, messy), the mood it gives. Leave out people, characters, their clothes, bodies and poses; do not invent a story.
+Return JSON only: {"name":"short Russian name of the place, 1-5 words","traits":["3-6 short Russian details a narrator can reuse, 2-6 words each"],"description":"Russian, 3-6 sentences"}.`;
+
+/** A picture of an object for the things library: the object only. */
+export const THING_PROMPT = `You fill a card of a roleplay things library from this picture. Describe the OBJECT only: what it is, its size, shape, colour, material, condition, marks, inscriptions and anything that makes it recognisable. Leave out hands, people, clothing that is not the object, and the background.
+Return JSON only: {"name":"short Russian name of the object, 1-5 words","description":"Russian, 2-4 sentences"}.`;
+
+/**
+ * A picture of a person for the card of a persona: her PERMANENT appearance, and on request her voice (the same rules as «Внешность по картинке»
+ * of the Pudrenitsa persona page). Plain Russian prose; with the voice, a line with the mark between the two parts.
+ */
+export const PERSONA_VOICE_MARK = '===VOICE===';
+const LOOK_RULES = `You write the PERMANENT APPEARANCE of a roleplay character from the picture, in Russian, as plain continuous prose: third person, present tense, no lists, no headings, no quotes, no mention of the picture. 4 to 7 sentences.
+Include what does not change from scene to scene: the face (shape, eyes and their colour, brows, nose, lips), the hair (natural colour, length, texture; a hairstyle only as a plain fact), skin, height and build, hands, and lasting marks (freckles, moles, scars, tattoos, fangs, permanent piercings).
+Leave out everything that changes: clothes, shoes, bags, jewellery that is taken off, make-up, glasses if they look like an accessory, the pose, a single moment's expression or mood, the background, lighting.
+Describe only what the picture shows. Do not invent a personality, a past or a name.`;
+const VOICE_RULES = `After the appearance, put a line with only ${PERSONA_VOICE_MARK} and then 2 to 3 sentences about the VOICE: how it sounds in different moments (calm, excited, angry, tender, tired): pitch, timbre, tempo, volume, how it changes. Do not give catchphrases, speech quirks, example lines or quotes; only how the voice sounds.`;
+
+/** The request for the model (the picture goes as a separate part). */
+export function personaLookPrompt({ wishes = '', voice = false, voiceWishes = '', name = '' } = {}) {
+  const clip = text => String(text ?? '').trim().slice(0, 1200);
+  const parts = [LOOK_RULES];
+  if (voice) parts.push(VOICE_RULES);
+  if (name) parts.push(`The character is called «${name}»; use the name only where it reads naturally, otherwise pronouns.`);
+  if (clip(wishes)) parts.push(`The user's wishes about the appearance. They are facts about the character and win over the picture and over the rules above:\n${clip(wishes)}`);
+  if (voice && clip(voiceWishes)) parts.push(`The user's wishes about the voice:\n${clip(voiceWishes)}`);
+  parts.push('Answer with the Russian text only: no preface, no markup.');
+  return parts.join('\n\n');
+}
+
+/**
+ * The reply of the model → { looks, voice }: without thoughts, code fences and a preface like «Вот описание:». The voice is cut off at the
+ * mark; a model that wrote its own heading instead («Голос:», «**Voice**») or just a last paragraph about the voice is understood too.
+ */
+export function parsePersonaLook(raw, { voice = false } = {}) {
+  const text = String(raw ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/^```\w*\s*|\s*```$/g, '').trim();
+  const clean = value => String(value ?? '').replace(/^(?:вот|here(?:'s| is)|description|описание)[^\n:]{0,60}:\s*\n+/i, '').replace(/^["«»“”]+|["«»“”]+$/g, '').trim().slice(0, 3000);
+  const heading = /\n[ \t]*(?:={2,}[ \t]*)?(?:#{1,4}[ \t]*)?(?:\*{1,2})?[ \t]*(?:VOICE|Voice|ГОЛОС|Голос)[ \t]*(?:={2,}|\*{1,2})?[ \t]*:?(?:\*{1,2})?[ \t]*(?:\n|$)/;
+  const cut = text.match(heading);
+  if (cut) return { looks: clean(text.slice(0, cut.index)), voice: voice ? clean(text.slice(cut.index + cut[0].length)) : '' };
+  if (voice) {
+    const parts = text.split(/\n\s*\n/);
+    const last = parts.length > 1 ? parts[parts.length - 1] : '';
+    if (/голос|тембр|звучит|говорит|речь|\bvoice\b|sounds?\b|pitch/i.test(last)) return { looks: clean(parts.slice(0, -1).join('\n\n')), voice: clean(last.replace(/^(?:голос|voice)[ \t]*:?[ \t]*/i, '')) };
+  }
+  return { looks: clean(text), voice: '' };
+}
+
+/** The prompt when nothing is known about the picture. */
+export const DESCRIBE_PROMPT = describePrompt(null);
+
+/** Settings for describing, with defaults filled in. */
+export function visionSettings(raw) {
+  const value = { ...VISION_DEFAULTS, ...(raw && typeof raw === 'object' ? raw : {}) };
+  if (!Object.hasOwn(VISION_MODES, value.mode)) value.mode = 'main';
+  value.maxTokens = Math.max(200, Math.min(4000, Number(value.maxTokens) || VISION_DEFAULTS.maxTokens));
+  return value;
+}
+
+function messagesFor(dataUrl, prompt) {
+  return [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: dataUrl } }] }];
+}
+
+function contentOf(result) {
+  const content = typeof result === 'string' ? result : result?.content;
+  if (typeof content !== 'string' || !content.trim()) throw new Error('Модель вернула пустой ответ. Видит ли она картинки?');
+  return content;
+}
+
+/** Ask the chosen model about a picture (a data: URL). Returns its raw text. */
+export async function askAboutImage(context, rawSettings, dataUrl, prompt = DESCRIBE_PROMPT, { maxTokens } = {}) {
+  if (!/^data:image\//.test(String(dataUrl ?? ''))) throw new TypeError('Нужна картинка.');
+  const settings = visionSettings(rawSettings);
+  // A thinking model needs room for its thoughts before the answer: the caller may ask for more than the settings page allows.
+  if (Number(maxTokens) > 0) settings.maxTokens = Math.min(32000, Math.round(Number(maxTokens)));
+  const messages = messagesFor(dataUrl, prompt);
+  if (settings.mode === 'profile') {
+    const service = context.ConnectionManagerRequestService;
+    if (!service) throw new Error('В этой версии SillyTavern нет профилей подключений.');
+    if (!settings.profileId) throw new Error('Выберите профиль подключения для описания картинок.');
+    return contentOf(await service.sendRequest(settings.profileId, messages, settings.maxTokens));
+  }
+  if (settings.mode === 'custom') {
+    return auxGenerate(context, { mode: 'custom', url: settings.url, key: settings.key, model: settings.model, maxTokens: settings.maxTokens }, messages);
+  }
+  // 'main': the chat model of SillyTavern, as it is set up right now.
+  if (context.mainApi !== 'openai') throw new Error('«Как у таверны» работает только с Chat Completion API. Выберите профиль или свой API в «Настройки → Модели и API → Картинки».');
+  const service = context.ChatCompletionService;
+  const oai = context.chatCompletionSettings;
+  if (!service || !oai) throw new Error('Эта версия SillyTavern не даёт расширениям запросы к модели чата.');
+  const result = await service.processRequest({
+    stream: false,
+    messages,
+    max_tokens: settings.maxTokens,
+    model: context.getChatCompletionModel?.(),
+    chat_completion_source: oai.chat_completion_source,
+    custom_url: oai.custom_url || undefined,
+    reverse_proxy: oai.reverse_proxy || undefined,
+    proxy_password: oai.proxy_password || undefined,
+  }, {}, true);
+  return contentOf(result);
+}
+
+/** The model's answer as card fields: { name, category, gender, description } (missing parts are ''). */
+export function parseDescription(text) {
+  // Thinking models put their reasoning before the answer: in <think> tags, or as plain
+  // text that may itself quote the JSON template. The answer is the LAST object that parses.
+  const raw = String(text ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+  const data = lastJsonObject(raw);
+  if (!data) {
+    // A model that ignored the format still gave a description: keep it as is.
+    // But a reply that tried JSON and broke (reasoning, cut by the token limit) is not one.
+    if (raw.includes('{')) throw new Error('Модель вернула размышления или обрезанный ответ вместо JSON. Увеличьте лимит токенов в «Настройки → Модели и API → Картинки» или выберите модель без размышлений.');
+    return { name: '', category: '', gender: '', description: raw.replace(/^```\w*|```$/g, '').trim().slice(0, 3000) };
+  }
+  const categories = new Set(WARDROBE_CATEGORIES.map(([id]) => id));
+  return {
+    name: String(data.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
+    category: categories.has(data.category) ? data.category : '',
+    gender: ['female', 'unisex', 'male'].includes(data.gender) ? data.gender : '',
+    description: String(data.description ?? '').trim().slice(0, 3000),
+    ...(Array.isArray(data.traits) ? { traits: data.traits.map(trait => String(trait ?? '').trim()).filter(Boolean).slice(0, 8) } : {}),
+  };
+}
+
+/**
+ * The last {...} in `text` that parses as a card answer (has a name or a description), or null.
+ * Line breaks are turned into spaces first: some proxies break lines inside keys ("name\n").
+ */
+function lastJsonObject(text) {
+  const flat = text.replace(/\r?\n/g, ' ');
+  for (let start = flat.lastIndexOf('{'); start >= 0; start = flat.lastIndexOf('{', start - 1)) {
+    const end = closingBrace(flat, start);
+    if (end < 0) continue;
+    let parsed;
+    try { parsed = JSON.parse(flat.slice(start, end + 1)); } catch { continue; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+    const data = Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key.trim(), value]));
+    // The template quoted in the reasoning ({"name":"...", …}) is not an answer.
+    const filled = value => typeof value === 'string' && /[^.\s…]/.test(value);
+    if (filled(data.description) || filled(data.name)) return data;
+  }
+  return null;
+}
+
+/** Index of the brace that closes the one at `start` (strings respected), or -1. */
+function closingBrace(text, start) {
+  let depth = 0;
+  let inString = false;
+  for (let index = start; index < text.length; index++) {
+    const char = text[index];
+    if (inString) {
+      if (char === '\\') index++;
+      else if (char === '"') inString = false;
+    } else if (char === '"') inString = true;
+    else if (char === '{') depth++;
+    else if (char === '}' && --depth === 0) return index;
+  }
+  return -1;
+}
+
+/** What the settings page offers: the profiles, and whether «Как у таверны» can see pictures at all. */
+export function listVisionChoices(context, rawSettings) {
+  let profiles = [];
+  try {
+    profiles = (context.ConnectionManagerRequestService?.getSupportedProfiles?.() ?? [])
+      .map(profile => ({ id: profile.id, name: profile.name || profile.id }));
+  } catch { profiles = []; }
+  let mainModel = '';
+  try { mainModel = context.mainApi === 'openai' ? String(context.getChatCompletionModel?.() ?? '') : ''; } catch { mainModel = ''; }
+  return { settings: visionSettings(rawSettings), profiles, mainChatCompletion: context.mainApi === 'openai', mainModel };
+}
