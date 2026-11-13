@@ -390,7 +390,8 @@ test('«Локации»: картинка ставится прямо с пли
     const file = new dom.window.File(['x'], 'bar.png', { type: 'image/png' });
     Object.defineProperty(pick, 'files', { value: [file], configurable: true });
     pick.dispatchEvent(new dom.window.Event('change'));
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // картинка уходит асинхронно: ждём, а не гадаем по времени (на загруженной машине 50 мс не хватало)
+    for (let i = 0; i < 80 && !calls.some(([name]) => name === 'onLibrarySetImage'); i++) await new Promise(resolve => setTimeout(resolve, 25));
     const call = calls.find(([name]) => name === 'onLibrarySetImage');
     assert.ok(call && call[1].kind === 'places' && call[1].id === library.locations[0].id, 'картинка ушла этой локации');
     assert.equal(shadow.querySelector('.ku-wcard'), null);

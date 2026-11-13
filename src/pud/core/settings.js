@@ -42,8 +42,6 @@ export function defaultSettings() {
     wandHidden: [],
     // Свои иконки: { pud: { имя: data-ссылка }, studio: { … } }, см. shared/custom-icons.js
     icons: { pud: {}, studio: {} },
-    // Свой экран загрузки (картинка, гифка, видео), см. core/custom-media.js
-    loading: { enabled: false, src: '', path: '', kind: '', name: '', size: 'm', fit: 'contain', bg: 'theme', color: '#fff5f8', text: '', spinner: false },
     // Позиции и размеры окон: имя окна → { left, top, width, height }
     windows: {},
   };

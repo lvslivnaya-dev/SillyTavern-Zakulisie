@@ -10,7 +10,7 @@
  * Pure: no DOM, no SillyTavern.
  */
 export const GM_VERSION = 1;
-export const GM_LIMITS = Object.freeze({ messages: 200, messageText: 4000, conclusions: 40, conclusionText: 900, promptCharacters: 3200, name: 40, prompt: 6000, contextMessages: 14, contextCharacters: 6000, historyForModel: 24 });
+export const GM_LIMITS = Object.freeze({ messages: 200, messageText: 4000, conclusions: 40, conclusionText: 900, promptCharacters: 3200, name: 40, customs: 20, prompt: 6000, contextMessages: 14, contextCharacters: 6000, historyForModel: 24 });
 export const GM_TAG = 'GM NOTES';
 /** The line after which the assistant writes the conclusion it proposes. */
 export const PROPOSAL_MARK = '===ВЫВОД===';
@@ -26,7 +26,7 @@ export const DEFAULT_GM_PROMPT = `Ты — ассистент автора ро�
 
 /**
  * The assistants the author can pick (in the settings of Zakulisie): each has a character and the words it calls the author by.
- * `custom` is the author's own: name, character and forms of address are typed in the settings.
+ * The author's own ones (any number, `customs`) have a name, a character and forms of address typed in the settings.
  */
 export const ASSISTANTS = Object.freeze([
   Object.freeze({
@@ -69,18 +69,54 @@ export function parseAddresses(value) {
   return out.slice(0, 12);
 }
 
+const tidyCustom = (item, id) => ({ id, name: text(item.name, GM_LIMITS.name), character: text(item.character, 1500), addresses: parseAddresses(item.addresses) });
+
+/** The author's own assistants: `customs` list; the single `custom` of the earlier version joins it (id «custom»). */
+function normalizeCustoms(source) {
+  const builtin = ASSISTANTS.map(item => item.id);
+  const out = [];
+  for (const item of Array.isArray(source.customs) ? source.customs : []) {
+    if (!isPlainObject(item) || out.length >= GM_LIMITS.customs) continue;
+    const id = typeof item.id === 'string' && /^[a-z0-9_-]{1,30}$/.test(item.id) && !builtin.includes(item.id) && !out.some(own => own.id === item.id) ? item.id : newId('own', [...builtin, ...out.map(own => own.id)]);
+    out.push(tidyCustom(item, id));
+  }
+  const legacy = isPlainObject(source.custom) ? tidyCustom(source.custom, CUSTOM_ASSISTANT_ID) : null;
+  if (legacy && (legacy.name || legacy.character || legacy.addresses.length) && !out.some(own => own.id === CUSTOM_ASSISTANT_ID) && out.length < GM_LIMITS.customs) out.unshift(legacy);
+  return out;
+}
+
+/**
+ * A change of the own assistants: `addCustom`, `removeCustom: id`, `editCustom: { id, name?, character?, addresses? }`
+ * (the old `custom: {…}` edits the assistant «custom»). Returns the new list and the id of the one just added.
+ */
+export function patchCustoms(list, patch = {}) {
+  let customs = (list ?? []).map(item => ({ ...item }));
+  let added = '';
+  if (patch.addCustom && customs.length < GM_LIMITS.customs) {
+    added = newId('own', [...ASSISTANTS.map(item => item.id), ...customs.map(item => item.id)]);
+    customs.push({ id: added, name: '', character: '', addresses: [] });
+  }
+  if (patch.removeCustom) customs = customs.filter(item => item.id !== patch.removeCustom);
+  const edit = patch.editCustom?.id ? patch.editCustom : isPlainObject(patch.custom) ? { ...patch.custom, id: CUSTOM_ASSISTANT_ID } : null;
+  if (edit) {
+    if (edit.id === CUSTOM_ASSISTANT_ID && !customs.some(item => item.id === CUSTOM_ASSISTANT_ID)) customs.unshift({ id: CUSTOM_ASSISTANT_ID, name: '', character: '', addresses: [] });
+    customs = customs.map(item => (item.id === edit.id ? { ...item, ...Object.fromEntries(['name', 'character', 'addresses'].filter(key => key in edit).map(key => [key, edit[key]])) } : item));
+  }
+  return { customs, added };
+}
+
 /** The settings of the assistant (extension settings, not the chat) → a tidy object. */
 export function normalizeGmSettings(raw) {
   const source = isPlainObject(raw) ? raw : {};
-  const custom = isPlainObject(source.custom) ? source.custom : {};
-  const known = [...ASSISTANTS.map(item => item.id), CUSTOM_ASSISTANT_ID];
+  const customs = normalizeCustoms(source);
+  const known = [...ASSISTANTS.map(item => item.id), ...customs.map(item => item.id)];
   const avatars = {};
   for (const [id, value] of Object.entries(isPlainObject(source.avatars) ? source.avatars : {})) {
     if (known.includes(id) && typeof value === 'string' && /^data:image\//.test(value) && value.length <= GM_AVATAR_MAX) avatars[id] = value;
   }
   return {
     assistant: known.includes(source.assistant) ? source.assistant : DEFAULT_ASSISTANT_ID,
-    custom: { name: text(custom.name, GM_LIMITS.name), character: text(custom.character, 1500), addresses: parseAddresses(custom.addresses) },
+    customs,
     avatars,
     // '' = like the other requests of Zakulisie (the auxiliary API, if it is on); 'main' = the chat's own API; otherwise a connection profile
     profileId: text(source.profileId, 80),
@@ -95,9 +131,10 @@ export function resolveAssistant(rawSettings) {
   const settings = normalizeGmSettings(rawSettings);
   const builtin = ASSISTANTS.find(item => item.id === settings.assistant);
   if (builtin) return { id: builtin.id, name: builtin.name, tagline: builtin.tagline, gender: builtin.gender, character: builtin.character, addresses: [...builtin.addresses], builtin: true };
-  const own = settings.custom;
+  const own = settings.customs.find(item => item.id === settings.assistant);
+  if (!own) return resolveAssistant({ ...settings, assistant: DEFAULT_ASSISTANT_ID });
   return {
-    id: CUSTOM_ASSISTANT_ID,
+    id: own.id,
     name: own.name || DEFAULT_GM_NAME,
     tagline: 'свой характер',
     gender: '',

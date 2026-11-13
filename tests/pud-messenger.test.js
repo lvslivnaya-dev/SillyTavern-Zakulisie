@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { startMessenger, MESSENGER_BUTTON_ID, MESSENGER_ID } from '../src/pud/ui/messenger.js';
 import { startAssistants } from '../src/pud/ui/assistants.js';
-import { resolveAssistant, normalizeGmSettings, normalizeGm, ASSISTANTS } from '../src/core/gm-assistant.js';
+import { resolveAssistant, normalizeGmSettings, normalizeGm, ASSISTANTS, patchCustoms } from '../src/core/gm-assistant.js';
 
 function fakeBridge() {
   let gm = normalizeGm({ messages: [], conclusions: [{ id: 'c1', text: 'Be gentle.', on: true }], proposal: null });
@@ -24,7 +24,7 @@ function fakeBridge() {
       answer: async answer => { calls.push(['answer', answer]); gm = { ...gm, proposal: null }; emit(); },
       conclusion: async payload => { calls.push(['conclusion', payload]); emit(); },
       clear: async () => { calls.push(['clear']); emit(); },
-      saveSettings: async patch => { calls.push(['settings', patch]); settings = normalizeGmSettings({ ...settings, ...patch, custom: { ...settings.custom, ...(patch.custom ?? {}) }, avatars: { ...settings.avatars, ...(patch.avatars ?? {}) } }); emit(); },
+      saveSettings: async patch => { calls.push(['settings', patch]); settings = normalizeGmSettings({ ...settings, ...patch, customs: patchCustoms(settings.customs, patch).customs, avatars: { ...settings.avatars, ...(patch.avatars ?? {}) } }); emit(); },
     },
   };
 }
@@ -106,7 +106,14 @@ test('вкладка «Ассистенты»: выбрать ассистент
   document.body.append(pane);
   let removed = 0;
   const undo = startAssistants(document, { bridge, shared: {}, hub: { addTab: () => ({ pane, remove: () => { removed += 1; } }) } });
-  assert.equal(pane.querySelectorAll('.pud-asst').length, 4, 'три готовых и свой');
+  assert.equal(pane.querySelectorAll('.pud-asst').length, 3, 'три готовых, своих пока нет');
+  pane.querySelector('[data-add-own]').click();
+  await Promise.resolve();
+  assert.deepEqual(bridge.calls.at(-1), ['settings', { addCustom: true }]);
+  assert.equal(pane.querySelectorAll('.pud-asst').length, 4, 'добавлен свой ассистент');
+  pane.querySelector('[data-add-own]').click();
+  await Promise.resolve();
+  assert.equal(pane.querySelectorAll('.pud-asst').length, 5, 'их можно добавлять сколько угодно');
   assert.match(pane.textContent, /цвет мой, цветочек, солнышко/);
 
   pane.querySelector('[data-id="dias"] [data-act="pick"]').click();
@@ -117,7 +124,17 @@ test('вкладка «Ассистенты»: выбрать ассистент
   const addresses = pane.querySelector('[data-own="addresses"]');
   addresses.value = 'босс, шеф';
   addresses.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-  assert.deepEqual(bridge.calls.at(-1), ['settings', { custom: { addresses: 'босс, шеф' } }]);
+  assert.deepEqual(bridge.calls.at(-1), ['settings', { editCustom: { id: 'own1', addresses: 'босс, шеф' } }]);
+  await Promise.resolve();
+  assert.match(pane.textContent, /босс, шеф/);
+
+  const first = pane.querySelector('[data-id="own1"] [data-act="del"]');
+  first.click();
+  assert.match(pane.querySelector('[data-id="own1"] [data-act="del"]').textContent, /Точно удалить/, 'первое нажатие только предупреждает');
+  assert.equal(pane.querySelectorAll('.pud-asst').length, 5);
+  pane.querySelector('[data-id="own1"] [data-act="del"]').click();
+  await Promise.resolve();
+  assert.equal(pane.querySelectorAll('.pud-asst').length, 4, 'второе нажатие удаляет');
 
   const select = pane.querySelector('[data-field="profile"]');
   assert.ok([...select.options].some(option => option.value === 'p1'), 'профили подключений в списке');

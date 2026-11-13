@@ -9,7 +9,6 @@ import { startInputBar } from './ui/inputbar.js';
 import { startHider } from './ui/hider.js';
 import { startWandMenu } from './ui/wand-menu.js';
 import { startIconStudio } from './ui/icon-studio.js';
-import { startLoadingScreen } from './ui/loading-screen.js';
 import { startMessenger } from './ui/messenger.js';
 import { startAssistants } from './ui/assistants.js';
 import { startWalkCat } from './ui/walkcat.js';
@@ -60,10 +59,6 @@ const MODULES = [
   {
     name: 'свои иконки',
     start: ({ settings, shared }) => startIconStudio(document, { settings, save: () => globalThis.SillyTavern?.getContext?.().saveSettingsDebounced?.(), hub: shared.hub }),
-  },
-  {
-    name: 'экран загрузки',
-    start: ({ context, settings, shared }) => startLoadingScreen(document, { context, settings, save: () => context.saveSettingsDebounced?.(), hub: shared.hub }),
   },
   {
     name: 'меню палочки',

@@ -1,6 +1,4 @@
 import { initPudrenitsa } from './src/pud/start.js';
-import { watchLoader } from './src/pud/ui/loading-screen.js';
-import { SETTINGS_KEY as PUD_SETTINGS_KEY } from './src/pud/core/settings.js';
 import {
   applyOperation,
   applyOperations,
@@ -129,7 +127,7 @@ import { TEST_IMAGE, TEST_PROMPT, askAboutImage, listVisionChoices, visionSettin
 import { hideSummarized } from './src/integration/chronicle-run.js';
 import { createChronicleRunner } from './src/integration/chronicle-actions.js';
 import { getSettings, GM_METADATA_KEY, KULISY_BUILD, SCENE_PROMPT_KEY } from './src/integration/settings.js';
-import { ASSISTANTS, CUSTOM_ASSISTANT_ID, DEFAULT_GM_NAME, DEFAULT_GM_PROMPT, GM_AVATAR_MAX, GM_LIMITS, acceptProposal, addMessage, dropLastReply, buildGmPrompt, buildGmRequest, clearTalk, continueTalk, editConclusion, normalizeGm, normalizeGmSettings, parseAddresses, rejectProposal, removeConclusion, resolveAssistant, setProposal, splitReply, toggleConclusion } from './src/core/gm-assistant.js';
+import { ASSISTANTS, CUSTOM_ASSISTANT_ID, DEFAULT_GM_NAME, DEFAULT_GM_PROMPT, GM_AVATAR_MAX, GM_LIMITS, acceptProposal, addMessage, dropLastReply, buildGmPrompt, buildGmRequest, clearTalk, continueTalk, editConclusion, normalizeGm, normalizeGmSettings, parseAddresses, patchCustoms, rejectProposal, removeConclusion, resolveAssistant, setProposal, splitReply, toggleConclusion } from './src/core/gm-assistant.js';
 import { createHistoryBatches, rebuildWithoutAutomaticHistory, historyFingerprint, sampleHistory } from './src/integration/history.js';
 import { applyAnalysisResult, describeProposedChanges, tempoDelta } from './src/integration/analysis-operations.js';
 import { loadLinkedLore, loadGroupLore, generationBooks, analyzeLorebookCharacters, canonKeys, namesMatch } from './src/integration/lorebooks.js';
@@ -3262,17 +3260,19 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       await writeGm(op === 'toggle' ? toggleConclusion(gm, id) : op === 'remove' ? removeConclusion(gm, id) : editConclusion(gm, id, text));
     },
     onGmClear: async () => { await writeGm(clearTalk(readGm())); },
-    /** A patch of the assistant's settings: { assistant, custom: {…}, avatars: { id: dataUrl | null }, profileId, prompt }. */
+    /** A patch of the assistant's settings: { assistant, addCustom, removeCustom: id, editCustom: { id, … }, avatars: { id: dataUrl | null }, profileId, prompt }. Returns the id of an added assistant. */
     onGmSettings: (patch = {}) => {
       const now = normalizeGmSettings(settings.gm);
       const avatars = { ...now.avatars };
       for (const [id, value] of Object.entries(patch.avatars ?? {})) { if (value) avatars[id] = value; else delete avatars[id]; }
+      const { customs, added } = patchCustoms(now.customs, patch);
       settings.gm = normalizeGmSettings({
         ...now, ...Object.fromEntries(['assistant', 'profileId', 'prompt', 'userGender'].filter(key => key in patch).map(key => [key, patch[key]])),
-        custom: { ...now.custom, ...(patch.custom ?? {}) }, avatars,
+        customs, avatars,
       });
       context.saveSettingsDebounced();
       notify();
+      return added;
     },
     onPersonaAuAdd: ({ name }) => savePersonaCards(library => addAu(library, name)),
     onPersonaAuRemove: async ({ id }) => {
@@ -4661,18 +4661,6 @@ ${card.personality ?? card.data?.personality ?? ''}`;
 }
 
 /** Одно расширение: сначала Кулисы, потом модули бывшей Пудреницы (src/pud). Ошибка одной части не роняет другую. */
-/**
- * Свой экран загрузки берётся в работу первым делом: тяжёлая часть запуска (Кулисы, окна) идёт уже под ним. Настройки читаются
- * прямо из хранилища таверны, а не из модуля, который ещё не стартовал.
- */
-function startLoadingWatch() {
-  if (typeof document === 'undefined') return;
-  try {
-    watchLoader(document, () => globalThis.SillyTavern?.getContext?.().extensionSettings?.[PUD_SETTINGS_KEY]?.loading);
-  } catch (error) { console.error('[Закулисье] Свой экран загрузки не запустился.', error); }
-}
-startLoadingWatch();
-
 export async function init() {
   const kulisy = await initKulisy();
   try { await initPudrenitsa({ bridge: kulisy?.personaBridge ?? null }); } catch (error) { console.error('[Закулисье] Модули бывшей Пудреницы не запустились.', error); }

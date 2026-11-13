@@ -12,7 +12,7 @@ test('палитры: пять штук, каждая задаёт все ток
   assert.deepEqual(PALETTES.map(p => p.id), ['pink', 'graphite', 'noir', 'latte', 'matcha']);
   assert.deepEqual(paletteVars('pink'), {}, 'розовая уже в style.css');
   const used = new Set([...CSS.matchAll(/var\((--pud-[\w-]+)/g)].map(match => match[1]));
-  for (const local of ['--pud-toast', '--pud-depth', '--pud-f-mono', '--pud-load-size', '--pud-load-fit', '--pud-load-bg', '--pud-load-ink']) used.delete(local);
+  for (const local of ['--pud-toast', '--pud-depth', '--pud-f-mono']) used.delete(local);
   const defined = new Set([...CSS.matchAll(/^\s*(--pud-[\w-]+):/gm)].map(match => match[1]));
   for (const name of used) assert.ok(defined.has(name), `токен ${name} используется, но не задан в style.css`);
   // цветовые токены: значение — цвет, тройка чисел или картинка

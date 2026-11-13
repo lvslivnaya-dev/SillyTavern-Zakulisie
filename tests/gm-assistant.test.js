@@ -74,3 +74,28 @@ test('stored junk is tidied: wrong roles and empty texts dropped, double ids rep
   assert.deepEqual(normalizeGm('x'), emptyGm());
   assert.deepEqual(splitReply('просто ответ'), { text: 'просто ответ', proposal: null });
 });
+
+test('свои ассистенты: сколько угодно, прежний единственный «свой» переезжает в список, удалённый выбранный возвращает Розиту', async () => {
+  const { normalizeGmSettings, patchCustoms, resolveAssistant, GM_LIMITS } = await import('../src/core/gm-assistant.js');
+  const old = normalizeGmSettings({ assistant: 'custom', custom: { name: 'Нори', character: 'Тихая.', addresses: 'босс; шеф' } });
+  assert.deepEqual(old.customs.map(item => [item.id, item.name]), [['custom', 'Нори']]);
+  assert.equal(resolveAssistant(old).name, 'Нори');
+  assert.deepEqual(normalizeGmSettings({ custom: { name: '', character: '', addresses: [] } }).customs, [], 'пустой прежний «свой» не нужен');
+
+  let { customs, added } = patchCustoms(old.customs, { addCustom: true });
+  assert.equal(added, 'own1');
+  ({ customs } = patchCustoms(customs, { addCustom: true }));
+  ({ customs } = patchCustoms(customs, { editCustom: { id: 'own2', name: 'Ян', addresses: 'шеф, босс' } }));
+  const settings = normalizeGmSettings({ assistant: 'own2', customs, avatars: { own2: 'data:image/png;base64,AAAA', gone: 'data:image/png;base64,AAAA' } });
+  assert.equal(settings.customs.length, 3);
+  assert.deepEqual(resolveAssistant(settings).addresses, ['шеф', 'босс']);
+  assert.deepEqual(Object.keys(settings.avatars), ['own2'], 'картинка чужого id не хранится');
+
+  const without = normalizeGmSettings({ ...settings, customs: patchCustoms(settings.customs, { removeCustom: 'own2' }).customs });
+  assert.equal(without.assistant, 'rosita', 'выбранного больше нет: возвращается Розита');
+  assert.equal(without.customs.length, 2);
+
+  let many = [];
+  for (let i = 0; i < GM_LIMITS.customs + 5; i++) many = patchCustoms(many, { addCustom: true }).customs;
+  assert.equal(many.length, GM_LIMITS.customs, 'есть разумный предел');
+});

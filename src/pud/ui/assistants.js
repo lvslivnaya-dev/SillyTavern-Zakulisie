@@ -1,6 +1,6 @@
 /**
  * Вкладка «Ассистенты» в окне настроек Закулисья: с кем автор разговаривает в маленьком чате (кнопка справа от строки ввода).
- * Три готовых ассистента с характером и обращениями и один свой: имя, характер и обращения вписываются здесь же.
+ * Три готовых ассистента с характером и обращениями и сколько угодно своих: имя, характер и обращения вписываются здесь же.
  * У каждого своя картинка (можно поставить свою), и можно выбрать, через какой API он отвечает. Данные идут через bridge.assistant.
  */
 import { report } from '../core/guard.js';
@@ -39,6 +39,8 @@ export function startAssistants(doc, { bridge, hub }) {
   const undo = [() => tab.remove()];
   let data = api.view();
   let pictureFor = '';
+  // удаление в два нажатия: первое только предупреждает
+  let armed = '';
 
   const picker = doc.createElement('input');
   picker.type = 'file';
@@ -64,14 +66,15 @@ export function startAssistants(doc, { bridge, hub }) {
     </article>`;
 
   const render = () => {
-    const custom = data.settings.custom;
-    const customForm = `
+    const customForm = custom => `
       <div class="pud-asst-own">
-        <label class="pud-field"><span>Имя</span><input class="text_pole" data-own="name" maxlength="40" value="${escapeHtml(custom.name)}" placeholder="Как её зовут"></label>
+        <label class="pud-field"><span>Имя</span><input class="text_pole" data-own="name" maxlength="40" value="${escapeHtml(custom.name)}" placeholder="Как его или её зовут"></label>
         <label class="pud-field"><span>Характер и манера речи</span><textarea class="text_pole" data-own="character" rows="4" placeholder="Например: сдержанная, с чёрным юмором, говорит короткими фразами, не терпит воды">${escapeHtml(custom.character)}</textarea></label>
         <label class="pud-field"><span>Как обращается к вам (через запятую)</span><input class="text_pole" data-own="addresses" value="${escapeHtml(custom.addresses.join(', '))}" placeholder="например: босс, шеф, капитан"></label>
+        <div class="pud-native-btns"><button type="button" class="menu_button" data-act="del">${armed === custom.id ? 'Точно удалить? Нажмите ещё раз' : 'Удалить ассистента'}</button></div>
       </div>`;
     const ready = data.ready.map(item => card(item.id, item.name, item.tagline, item.addresses)).join('');
+    const own = (data.settings.customs ?? []).map(custom => card(custom.id, custom.name || 'Новый ассистент', 'свой характер', custom.addresses, customForm(custom))).join('');
     pane.innerHTML = `
       <div class="pud-card">
         <div>
@@ -79,7 +82,8 @@ export function startAssistants(doc, { bridge, hub }) {
           <p class="pud-hint">С ним вы разговариваете в маленьком чате: кнопка с его лицом стоит справа от строки ввода. Он видит последние сообщения игры, но сам разговор не попадает ни в игровой чат, ни к рассказчику: рассказчику уходит только то, что вы приняли («Да») на плашке «Вывод».</p>
         </div>
       </div>
-      <div class="pud-asst-list">${ready}${card('custom', custom.name || 'Свой ассистент', 'свой характер', custom.addresses, customForm)}</div>
+      <div class="pud-asst-list">${ready}${own}</div>
+      <div class="pud-native-btns"><button type="button" class="menu_button" data-add-own>+ Добавить своего ассистента</button></div>
       <div class="pud-card pud-asst-api">
         <div>
           <b>Кто вы</b>
@@ -117,12 +121,18 @@ export function startAssistants(doc, { bridge, hub }) {
   };
 
   pane.addEventListener('click', event => {
+    if (event.target.closest('[data-add-own]')) { run('добавить', () => api.saveSettings({ addCustom: true })); return; }
     const act = event.target.closest('[data-act]')?.dataset.act;
     const id = event.target.closest('[data-id]')?.dataset.id;
     if (!act || !id) return;
     if (act === 'pick') run('выбор', () => api.saveSettings({ assistant: id }));
     else if (act === 'pic') { pictureFor = id; picker.value = ''; picker.click(); }
     else if (act === 'unpic') run('картинка', () => api.saveSettings({ avatars: { [id]: null } }));
+    else if (act === 'del') {
+      if (armed !== id) { armed = id; render(); return; }
+      armed = '';
+      run('удалить', () => api.saveSettings({ removeCustom: id }));
+    }
   });
   pane.addEventListener('change', event => {
     const target = event.target;
@@ -133,7 +143,11 @@ export function startAssistants(doc, { bridge, hub }) {
       return;
     }
     const own = target.dataset?.own;
-    if (own) { run('свой ассистент', () => api.saveSettings({ custom: { [own]: target.value } })); return; }
+    if (own) {
+      const id = target.closest('[data-id]')?.dataset.id;
+      if (id) run('свой ассистент', () => api.saveSettings({ editCustom: { id, [own]: target.value } }));
+      return;
+    }
     if (target.dataset?.field === 'gender') run('пол', () => api.saveSettings({ userGender: target.value }));
     else if (target.dataset?.field === 'profile') run('API', () => api.saveSettings({ profileId: target.value }));
     else if (target.dataset?.field === 'prompt') run('правила', () => api.saveSettings({ prompt: target.value }));

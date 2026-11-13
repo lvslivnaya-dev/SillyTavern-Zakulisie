@@ -120,7 +120,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // Several windows of Zakulisie at once (docked panels on both sides of the chat); off = one window at a time.
   studioMulti: false,
   // The assistant of the author: who it is (a ready one or its own), pictures, the API it answers through, the prompt (empty = the built-in one); what was agreed is sent unless switched off.
-  gm: { assistant: 'rosita', custom: { name: '', character: '', addresses: [] }, avatars: {}, profileId: '', prompt: '' },
+  gm: { assistant: 'rosita', customs: [], avatars: {}, profileId: '', prompt: '' },
   sendGm: true,
   // The scene rail (the drawer at the wall of the browser): 'left' | 'right'.
   railSide: 'left',
