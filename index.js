@@ -119,7 +119,7 @@ import { createWardrobeCallbacks, createWardrobeStore } from './src/integration/
 import { createHoraeCallbacks } from './src/integration/horae-import.js';
 import {
   LIBRARY_IMAGE_FOLDER, browseImageFolder, copyImageTo, deleteWardrobeImage, folderStorageStatus, isTreeImage, listInbox, moveTreeImage, prepareInbox,
-  setImageFolder, storedImageForModel, fileToDataUrl, shrinkDataUrl, VISION_MAX_SIDE, treeDirOf, uploadToTree, uploadWardrobeImage,
+  setImageFolder, storedImageForModel, fileToDataUrl, shrinkDataUrl, VISION_MAX_SIDE, treeDirOf, uploadToTree, uploadWardrobeImage, imageUrl,
 } from './src/integration/wardrobe-images.js';
 import { inboxDirectories, newTreeFiles, treeDirFor } from './src/integration/wardrobe-inbox.js';
 import { countImages, moveImages } from './src/integration/image-move.js';
@@ -223,11 +223,14 @@ async function initKulisy() {
   };
   // A card edited in the library changes what the narrator is sent: the prompt is rebuilt too.
   let promptSoon = false;
+  // the persona window redraws its list when the library changes (a new portrait of a card, a renamed card)
+  const libraryListeners = new Set();
   const locationLibrary = createLocationLibraryStore({
     settings: () => settings,
     save: () => context.saveSettingsDebounced(),
     onChange: () => {
       storeChanged();
+      for (const listener of libraryListeners) { try { listener(); } catch (error) { console.error('[Kulisy] A library listener failed.', error); } }
       if (promptSoon) return;
       promptSoon = true;
       queueMicrotask(() => {
@@ -4615,6 +4618,10 @@ ${card.personality ?? card.data?.personality ?? ''}`;
   // What the persona window (the former Pudrenitsa) needs from Kulisy: the card of a persona, made on demand, and its editor to embed.
   controller.personaBridge = {
     cardIdFor: avatar => (locationLibrary.get().characters ?? []).find(card => card.persona && card.avatar === avatar)?.id ?? '',
+    /** The persona window asks to be told when the library changes. Returns the way to stop. */
+    subscribe(listener) { libraryListeners.add(listener); return () => libraryListeners.delete(listener); },
+    /** The address of the picture of the persona's card (its own portrait), or '' when the card has none. */
+    cardImageFor: avatar => { const image = (locationLibrary.get().characters ?? []).find(card => card.persona && card.avatar === avatar)?.image; return image ? imageUrl(image) : ''; },
     ensureCard({ avatar, name }) {
       const have = (locationLibrary.get().characters ?? []).find(card => card.persona && card.avatar === avatar);
       if (have) return have.id;

@@ -1,6 +1,6 @@
 {
   "name": "sillytavern-zakulisie",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": false,
   "type": "module",
   "description": "Zakulisie for SillyTavern: who knows what, relationships, locations, wardrobe, cards, lorebook tools, theme and assistants for narrator-card chats.",

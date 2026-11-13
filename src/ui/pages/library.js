@@ -380,6 +380,14 @@ export function createLibraryPages(ctx) {
   }
 
   function picture(entry) {
+    // A persona card with no picture of its own shows the picture of the persona in the tavern (as the open card does).
+    if (!entry.image && personaMode && entry.avatar) {
+      // the file keeps its name when the picture is replaced: a fresh address every half minute shows the new one
+      const stamp = Math.floor(Date.now() / 30000);
+      const ph = element('img', { className: 'ku-pic', src: `/User Avatars/${encodeURIComponent(entry.avatar)}?t=${stamp}`, alt: '', loading: 'lazy', draggable: false });
+      ph.addEventListener('error', () => ph.replaceWith(cover(entry)), { once: true });
+      return ph;
+    }
     if (!entry.image) return cover(entry);
     const img = element('img', { className: 'ku-pic', src: imageUrl(entry.image), alt: '', loading: 'lazy', draggable: false });
     // A picture from another computer's library (an imported file) is not on this server.

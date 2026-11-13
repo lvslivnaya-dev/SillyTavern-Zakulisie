@@ -144,7 +144,13 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
   const byAvatar = avatar => all().find(persona => persona.avatar === avatar);
   // большая картинка — полный файл, в списке — миниатюра таверны (после смены картинки таверна сама обновляет их кэш)
   const img = avatar => api.imageUrl(avatar);
-  const thumb = avatar => api.thumbUrl(avatar);
+  // файл миниатюры сохраняет имя, когда картинку меняют: браузер держит старую (в том числе «силуэт» без картинки). Метка в адресе
+  // своя на каждую загрузку страницы, а после нажатия «сменить картинку» минуту обновляется при каждой перерисовке.
+  const pageStamp = Date.now();
+  let freshUntil = 0;
+  const thumb = avatar => `${api.thumbUrl(avatar)}&t=${Date.now() < freshUntil ? Date.now() : pageStamp}`;
+  // у карточки персоны может быть свой портрет (его ставят в окне карточки): в списке он важнее заглушки аватара таверны
+  const rowPicture = avatar => { try { return bridge?.cardImageFor?.(avatar) || thumb(avatar); } catch { return thumb(avatar); } };
   const nameOf = connection => {
     const ctx = live();
     return connection.type === 'group'
@@ -290,7 +296,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
       const links = persona.connections.map(link => link.name ?? nameOf(link)).filter(Boolean);
       return `<article class="pud-prow${persona.avatar === state.picked ? ' on' : ''}${state.checked.has(persona.avatar) ? ' checked' : ''}" role="listitem" tabindex="0" data-avatar="${escapeHtml(persona.avatar)}">
         <span class="pud-ck" aria-hidden="true"></span>
-        <img class="pud-prow-ph" src="${escapeHtml(thumb(persona.avatar))}" alt="" loading="lazy" decoding="async">
+        <img class="pud-prow-ph" src="${escapeHtml(rowPicture(persona.avatar))}" alt="" loading="lazy" decoding="async">
         <div class="pud-prow-info">
           <b class="pud-prow-name">${escapeHtml(persona.name)}</b>
           ${persona.title ? `<span class="pud-prow-title">${escapeHtml(persona.title)}</span>` : ''}
@@ -489,7 +495,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
     else if (act === 'make-card') run('Карточка персоны', async () => { bridge?.ensureCard({ avatar, name: byAvatar(avatar)?.name ?? '' }); state.leftMode = 'card'; state.forceLeft = true; });
     else if (act === 'desc') run('Описание персоны', () => openDesc(avatar));
     else if (act === 'look') lookWin.open(avatar);
-    else if (act === 'image') run('Картинка персоны', () => api.changeImage(doc, avatar));
+    else if (act === 'image') { freshUntil = Date.now() + 60000; run('Картинка персоны', () => api.changeImage(doc, avatar)); }
     else if (act === 'lore') run('Лорбук персоны', () => api.openLorebook(byAvatar(avatar)?.lorebook));
     else if (act === 'link-open') { state.linkOpen = !state.linkOpen; schedule(); }
     else if (act === 'link-here' || act === 'link-add') {
@@ -675,6 +681,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
     undo.push(() => observer.disconnect());
   }
 
+  if (typeof bridge?.subscribe === 'function') undo.push(bridge.subscribe(() => schedule()));
   api.ready().then(() => { state.ready = true; state.picked = api.current() || state.picked; state.forceLeft = true; schedule(); }).catch(error => report('персоны', error));
   return () => { for (const fn of undo.reverse()) fn(); };
 }
