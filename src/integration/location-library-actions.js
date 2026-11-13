@@ -288,6 +288,7 @@ export function createLibraryCallbacks(deps) {
         if (on) {
           const result = linkCards(before, library.get(), ids, pick);
           for (const skip of result.skipped) deps.notify?.(`Карточка «${skip.name}» не подключена: ${skip.why}`);
+          for (const swap of result.replaced) deps.notify?.(`Карточка «${swap.by}» встала на место карточки «${swap.name}»: у героя «${swap.entityName}» одна карточка`);
           if (result.state !== before) await deps.replaceState(result.state);
           return result.linked.length;
         }

@@ -85,7 +85,15 @@ export function createWindow(doc, options) {
     rect = fitRect(rect, viewport());
     Object.assign(win.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
   };
-  const remember = () => { store[options.id] = { ...rect }; save(); };
+  // Настройки таверны целиком уходят на сервер при каждом сохранении (у меня 12 МБ), поэтому не сохраняем то, что не изменилось:
+  // иначе каждое открытие окна (размер 0 → размер) заканчивалось бы тяжёлой записью и подвисанием.
+  const remember = () => {
+    const next = { left: Math.round(rect.left), top: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
+    const old = store[options.id];
+    if (old && ['left', 'top', 'width', 'height'].every(key => Math.round(old[key]) === next[key])) return;
+    store[options.id] = next;
+    save();
+  };
   const front = () => { win.style.zIndex = String(++zTop); };
 
   // перетаскивание за шапку

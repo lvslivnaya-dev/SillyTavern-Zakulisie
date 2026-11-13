@@ -74,11 +74,17 @@ export function cardNameForms(state, library, names, recognitionForms) {
   return forms;
 }
 
-/** The characters of the chat whose name or alias is exactly a name of the card (a sound is no proof: nobody is guessed). */
+/**
+ * The characters of the chat the card is about (a sound is no proof: nobody is guessed): the name of the card is a name or an alias of the
+ * character, or the character's own name is one of the aliases of the card. Two aliases that merely coincide
+ * (a family name, a shared nickname) tell nothing: otherwise a whole folder of relatives collapsed into one character.
+ */
 export function entityCandidates(state, card) {
   const personaId = state.ui?.personaId || '';
-  const wanted = new Set(cardNames(card).map(normalizeAlias));
-  return Object.values(state.entities ?? {}).filter(entity => entity.id !== personaId && entityNames(entity).some(name => wanted.has(normalizeAlias(name)))).map(entity => entity.id);
+  const entities = Object.values(state.entities ?? {}).filter(entity => entity.id !== personaId);
+  const own = normalizeAlias(card.name ?? '');
+  const aliases = new Set((card.aliases ?? []).map(normalizeAlias));
+  return entities.filter(entity => entityNames(entity).some(name => normalizeAlias(name) === own) || aliases.has(normalizeAlias(entity.name ?? ''))).map(entity => entity.id);
 }
 
 /** The character of the chat a card is about: the one whose name is exactly the card's ('' if there is none or several). */
@@ -97,13 +103,14 @@ function meta(reason) {
  * (one character, one card).
  * `pick` = { cardId: entityId | '__new' } is the user's own choice: that character (or a new one) whatever the names say.
  * Several characters with the card's name and no choice: the card waits (skipped), nobody is made up.
- * → { state, linked: [{ cardId, entityId, created }], skipped: [{ name, why }] }
+ * → { state, linked: [{ cardId, entityId, created }], skipped: [{ name, why }], replaced: [{ name, by, entityName }] }
  */
 export function linkCards(state, library, cardIds, pick = {}) {
   const byId = new Map((library?.characters ?? []).map(card => [card.id, card]));
   let next = state;
   const linked = [];
   const skipped = [];
+  const replaced = [];
   const personaName = state.entities?.[state.ui?.personaId]?.name ?? '';
   const taken = new Map([...cardLinks(state)].map(([cardId, entityId]) => [entityId, cardId]));
   for (const cardId of [...new Set(cardIds ?? [])]) {
@@ -143,13 +150,17 @@ export function linkCards(state, library, cardIds, pick = {}) {
     }
     // One card per character: the one that was attached before is let go.
     const cards = { ...(next.ui?.cards ?? {}) };
-    if (taken.has(entityId) && taken.get(entityId) !== cardId) delete cards[taken.get(entityId)];
+    if (taken.has(entityId) && taken.get(entityId) !== cardId) {
+      const old = byId.get(taken.get(entityId));
+      replaced.push({ name: old?.name ?? '', by: card.name, entityName: next.entities?.[entityId]?.name ?? '' });
+      delete cards[taken.get(entityId)];
+    }
     cards[cardId] = entityId;
     taken.set(entityId, cardId);
     next = { ...next, ui: { ...(next.ui ?? {}), cards } };
     linked.push({ cardId, entityId, created });
   }
-  return { state: next, linked, skipped };
+  return { state: next, linked, skipped, replaced };
 }
 
 /** Switch cards off in this chat: the attachment goes, the characters stay. */

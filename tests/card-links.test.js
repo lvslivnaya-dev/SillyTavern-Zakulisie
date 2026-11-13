@@ -34,3 +34,28 @@ test('only an exact name finds the character: a similar sound is not enough, and
   const fresh = linkCards(twins.state, lib, [card.id], { [card.id]: '__new' });
   assert.equal(fresh.linked[0].created, true);
 });
+
+test('карточки одной папки с общей фамилией или кличкой не склеиваются в одного героя при массовом включении', () => {
+  const { library, folder } = addFolder(emptyLibrary(), { name: 'Бонтен' });
+  let lib = library;
+  const ids = [];
+  for (const name of ['Ран Хайтани', 'Рин Хайтани', 'Кокуджо Такэоми']) {
+    const made = addLibraryCharacter(lib, { folderId: folder.id, name, aliases: ['Хайтани', 'Бонтен'] });
+    lib = made.library;
+    ids.push(made.character.id);
+  }
+  const result = linkCards(chat().state, lib, ids);
+  assert.equal(result.linked.length, 3);
+  assert.equal(new Set(result.linked.map(item => item.entityId)).size, 3, 'у каждой карточки свой герой');
+  assert.deepEqual(result.replaced, [], 'ни одна карточка никого не вытеснила');
+});
+
+test('карточка, вставшая на место другой у того же героя, называется в итоге, а не теряется молча', () => {
+  const { library, folder } = addFolder(emptyLibrary(), { name: 'АУ' });
+  const one = addLibraryCharacter(library, { folderId: folder.id, name: 'Ран Хайтани (канон)', aliases: ['Ран'] });
+  const two = addLibraryCharacter(one.library, { folderId: folder.id, name: 'Ран Хайтани (АУ)', aliases: ['Ран'] });
+  const start = chat('Ран');
+  const result = linkCards(start.state, two.library, [one.character.id, two.character.id]);
+  assert.equal(result.linked.length, 2);
+  assert.equal(result.replaced.length, 1, 'у героя одна карточка: вытесненная названа');
+});
