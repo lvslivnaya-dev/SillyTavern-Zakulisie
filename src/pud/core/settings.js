@@ -29,6 +29,12 @@ export function defaultSettings() {
     library: { pinned: [], favoriteChats: [], archivedChats: [], imported: false, shelf: 'recent', personasImported: false, lorebooksImported: false },
     // Окно расширений: ключ блока настроек → id расширения (если хозяин не угадался сам)
     extensionLinks: {},
+    // Окно расширений: порядок списка (name — по алфавиту, recent — последние установленные)
+    extensionsSort: 'name',
+    // Соединение: подпись плашки профиля (id профиля → текст), только для окна Закулисья
+    connectionLabels: {},
+    // Соединение: библиотека адресов серверов [{ id, label, url }], общая для всех профилей
+    connectionUrls: [],
     // Редактор лорбука: последний открытый лорбук и сортировка записей
     loreEditor: { book: '', sort: 'native' },
     // «Что сработало из лорбуков»: значки-ключики под ответами

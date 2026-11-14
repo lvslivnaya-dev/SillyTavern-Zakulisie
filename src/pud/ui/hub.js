@@ -19,6 +19,9 @@ export const HUB_TABS = [
   { id: 'bg', title: 'Фон', icon: 'image', drawer: 'backgrounds-button', content: 'Backgrounds' },
 ];
 
+/** Вкладки блока «Визуал»: он стоит в самом конце списка, перед ссылками (порядок — как здесь). */
+export const VISUAL_TABS = ['bg', 'palette', 'icons'];
+
 export const HUB_LINKS = [
   { title: 'Документация', icon: 'doc', href: 'https://docs.sillytavern.app/' },
   { title: 'GitHub', icon: 'git', href: 'https://github.com/SillyTavern/SillyTavern' },
@@ -101,6 +104,14 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
     if (!drawer || !content) continue;
     const pane = addTab(tab.id, tab.title, tab.icon);
     const home = { parent: content.parentElement, next: content.nextSibling };
+    if (tab.id === 'user') {
+      // Тема и окна Закулисья рассчитаны на родной вид таверны: чужие темы здесь никто не проверял
+      const warn = doc.createElement('div');
+      warn.className = 'pud-warnbox';
+      warn.setAttribute('role', 'note');
+      warn.innerHTML = '<b>⚠ Темы не тестировались</b><span>Закулисье проверялось только со своей темой. С другими темами таверны (User Settings → Theme) окна могут выглядеть криво или работать странно. Меняйте тему на свой страх и риск.</span>';
+      pane.append(warn);
+    }
     pane.append(content);
     drawer.classList.add('pud-moved');
     undo.push(() => {
@@ -159,12 +170,29 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
   doc.body.classList.add(HUB_CLASS);
   undo.push(() => doc.body.classList.remove(HUB_CLASS));
 
+  // «Визуал» (фон, палитра, иконки) — отдельный блок в конце, перед ссылками. Заголовка нет, если таких вкладок нет.
+  const regroup = () => {
+    let head = tabs.querySelector('[data-visual-head]');
+    const found = VISUAL_TABS.map(id => tabs.querySelector(`[data-tab="${id}"]`)).filter(Boolean);
+    if (!found.length) { head?.remove(); return; }
+    if (!head) {
+      head = doc.createElement('div');
+      head.className = 'pud-tabs-sub';
+      head.dataset.visualHead = '1';
+      head.textContent = 'Визуал';
+    }
+    tabs.insertBefore(head, links);
+    for (const tab of found) tabs.insertBefore(tab, links);
+  };
+  regroup();
+
   // другие модули добавляют сюда свои вкладки
   shared.hub = {
     addTab(id, title, iconName) {
       const pane = addTab(id, title, iconName);
       const tab = tabs.querySelector(`[data-tab="${id}"]`);
-      return { pane, remove: () => { tab?.remove(); pane.remove(); } };
+      regroup();
+      return { pane, remove: () => { tab?.remove(); pane.remove(); regroup(); } };
     },
     open(tabId) { if (tabId) select(tabId); hub.open(); },
   };

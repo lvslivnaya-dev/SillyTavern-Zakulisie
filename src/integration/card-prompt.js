@@ -60,6 +60,11 @@ export function cardedSheetTest(state, library) {
   };
 }
 
+/** « (female)» for the card's header: the narrator reads the gender with the rest of the sheet. */
+function genderTag(gender) {
+  return gender === 'female' || gender === 'male' ? ` (${gender})` : '';
+}
+
 /** Lorebook entries to take out because a card tells the same: a Map entry → 'drop'. */
 export function planSheetDrops({ lists, state, library }) {
   const decisions = new Map();
@@ -121,8 +126,8 @@ export function planCards({ state, library, config, extraNames = new Map(), pres
     .map(entity => (extraNames.get(entity.id)?.length ? { ...entity, aliases: [...(entity.aliases ?? []), ...extraNames.get(entity.id)] } : entity));
   report.nobody = !people.some(entity => present.has(entity.id));
 
-  const named = namedInText(namedText, people);
-  const inReply = namedSentences(replyText, people);
+  const named = namedInText(namedText, people, present);
+  const inReply = namedSentences(replyText, people, present);
   for (const [id, count] of inReply) if (count >= 2) named.add(id);
   const around = buildAround(people, present, named, inReply, id => (byEntity.has(id) ? [byEntity.get(id).name, ...byEntity.get(id).aliases] : []));
   const keyText = `${namedText}\n${replyText}`;
@@ -177,7 +182,7 @@ export function planCards({ state, library, config, extraNames = new Map(), pres
   report.trimmedNames = [];
   for (const person of report.people) {
     const card = byEntity.get(person.id);
-    headers.set(person.id, `## ${[card.name, ...card.aliases.slice(0, 3)].join(' / ')}`);
+    headers.set(person.id, `## ${[card.name, ...card.aliases.slice(0, 3)].join(' / ')}${genderTag(card.gender || state?.ui?.genders?.[person.id])}`);
     taken.set(person.id, []);
   }
   for (const round of [true, false]) {

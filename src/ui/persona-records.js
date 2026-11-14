@@ -11,8 +11,10 @@ export const recordsFromDraft = draft => (draft ?? []).map(record => ({ ...recor
  * The records about a persona: each has its text, whom it concerns, who knows it, the AU it belongs to, «секрет» and a switch.
  * `records` is the draft's own array, edited in place; `au` = the list of AU [{ id, name }]; `cards` = the cards of characters of the library
  * [{ id, name }] a record can be tied to straight (besides names typed in); `redraw` draws the window again.
+ * The records are a list in the card's side column; this pane edits the `selected` one. `add()` / `remove(index)` are the card's own
+ * (they also move the selection); without them the pane adds and removes by itself.
  */
-export function renderPersonaRecords({ records, au, cards = [], redraw }) {
+export function renderPersonaRecords({ records, au, cards = [], redraw, selected = 0, add = null, remove = null }) {
   const nameOf = new Map(cards.map(card => [card.id, card.name]));
   const field = (label, node) => element('label', { className: 'field' }, [element('span', { className: 'muted ku-small', text: label }), node]);
   const input = (value, label, onInput, placeholder = '') => {
@@ -42,6 +44,8 @@ export function renderPersonaRecords({ records, au, cards = [], redraw }) {
   const rows = records.map((record, index) => {
     const text = element('textarea', { rows: 3, value: record.text, 'aria-label': `Запись ${index + 1}`, placeholder: 'Например: Рэн видит в ней младшую сестру' });
     text.addEventListener('input', () => { record.text = text.value; });
+    // the list on the left names a record by its text: it follows when the field is left
+    text.addEventListener('change', () => redraw());
     const chips = au.map(item => {
       const on = record.au.includes(item.id);
       const chip = element('button', { type: 'button', className: `ku-chip${on ? ' told' : ''}`, 'aria-pressed': String(on), text: item.name, title: on ? 'Запись только в этом АУ. Нажмите, чтобы убрать' : 'Привязать запись к этому АУ' });
@@ -69,18 +73,20 @@ export function renderPersonaRecords({ records, au, cards = [], redraw }) {
         element('label', { className: 'ku-inline' }, [on, 'включена']),
         element('label', { className: 'ku-inline', title: 'Знают только названные: остальные не знают и не догадываются' }, [secret, 'секрет']),
         element('span', { className: 'ku-push' }),
-        button('×', 'btn icon small', () => { records.splice(index, 1); redraw(); }, 'Удалить запись'),
+        button('×', 'btn icon small', () => { if (remove) remove(index); else { records.splice(index, 1); redraw(); } }, 'Удалить запись'),
       ]),
     ]);
   });
 
+  const addRecord = () => { if (add) add(); else { records.push({ id: '', text: '', about: '', knows: '', au: [], secret: false, off: false }); redraw(); } };
+  const index = Math.min(Math.max(Number(selected) || 0, 0), records.length - 1);
   return element('div', { className: 'ku-cpane' }, [
     element('div', { className: 'ku-ctitlerow' }, [
-      element('h3', { className: 'ku-ctitle', text: `Записи о персоне · ${records.length}` }),
-      button('+ Запись', 'btn small', () => { records.push({ id: '', text: '', about: '', knows: '', au: [], secret: false, off: false }); redraw(); }),
+      element('h3', { className: 'ku-ctitle', text: records.length ? `Запись ${index + 1} из ${records.length}` : 'Записи о персоне' }),
+      ...(records.length ? [] : [button('+ Запись', 'btn small', addRecord)]),
     ]),
-    element('p', { className: 'ku-hint', text: 'Запись идёт модели, когда на сцене кто-то из тех, кого она касается или кто о ней знает, и когда включено её АУ. Не названы ни те, ни другие: идёт всегда. Секретную знают только названные.' }),
+    element('p', { className: 'ku-hint', text: 'Запись идёт модели, когда на сцене кто-то из тех, кого она касается или кто о ней знает, и когда включена нужная АУ. Новая запись — плюс у названия «Записи о персоне» в списке слева.' }),
     ...(au.length ? [] : [element('p', { className: 'ku-hint', text: 'АУ добавляются на странице «Персона».' })]),
-    ...rows,
+    ...(records.length ? [rows[index]] : [element('p', { className: 'ku-hint', text: 'Записей пока нет.' })]),
   ]);
 }

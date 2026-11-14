@@ -63,7 +63,7 @@ export function startHider(doc, { context, api = hiderApi }) {
   const ask = async () => {
     const c = ctx();
     const chat = c.chat ?? [];
-    if (!chat.length) { globalThis.toastr?.info?.('В чате пока нет сообщений.', 'Пудреница'); return; }
+    if (!chat.length) { globalThis.toastr?.info?.('В чате пока нет сообщений.', 'Закулисье'); return; }
     const hidden = chat.filter(message => message?.is_system).length;
     const box = doc.createElement('div');
     box.className = 'pud-ask pud-hider';
@@ -80,18 +80,18 @@ export function startHider(doc, { context, api = hiderApi }) {
     const ok = await c.callGenericPopup(box, c.POPUP_TYPE.CONFIRM, '', { okButton: 'Готово', cancelButton: 'Отмена' });
     if (!ok) return;
     const range = parseRange(box.querySelector('[data-from]').value, box.querySelector('[data-to]').value, chat.length);
-    if (typeof range === 'string') { globalThis.toastr?.warning?.(range, 'Пудреница'); return; }
+    if (typeof range === 'string') { globalThis.toastr?.warning?.(range, 'Закулисье'); return; }
     const unhide = box.querySelector('input[name="pud-hider-mode"]:checked')?.value === 'show';
     await api.hideRange(range[0], range[1], unhide);
     const count = range[1] - range[0] + 1;
-    globalThis.toastr?.success?.(`${unhide ? 'Возвращено' : 'Скрыто'}: ${plural(count, 'сообщение', 'сообщения', 'сообщений')}, с № ${range[0]} по № ${range[1]}.`, 'Пудреница');
+    globalThis.toastr?.success?.(`${unhide ? 'Возвращено' : 'Скрыто'}: ${plural(count, 'сообщение', 'сообщения', 'сообщений')}, с № ${range[0]} по № ${range[1]}.`, 'Закулисье');
   };
   const run = event => {
     if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     ask().catch(error => {
       report('скрыть сообщения', error);
-      globalThis.toastr?.error?.('Не получилось скрыть. Подробности в консоли (F12).', 'Пудреница');
+      globalThis.toastr?.error?.('Не получилось скрыть. Подробности в консоли (F12).', 'Закулисье');
     });
   };
   button.addEventListener('click', run);

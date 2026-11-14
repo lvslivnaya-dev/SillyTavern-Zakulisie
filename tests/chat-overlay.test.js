@@ -451,7 +451,7 @@ test('the strip above the message box says what the scene is and what goes to th
     overlay.render(view({ lastSent: { stage: { label: 'Касания', note: 'тихо' }, cues: ['⚡ Событие: шторм'] } }));
     assert.match(document.getElementById('ku-scene-strip').querySelector('.ku-ss-last').textContent, /В последний запрос ушло: стадия «Касания», заметка «тихо» · ⚡ Событие: шторм/);
     overlay.render(view({ lastSent: { stage: null, cues: [] } }));
-    assert.match(document.getElementById('ku-scene-strip').querySelector('.ku-ss-last').textContent, /ничего от Кулис, кроме обычной сцены/);
+    assert.match(document.getElementById('ku-scene-strip').querySelector('.ku-ss-last').textContent, /ничего от Закулисья, кроме обычной сцены/);
     overlay.render(view({ lastSent: { stage: null, cues: [], cards: [{ name: 'Инуи', sent: ['Голос'], held: [{ title: 'Внешность', why: 'уже была' }] }, { name: 'Кокону', sent: [], held: [] }], place: { name: 'Кафе', parts: ['описание'] }, things: ['Шарф'], noCard: [{ name: 'Изана', inLibrary: true }, { name: 'Кай', inLibrary: false }] } }));
     const lib = document.getElementById('ku-scene-strip').querySelector('.ku-ss-lib');
     assert.match(lib.textContent, /Из библиотеки ушло: .*Инуи: Голос.*Кокону: ничего.*Кафе: описание.*Шарф/, 'which entries of the library went with the request');

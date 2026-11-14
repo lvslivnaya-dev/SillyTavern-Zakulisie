@@ -373,6 +373,12 @@
 .ku-setup-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; width: calc(100% - 12px); box-sizing: border-box; margin: 0 6px 4px; padding: 6px 12px; border: 1px solid var(--SmartThemeQuoteColor); border-radius: 10px; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, var(--SmartThemeBlurTintColor)); font-size: .92em; }
 .ku-setup-banner .ku-sb-text { flex: 1 1 220px; min-width: 0; }
 .ku-setup-banner .ku-sb-go { font-weight: 600; }
+.ku-setup-banner .ku-sb-steps { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.ku-setup-banner .ku-sb-step { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; color: var(--SmartThemeBodyColor); border-color: var(--SmartThemeBorderColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 18%, transparent); }
+.ku-setup-banner .ku-sb-step:hover { border-color: var(--SmartThemeQuoteColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 34%, transparent); }
+.ku-setup-banner .ku-sb-step svg { width: 18px; height: 18px; display: block; }
+.ku-setup-banner .ku-sb-step.done { opacity: .55; }
+.ku-setup-banner .ku-sb-tick { position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--SmartThemeQuoteColor); }
 
 /* The strip above the message box: the scene in one glance and what goes to the model with the next post. */
 .ku-scene-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; width: calc(100% - 12px); box-sizing: border-box; margin: 0 6px 4px; padding: 4px 12px; border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 92%, transparent); backdrop-filter: blur(var(--SmartThemeBlurStrength, 10px)); color: var(--SmartThemeBodyColor); font: inherit; font-size: calc(var(--mainFontSize) * 0.8); text-align: left; cursor: pointer; }
@@ -384,3 +390,30 @@
 .ku-scene-strip .ku-ss-none { opacity: .6; }
 .ku-scene-strip .ku-ss-ver { margin-left: auto; font-size: .85em; opacity: .5; }
 .ku-scene-strip .ku-ss-last { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; opacity: .8; border-top: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent); padding-top: 3px; }
+/* кнопки плашек над полем ввода: как остальные кнопки Закулисья, а не серые системные */
+.ku-setup-banner .ku-dir-btn, #ku-au-banner .ku-dir-btn {
+  min-height: 30px; padding: 3px 14px; border-radius: 12px; font: inherit; cursor: pointer;
+  color: var(--SmartThemeBodyColor);
+  border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, transparent);
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor) 16%, transparent);
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.ku-setup-banner .ku-dir-btn:hover, #ku-au-banner .ku-dir-btn:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 32%, transparent); border-color: var(--SmartThemeQuoteColor); }
+.ku-setup-banner .ku-dir-btn:active, #ku-au-banner .ku-dir-btn:active { box-shadow: inset 0 2px 4px color-mix(in srgb, var(--SmartThemeBodyColor) 25%, transparent); }
+.ku-setup-banner .ku-sb-go, #ku-au-banner .ku-sb-go { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 34%, transparent); }
+.ku-setup-banner .ku-dir-btn.ku-sb-step { width: 36px; height: 36px; min-height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+#ku-scene-chips .ku-cal-mini { display: grid; gap: 3px; max-width: 360px; margin: 4px 0 6px; }
+#ku-scene-chips .ku-cal-mini-head { text-align: center; font-size: .75em; color: color-mix(in srgb, var(--SmartThemeBodyColor) 60%, transparent); }
+#ku-scene-chips button.ku-cal-mini-cell { background: none; color: inherit; font: inherit; cursor: pointer; min-height: 0; }
+#ku-scene-chips .ku-cal-mini-cell.on { border-color: var(--SmartThemeQuoteColor); }
+#ku-scene-chips .ku-cal-day { display: grid; gap: 6px; margin: 6px 0; padding: 8px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 20%, transparent); }
+#ku-scene-chips .ku-cal-mini-cell { position: relative; text-align: center; padding: 3px 0; border-radius: 7px; font-size: .85em; border: 1px solid transparent; }
+#ku-scene-chips .ku-cal-mini-cell.other { opacity: .35; }
+#ku-scene-chips .ku-cal-mini-cell.today { border-color: var(--SmartThemeQuoteColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 24%, transparent); font-weight: 700; }
+#ku-scene-chips .ku-cal-mini-cell.has::after { content: ''; position: absolute; left: 50%; bottom: 1px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--SmartThemeQuoteColor); }
+#ku-scene-chips .ku-dir-cal-row { padding: 2px 0; }
+.ku-setup-banner .ku-dir-btn.ku-sb-close { margin-left: auto; width: 30px; padding: 0; }
+/* воздух: между чатом, плашкой и строкой «Уйдёт модели», и внутри плашки */
+.ku-setup-banner, #ku-au-banner { margin: 12px 6px 12px; padding: 12px 16px; gap: 12px 12px; }
+.ku-setup-banner .ku-sb-steps { gap: 10px; margin: 2px 0 6px; }
+.ku-setup-banner .ku-sb-steps + .ku-dir-btn { margin-top: 4px; }

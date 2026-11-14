@@ -12,7 +12,7 @@ const SECRET_CLASS = 'kulisy-secret';
 function createButton() {
   const node = document.createElement('div');
   node.className = `mes_button ${BUTTON_CLASS} fa-solid fa-heart-pulse`;
-  node.title = 'Кулисы: проверить этот ответ (отношения, сцена, кто что узнал, утечки)';
+  node.title = 'Закулисье: проверить этот ответ (отношения, сцена, кто что узнал, утечки)';
   node.setAttribute('aria-label', node.title);
   return node;
 }
@@ -20,7 +20,7 @@ function createButton() {
 function createSecretButton() {
   const node = document.createElement('div');
   node.className = `mes_button ${SECRET_CLASS} fa-solid fa-user-secret`;
-  node.title = 'Кулисы: создать секрет из выделенного текста (сначала выдели его в сообщении)';
+  node.title = 'Закулисье: создать секрет из выделенного текста (сначала выдели его в сообщении)';
   node.setAttribute('aria-label', node.title);
   return node;
 }

@@ -167,7 +167,8 @@ test('factors sheet opens with the line end point, and saving sends it for that 
       directionPresets: () => [{ id: 'romance', label: 'Романтика' }],
     });
     const shadow = studio.element.shadowRoot;
-    [...shadow.querySelectorAll('button')].find(node => node.textContent === 'Факторы роста').click();
+    shadow.querySelector('.gear-toggle').click(); // the gear of the line holds the growth factors
+    [...shadow.querySelectorAll('button')].find(node => node.textContent === 'Факторы роста…').click();
   });
   try {
     assert.deepEqual(errors, [], errors.join('\n'));
@@ -487,8 +488,9 @@ test('line factors: the model\'s reading of the pair is shown, list factors keep
   try {
     assert.deepEqual(errors, [], errors.join('\n'));
     const shadow = studio.element.shadowRoot;
+    shadow.querySelector('.gear-toggle').click();
     const open = [...shadow.querySelectorAll('button')].find(item => /Факторы роста/.test(item.textContent));
-    assert.ok(open, 'a factors button on the overview');
+    assert.ok(open, 'a factors button in the gear of the line');
     open.click();
     const box = shadow.querySelector('.factor-analysis');
     assert.ok(box && !box.hidden, 'analysis shown');
@@ -508,7 +510,7 @@ const embeddedPersona = (extra = {}, { library, options = {} } = {}) => {
   return { snapshot, options };
 };
 
-test('persona window, the strip over the embedded card: the persona of this chat, her card, the AU in three plaques; the hidden character lives in the card', () => {
+test('persona window, the embedded card: no strip of its own, the foot says whether she is the one you wear, the AU is a button there; the hidden character lives in the card', () => {
   const { snapshot } = embeddedPersona();
   const place = document.createElement('div');
   document.body.append(place);
@@ -520,10 +522,11 @@ test('persona window, the strip over the embedded card: the persona of this chat
   try {
     assert.deepEqual(errors, [], errors.join('\n'));
     const shadow = studio.element.shadowRoot;
-    const plaques = [...shadow.querySelectorAll('.ku-plaques > .card')].map(node => node.querySelector('h3')?.textContent);
-    assert.deepEqual(plaques, ['Персона этого чата', 'Карточка персоны', 'АУ']);
+    assert.equal(shadow.querySelector('.ku-embed-strip'), null, 'no strip over the card: the card has all the room');
+    assert.equal(shadow.querySelector('select[aria-label="Персона SillyTavern для этого чата"]'), null, 'nothing to choose or tie: the worn persona is the persona of the chat');
+    assert.match(shadow.querySelector('.ku-pstate').textContent, /Это ты в этом чате|Не надета сейчас/);
+    assert.ok(shadow.querySelector('.ku-cfoot-au'), 'the AU is a button with a caption beside the names, the closet and the sizes');
     assert.equal(shadow.querySelector('textarea[aria-label="Скрытый характер персоны"]'), null, 'it lives in the card of the persona');
-    assert.equal(shadow.querySelector('.ku-embed-strip').open, false, 'folded: the card has the room');
     studio.showWindow?.('relations');
   } finally { studio?.destroy(); place.remove(); }
 
@@ -534,15 +537,14 @@ test('persona window, the strip over the embedded card: the persona of this chat
   } finally { host?.destroy(); }
 });
 
-test('persona window: the AU of the chat are switched in the strip, «Открыть карточку» goes to the persona window, the page is gone from the menu', async () => {
+test('persona window: the AU of the chat are switched with the «АУ» button of the card, several at once', async () => {
   const { snapshot } = embeddedPersona();
   const place = document.createElement('div');
   document.body.append(place);
   const calls = [];
-  const opened = [];
   let studio;
   const errors = captureErrors(() => {
-    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place, embedCard: true, onOpenPersonas: avatar => opened.push(avatar), callbacks: {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place, embedCard: true, callbacks: {
       onPersonaAuToggle: payload => { calls.push(['au', payload]); },
     } });
     studio.showCard('pc1');
@@ -550,7 +552,8 @@ test('persona window: the AU of the chat are switched in the strip, «Откры
   try {
     assert.deepEqual(errors, [], errors.join('\n'));
     const shadow = studio.element.shadowRoot;
-    assert.match(shadow.querySelector('.ku-embed-strip').textContent, /Судзу[\s\S]*найдена по персоне/);
+    assert.equal(shadow.querySelector('.ku-aupop'), null, 'closed until the button is pressed');
+    shadow.querySelector('.ku-cfoot-au').click();
     const box = shadow.querySelector('input[aria-label="АУ «Универ» включено в этом чате"]');
     assert.equal(box.checked, true);
     const second = shadow.querySelector('input[aria-label="АУ «Мафия» включено в этом чате"]');
@@ -558,8 +561,6 @@ test('persona window: the AU of the chat are switched in the strip, «Откры
     second.dispatchEvent(new window.Event('change'));
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.deepEqual(calls.at(-1), ['au', { id: 'au2', on: true }], 'several AU can be on at once');
-    [...shadow.querySelectorAll('button')].find(item => item.textContent === 'Открыть карточку').click();
-    assert.deepEqual(opened, ['suzu.png']);
     assert.ok(!NAV_TABS.some(([id]) => id === 'personas'), 'no page «Персоны» in the Studio any more');
   } finally { studio?.destroy(); place.remove(); }
 });
@@ -588,8 +589,9 @@ test('persona window, the embedded card: the looks are described from a picture,
     assert.ok(shadow.querySelector('[aria-label="Внешность по картинке"] select[aria-label="Чем описывать"]'), 'the line to choose the model that describes');
     [...shadow.querySelectorAll('[aria-label="Внешность по картинке"] button')].find(item => item.getAttribute('aria-label') === 'Закрыть').click();
     assert.equal(shadow.querySelector('[aria-label="Внешность по картинке"]'), null);
-    const nav = [...shadow.querySelectorAll('.ku-cnav')].find(node => node.textContent.startsWith('Записи о персоне'));
-    assert.ok(nav, 'the records of the persona are a part of her card');
+    assert.ok(shadow.querySelector('.ku-cnavgroup .ku-cnav-add'), 'the records of the persona: a title with a plus, the records go below as a list');
+    const nav = [...shadow.querySelectorAll('.ku-crec')].find(node => node.textContent.startsWith('Рэн видит в ней сестру'));
+    assert.ok(nav, 'a record is a row of the list, named by its text');
     nav.click();
     const field = shadow.querySelector('textarea[aria-label="Запись 1"]');
     assert.equal(field.value, 'Рэн видит в ней сестру');
@@ -628,7 +630,8 @@ test('calendar page: month grid with events, a day, the editor and the generator
     const shadow = studio.element.shadowRoot;
     assert.equal(shadow.querySelectorAll('.ku-cal-cell').length, 42);
     assert.ok(shadow.querySelector('.ku-cal-cell.today.must'), 'today is marked, with a must event');
-    assert.match(shadow.textContent, /Апрель 2025/);
+    assert.equal(shadow.querySelector('select.ku-cal-pick[aria-label="Месяц"]').selectedOptions[0].textContent, 'Апрель', 'the month and the year are chosen apart');
+    assert.equal(shadow.querySelector('select.ku-cal-pick[aria-label="Год"]').value, '2025');
     assert.match(shadow.textContent, /10:00 · Контрольная по анатомии/);
     assert.match(shadow.textContent, /Сегодня в истории: вторник, 8 апреля 2025 \(день 2\)/);
     [...shadow.querySelectorAll('button')].find(item => item.textContent === '+ Событие').click();
@@ -900,7 +903,9 @@ test('own calendar: the grid follows its weekdays and months, dates are typed as
     assert.deepEqual(errors, [], errors.join('\n'));
     const root = studio.element.shadowRoot;
     assert.deepEqual([...root.querySelectorAll('.ku-cal-head')].map(node => node.textContent), ['Пе', 'Вт', 'Тр', 'Че', 'Пя']);
-    assert.match(root.querySelector('.ku-cal-title').textContent, /Цветов 14 эры Огня/);
+    assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Месяц"]').selectedOptions[0].textContent, 'Цветов');
+    assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Год"]').value, '14');
+    assert.match(root.textContent, /эры Огня/);
     // Month 2 of year 14 has 25 days in a five-day week: five full rows, and day 3 is marked.
     assert.equal(root.querySelectorAll('.ku-cal-cell').length, 25);
     assert.ok(root.querySelector('.ku-cal-cell.today.must'));
@@ -921,10 +926,12 @@ test('own calendar: the grid follows its weekdays and months, dates are typed as
     assert.match(root.querySelector('.ku-cal-layer').textContent, /Шаблоны и генератор года сделаны для земного календаря/);
     root.querySelector('.ku-cal-layer button[title="Закрыть"]').click();
     assert.equal(root.querySelector('.ku-cal-layer'), null);
-    // Next month of the last month: the year goes up.
-    const next = [...root.querySelectorAll('button')].find(item => item.getAttribute('title') === 'Следующий месяц');
-    next.click();
-    assert.match(root.querySelector('.ku-cal-title').textContent, /Льдов 15/);
+    // Next month of the last month goes round to the first one: the year stays, it has its own arrows.
+    [...root.querySelectorAll('button')].find(item => item.getAttribute('title') === 'Следующий месяц (год не меняется)').click();
+    assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Месяц"]').selectedOptions[0].textContent, 'Льдов');
+    assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Год"]').value, '14');
+    [...root.querySelectorAll('button')].find(item => item.getAttribute('title') === 'Следующий год').click();
+    assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Год"]').value, '15');
   } finally { studio?.destroy(); }
 });
 
@@ -1192,16 +1199,17 @@ test('headcanons page, the library: records of the library with a type, cards an
     assert.match(text, /Ран · Судзу \(персона\)/, 'the persona is told apart');
     assert.match(text, /сейчас уходит модели/);
     assert.ok([...shadow.querySelectorAll('button')].some(item => item.textContent.startsWith('Напряжение · 1')), 'chips of the types with counts');
-    [...shadow.querySelectorAll('button')].find(item => item.textContent === 'Перенести всё в библиотеку').click();
+    [...shadow.querySelectorAll('button')].find(item => item.textContent === 'Перенести в библиотеку').click();
     assert.equal(calls[0][0], 'migrate');
     assert.match(shadow.textContent, /воспоминаний: 1, хедканонов: 3/, 'what the chat holds, by type');
     [...shadow.querySelectorAll('button')].find(item => item.textContent === '+ Запись').click();
     const field = shadow.querySelector('textarea[aria-label="Текст записи"]');
     field.value = 'Ран провожает её домой';
     field.dispatchEvent(new window.Event('input'));
-    const add = shadow.querySelector('select[aria-label="Добавить героя к записи"]');
-    add.value = 'c1';
-    add.dispatchEvent(new window.Event('change'));
+    [...shadow.querySelectorAll('.ku-bond-form button')].find(item => item.textContent.startsWith('Герои')).click(); // the heroes are ticked in a little window
+    const tick = shadow.querySelector('.ku-bond-form input[aria-label="Ран"]');
+    tick.checked = true;
+    tick.dispatchEvent(new window.Event('change'));
     [...shadow.querySelectorAll('button')].find(item => item.textContent === 'Сохранить').click();
     await new Promise(resolve => setTimeout(resolve, 0));
     const saved = calls.find(call => call[0] === 'save')[1];

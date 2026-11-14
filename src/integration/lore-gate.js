@@ -160,10 +160,10 @@ export function entryKeysHit(entry, text) {
 }
 
 /** In how many sentences of the text each character is named: Map id → count. */
-export function namedSentences(text, people) {
+export function namedSentences(text, people, present = new Set()) {
   const counts = new Map();
   for (const sentence of String(text ?? '').split(/(?<=[.!?…])\s+|\n+/)) {
-    for (const id of namedInText(sentence, people)) counts.set(id, (counts.get(id) ?? 0) + 1);
+    for (const id of namedInText(sentence, people, present)) counts.set(id, (counts.get(id) ?? 0) + 1);
   }
   return counts;
 }
@@ -172,7 +172,7 @@ export function namedSentences(text, people) {
  * Who the text names. Whole capitalised words only, so «Ран» is not found in «охраны» or «рано»;
  * a Russian case ending is allowed («Рана», «Риндо», «Какучо» → «с Раном»).
  */
-export function namedInText(text, people) {
+export function namedInText(text, people, present = new Set()) {
   const source = String(text ?? '');
   const found = new Set();
   if (!source.trim()) return found;
@@ -186,7 +186,15 @@ export function namedInText(text, people) {
     for (const word of words) if (word.startsWith(stem) && word.length >= name.length - 1 && word.length <= name.length + 2) return true;
     return false;
   };
-  for (const entity of people) if ([entity.name, ...(entity.aliases ?? [])].map(lower).some(hit)) found.add(entity.id);
+  // A name two characters share (a surname, a nickname): it names whoever of them is on stage. With none on stage it names nobody, so the sheet of a namesake
+  // who is not in the chat does not come along just because the other one was written about.
+  const owners = new Map();
+  const namesOf = entity => [...new Set([entity.name, ...(entity.aliases ?? [])].map(lower))];
+  for (const entity of people) for (const name of namesOf(entity)) owners.set(name, (owners.get(name) ?? 0) + 1);
+  const here = present instanceof Set ? present : new Set(present);
+  for (const entity of people) {
+    if (namesOf(entity).some(name => hit(name) && ((owners.get(name) ?? 0) < 2 || here.has(entity.id)))) found.add(entity.id);
+  }
   return found;
 }
 
@@ -299,8 +307,8 @@ export function planGate({ lists, state, config, presentIds = [], mode = 'calm',
   }
 
   // 2. Who else is in the scene or named in the fresh post (for «pair»): the words their names are written with.
-  const named = namedInText(namedText, people);
-  const inReply = namedSentences(replyText, people);
+  const named = namedInText(namedText, people, present);
+  const inReply = namedSentences(replyText, people, present);
   for (const [id, count] of inReply) if (count >= 2) named.add(id);
   const around = buildAround(people, present, named, inReply, id => sheets.get(id)?.titleNames ?? []);
 

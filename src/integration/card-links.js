@@ -79,12 +79,18 @@ export function cardNameForms(state, library, names, recognitionForms) {
  * character, or the character's own name is one of the aliases of the card. Two aliases that merely coincide
  * (a family name, a shared nickname) tell nothing: otherwise a whole folder of relatives collapsed into one character.
  */
-export function entityCandidates(state, card) {
+export function entityCandidates(state, card, foreignNames = new Set()) {
   const personaId = state.ui?.personaId || '';
-  const entities = Object.values(state.entities ?? {}).filter(entity => entity.id !== personaId);
+  const own0 = normalizeAlias(card.name ?? '');
+  const aliasKeys = new Set((card.aliases ?? []).map(normalizeAlias));
+  // a character already named as another card (and not as this one, nor by its alias) is that card's character, whatever aliases got stuck to them earlier
+  const entities = Object.values(state.entities ?? {}).filter(entity => {
+    if (entity.id === personaId) return false;
+    const key = normalizeAlias(entity.name ?? '');
+    return key === own0 || aliasKeys.has(key) || !foreignNames.has(key);
+  });
   const own = normalizeAlias(card.name ?? '');
-  const aliases = new Set((card.aliases ?? []).map(normalizeAlias));
-  return entities.filter(entity => entityNames(entity).some(name => normalizeAlias(name) === own) || aliases.has(normalizeAlias(entity.name ?? ''))).map(entity => entity.id);
+  return entities.filter(entity => entityNames(entity).some(name => normalizeAlias(name) === own) || aliasKeys.has(normalizeAlias(entity.name ?? ''))).map(entity => entity.id);
 }
 
 /** The character of the chat a card is about: the one whose name is exactly the card's ('' if there is none or several). */
@@ -113,6 +119,13 @@ export function linkCards(state, library, cardIds, pick = {}) {
   const replaced = [];
   const personaName = state.entities?.[state.ui?.personaId]?.name ?? '';
   const taken = new Map([...cardLinks(state)].map(([cardId, entityId]) => [entityId, cardId]));
+  // the names every card of the library is known by: who it belongs to
+  const namesOf = new Map();
+  const nameKeys = card => [...new Set(cardNames(card).map(normalizeAlias))];
+  for (const card of byId.values()) {
+    if (card.persona) continue;
+    for (const key of nameKeys(card)) namesOf.set(key, [...(namesOf.get(key) ?? []), card.id]);
+  }
   for (const cardId of [...new Set(cardIds ?? [])]) {
     const card = byId.get(cardId);
     if (!card || card.persona) continue; // a persona's card is not attached to a character of the chat
@@ -124,7 +137,8 @@ export function linkCards(state, library, cardIds, pick = {}) {
     const chosen = pick[cardId];
     if (chosen && chosen !== '__new' && next.entities?.[chosen] && chosen !== state.ui?.personaId) entityId = chosen;
     else if (!chosen) {
-      const found = entityCandidates(next, card);
+      const foreign = new Set([...byId.values()].filter(other => !other.persona && other.id !== cardId).map(other => normalizeAlias(other.name ?? '')));
+      const found = entityCandidates(next, card, foreign);
       if (found.length > 1) {
         skipped.push({ name: card.name, why: `в чате несколько героев с таким именем (${found.map(id => next.entities[id].name).join(', ')}): выберите нужного в окне карточки` });
         continue;
@@ -136,9 +150,13 @@ export function linkCards(state, library, cardIds, pick = {}) {
       const entity = next.entities[entityId];
       const have = new Set(entityNames(entity).map(normalizeAlias));
       const extra = cardNames(card).filter(name => !have.has(normalizeAlias(name)));
-      if (extra.length) {
+      // names that stuck to this character earlier but belong to other cards only (and not to this one) are let go
+      const mine = new Set(nameKeys(card));
+      const stuck = alias => { const key = normalizeAlias(alias); return !mine.has(key) && (namesOf.get(key) ?? []).some(id => id !== cardId); };
+      const kept = (entity.aliases ?? []).filter(alias => !stuck(alias));
+      if (extra.length || kept.length !== (entity.aliases ?? []).length) {
         const updated = createEntity(entity.name, {
-          id: entity.id, aliases: [...(entity.aliases ?? []), ...extra].slice(0, ALIASES_MAX), avatar: entity.avatar, sourceId: entity.sourceId,
+          id: entity.id, aliases: [...kept, ...extra].slice(0, ALIASES_MAX), avatar: entity.avatar, sourceId: entity.sourceId,
         });
         next = applyOperation(next, createOperation('entity.upsert', updated, meta(`Карточка «${card.name}»: имена добавлены`)));
       }
@@ -157,18 +175,41 @@ export function linkCards(state, library, cardIds, pick = {}) {
     }
     cards[cardId] = entityId;
     taken.set(entityId, cardId);
-    next = { ...next, ui: { ...(next.ui ?? {}), cards } };
+    // A hero that appeared only because of the card is remembered: taking the card off takes him off the stage too (when nothing happened to him).
+    const made = created ? [...new Set([...(next.ui?.cardMade ?? []), entityId])] : (next.ui?.cardMade ?? []);
+    next = { ...next, ui: { ...(next.ui ?? {}), cards, ...(made.length ? { cardMade: made } : {}) } };
     linked.push({ cardId, entityId, created });
   }
   return { state: next, linked, skipped, replaced };
 }
 
 /** Switch cards off in this chat: the attachment goes, the characters stay. */
-export function unlinkCards(state, cardIds) {
+export function unlinkCards(state, cardIds, library = null) {
+  const cardOf = new Map((library?.characters ?? []).map(card => [card.id, card]));
   const cards = { ...(state.ui?.cards ?? {}) };
   let changed = false;
-  for (const cardId of cardIds ?? []) if (cardId in cards) { delete cards[cardId]; changed = true; }
-  return changed ? { ...state, ui: { ...(state.ui ?? {}), cards } } : state;
+  let next = state;
+  let made = [...(state.ui?.cardMade ?? [])];
+  for (const cardId of cardIds ?? []) {
+    if (!(cardId in cards)) continue;
+    const entityId = cards[cardId];
+    delete cards[cardId];
+    changed = true;
+    // The hero was made by this card and has no history (no lines, no events): he leaves the chat with it; otherwise he stays.
+    // Links made before the mark existed have none: a hero with the card's own name that did not come from a tavern character counts as made by it.
+    const entity = next.entities?.[entityId];
+    const old = entity && !entity.sourceId && cardOf.has(cardId) && normalizeAlias(entity.name) === normalizeAlias(cardOf.get(cardId).name);
+    if ((made.includes(entityId) || old) && entity && entityId !== next.ui?.personaId) {
+      const used = Object.values(next.relationships ?? {}).some(relation => relation.from === entityId || relation.to === entityId)
+        || (next.knowledge?.events ?? []).some(event => (event.witnessIds ?? []).includes(entityId));
+      if (!used) next = applyOperation(next, createOperation('entity.remove', { entityId }, meta('Карточку сняли: персонаж без истории убран')));
+      made = made.filter(id => id !== entityId);
+    }
+  }
+  if (!changed) return state;
+  const ui = { ...(next.ui ?? {}), cards };
+  if (made.length) ui.cardMade = made; else delete ui.cardMade;
+  return { ...next, ui };
 }
 
 /** A chat just opened: attachments to cards that left the library or to characters that left the chat are let go. */

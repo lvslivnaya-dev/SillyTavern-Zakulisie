@@ -205,7 +205,7 @@ export function startLorebooks(doc, { context, settings, save, api = loreApi, sh
     win.element.classList.add('pud-busy');
     try { await api.ready(); await task(); } catch (error) {
       report(what, error);
-      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Пудреница');
+      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Закулисье');
     } finally {
       busy = false;
       win.element.classList.remove('pud-busy');
@@ -231,7 +231,7 @@ export function startLorebooks(doc, { context, settings, save, api = loreApi, sh
       if (await api.remove(name)) { forgetBook(settings, name); shared.loreEditor?.removed?.(name); state.checked.delete(name); delete state.counts[name]; done++; }
     }
     save();
-    if (names.length > 1) globalThis.toastr?.success?.(`Удалено: ${done}.`, 'Пудреница');
+    if (names.length > 1) globalThis.toastr?.success?.(`Удалено: ${done}.`, 'Закулисье');
   };
 
   let coverTarget = '';
@@ -279,7 +279,7 @@ export function startLorebooks(doc, { context, settings, save, api = loreApi, sh
       state.renaming = '';
       if (!keep || !newName || newName === oldName) { nameEl.textContent = oldName; schedule(); return; }
       if (newName.toLowerCase() === oldName.toLowerCase() || api.names().some(item => item.toLowerCase() === newName.toLowerCase())) {
-        globalThis.toastr?.warning?.('Лорбук с таким именем уже есть.', 'Пудреница');
+        globalThis.toastr?.warning?.('Лорбук с таким именем уже есть.', 'Закулисье');
         nameEl.textContent = oldName;
         schedule();
         return;
@@ -292,7 +292,7 @@ export function startLorebooks(doc, { context, settings, save, api = loreApi, sh
         if (Object.hasOwn(state.counts, oldName)) { state.counts[newName] = state.counts[oldName]; delete state.counts[oldName]; }
         if (state.checked.delete(oldName)) state.checked.add(newName);
         save();
-        globalThis.toastr?.success?.(`Теперь «${newName}». Ссылки персонажей, персон и чата перевязаны.`, 'Пудреница');
+        globalThis.toastr?.success?.(`Теперь «${newName}». Ссылки персонажей, персон и чата перевязаны.`, 'Закулисье');
       });
     };
     const onKey = event => {
@@ -441,7 +441,7 @@ export function startLorebooks(doc, { context, settings, save, api = loreApi, sh
         try {
           const moved = importLegacyLorebooks(settings, live().extensionSettings?.lorebookManager, await api.files());
           save();
-          if (moved) globalThis.toastr?.info?.('Папки и обложки из My lorebook manager перенесены в окно лорбуков.', 'Пудреница');
+          if (moved) globalThis.toastr?.info?.('Папки и обложки из My lorebook manager перенесены в окно лорбуков.', 'Закулисье');
         } catch (error) { report('перенос из My lorebook manager', error); }
       }
       state.ready = true;

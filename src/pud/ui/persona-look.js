@@ -151,7 +151,7 @@ export function startPersonaLook(doc, { context, settings, save, api = personaAp
     try { await api.ready?.(); await task(); } catch (error) {
       report(what, error);
       say(`${what}: ${error?.message ?? error}`, true);
-      globalThis.toastr?.error?.(`${what}: не получилось. ${error?.message ?? ''}`.trim(), 'Пудреница');
+      globalThis.toastr?.error?.(`${what}: не получилось. ${error?.message ?? ''}`.trim(), 'Закулисье');
     } finally {
       busy = false;
       win.element.classList.remove('pud-busy');
@@ -187,7 +187,7 @@ export function startPersonaLook(doc, { context, settings, save, api = personaAp
     if (!text) throw new Error(lang === 'en' ? 'Сначала переведи текст.' : 'Сначала опиши картинку.');
     await api.update(avatar, { description: putLookBlock(descriptionOf(), text, lang) });
     say(lang === 'en' ? 'Английский блок внешности лежит в описании персоны.' : 'Русский блок внешности лежит в описании персоны.');
-    globalThis.toastr?.success?.('Внешность вставлена в описание персоны.', 'Пудреница');
+    globalThis.toastr?.success?.('Внешность вставлена в описание персоны.', 'Закулисье');
   });
 
   const removeBlock = () => run('Описание персоны', async () => {

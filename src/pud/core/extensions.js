@@ -33,8 +33,9 @@ export function normalize(text) {
  * @param {string[]} disabled
  * @param {Record<string, string>} types
  * @param {Record<string, boolean|null>} updates id → есть ли обновление (null — не проверено)
+ * @param {Record<string, number>} installed id → когда установлено, мс (нет — не узнали)
  */
-export function buildExtensions(names, manifestOf, disabled = [], types = {}, updates = {}) {
+export function buildExtensions(names, manifestOf, disabled = [], types = {}, updates = {}, installed = {}) {
   const off = new Set(disabled);
   return names.map(id => {
     const manifest = manifestOf(id) ?? {};
@@ -49,12 +50,17 @@ export function buildExtensions(names, manifestOf, disabled = [], types = {}, up
       system: type === 'system' || !id.startsWith(PREFIX),
       enabled: !off.has(id),
       update: updates[id] ?? null,
+      installed: Number(installed[id]) || 0,
     };
   });
 }
 
 /** view: ALL | UPDATE | OFF | ORPHANS | id папки | NO_FOLDER. Отключённые и с обновлением — отдельные фильтры. */
-export function filterExtensions(list, settings, { view = ALL, query = '' } = {}) {
+export const SORT_NAME = 'name';
+export const SORT_RECENT = 'recent';
+
+/** sort: SORT_NAME — включённые, потом по алфавиту; SORT_RECENT — сначала самые недавно установленные. */
+export function filterExtensions(list, settings, { view = ALL, query = '', sort = SORT_NAME } = {}) {
   const needle = query.trim().toLowerCase();
   return list.filter(item => {
     if (view === UPDATE && item.update !== true) return false;
@@ -63,7 +69,9 @@ export function filterExtensions(list, settings, { view = ALL, query = '' } = {}
     if (view === NO_FOLDER && inFolder) return false;
     if (![ALL, UPDATE, OFF, NO_FOLDER, ORPHANS].includes(view) && inFolder !== view) return false;
     return !needle || item.name.toLowerCase().includes(needle) || item.folder.toLowerCase().includes(needle) || item.author.toLowerCase().includes(needle);
-  }).sort((a, b) => Number(b.enabled) - Number(a.enabled) || Number(a.system) - Number(b.system) || a.name.localeCompare(b.name, 'ru'));
+  }).sort(sort === SORT_RECENT
+    ? (a, b) => b.installed - a.installed || Number(a.system) - Number(b.system) || a.name.localeCompare(b.name, 'ru')
+    : (a, b) => Number(b.enabled) - Number(a.enabled) || Number(a.system) - Number(b.system) || a.name.localeCompare(b.name, 'ru'));
 }
 
 export function extensionCounts(list, settings) {

@@ -111,7 +111,7 @@ test('«Персонажи»: a maybe pair asks «Это один» / «Разн
     byText('Разные люди').click();
     await flush();
     assert.deepEqual(calls.at(-1), ['onDistinctCharacters', { firstId: kakucho.id, secondId: ran.id }]);
-    byText('Другие имена из лорбука').click();
+    byText('Другие имена').click();
     await flush();
     assert.equal(calls.at(-1)[0], 'onAliasesFromLore');
     shadow.querySelector('.ku-person').click();

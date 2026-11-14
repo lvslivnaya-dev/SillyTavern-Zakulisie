@@ -106,7 +106,7 @@ export function startPersonaSwitch(doc, { context, settings, api = personaApi })
       await refresh();
     } catch (error) {
       report('надеть персону', error);
-      globalThis.toastr?.error?.('Персона не наделась. Подробности в консоли (F12).', 'Пудреница');
+      globalThis.toastr?.error?.('Персона не наделась. Подробности в консоли (F12).', 'Закулисье');
     }
   });
   const onOutside = event => { if (!pop.hidden && !pop.contains(event.target) && !button.contains(event.target)) close(); };

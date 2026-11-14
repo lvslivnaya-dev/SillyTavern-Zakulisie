@@ -8,12 +8,12 @@ import { CALENDAR_LIMITS, REPEATS } from '../core/calendar.js';
 import { parseModelObject, requestStructured } from './analyzer.js';
 
 const SYSTEM = `You plan a realistic calendar of one year of a person's life for a roleplay. Output ONLY valid JSON:
-{"name":"short Russian name of the template","startMonth":4,"events":[{"title":"...","note":"...","date":"MM-DD","endDate":"MM-DD","time":"HH:MM","repeat":"none","weekdays":[1,3],"until":"MM-DD","must":true,"ahead":7,"persona":true}]}
+{"name":"short Russian name of the template","startMonth":4,"events":[{"title":"...","note":"...","date":"MM-DD","endDate":"MM-DD","time":"HH:MM","repeat":"none","weekdays":[1,3],"until":"MM-DD","kind":"holiday","intensity":2,"ahead":7,"persona":true}]}
 - Use the real calendar of that country, institution or job: for a Japanese university the year starts in April (entrance ceremony early April, Golden Week, first-term exams in late July, summer break August–September, the university festival in autumn, second-term exams in January–February, spring break). Fit the specific faculty, year of study or profession: its typical subjects, practicals, internships, deadlines, clubs, part-time work if plausible, and the public holidays and seasonal events that matter there.
 - startMonth: the month (1–12) the described year starts in. Dates are "MM-DD" without a year; a date in a month before startMonth belongs to the next calendar year.
 - repeat: "none" (once or a span with endDate), "weekly" (with weekdays, 1 = Monday … 7 = Sunday, and "until" for the end of the term), "yearly", "daily". Weekly classes: a few main ones, not every lesson.
 - title: Russian, at most 80 characters. note: Russian, at most 200 characters, concrete details that make the day vivid (what is tested, where, who is strict, what to bring).
-- must: true for what certainly happens and involves the person (exams, practicals, ceremonies, deadlines); false for background (holidays, city festivals, sales, weather events).
+- kind: "holiday" (public holidays, festivals), "birthday", "quest" (an obligation that must be done: exams, practicals, deadlines, lectures) or "sentimental" (a day with a special weight for the person). intensity: 1 slight (a city sale), 2 noticeable (a holiday), 3 major (an exam, a wedding anniversary).
 - ahead: how many days before it the person already knows and thinks about it (exams 7–10, festivals 3–5, classes 0).
 - persona: true when the event concerns the described person.
 - 20 to 45 events, spread over the whole year. Return JSON only.`;
@@ -39,7 +39,9 @@ export function parseCalendarTemplate(raw) {
       if (weekdays.length) event.weekdays = weekdays;
     }
     if (repeat !== 'none' && MONTH_DAY.test(clip(item.until, 5))) event.until = clip(item.until, 5);
-    if (item.must === true) event.must = true;
+    if (['holiday', 'birthday', 'quest', 'sentimental'].includes(item.kind)) event.kind = item.kind;
+    if ([1, 2, 3].includes(Math.round(Number(item.intensity)))) event.intensity = Math.round(Number(item.intensity));
+    if (item.must === true && !event.kind) event.kind = 'quest';
     const ahead = Math.round(Number(item.ahead));
     if (ahead > 0) event.ahead = Math.min(CALENDAR_LIMITS.ahead, ahead);
     if (item.persona === true) event.persona = true;

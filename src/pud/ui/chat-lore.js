@@ -14,7 +14,7 @@ const escapeHtml = text => String(text ?? '').replace(/[&<>"']/g, ch => ({ '&': 
 const KIND_ICON = { global: 'fa-globe', card: 'fa-address-card', extra: 'fa-book-bookmark', persona: 'fa-user', chat: 'fa-passport' };
 
 /** Что таверна знает о лорбуках открытого чата. */
-function gather(persona) {
+function gather(persona, zak = null) {
   const ctx = globalThis.SillyTavern.getContext();
   const power = ctx.powerUserSettings ?? {};
   let cards = [];
@@ -31,6 +31,7 @@ function gather(persona) {
     persona: avatar ? { avatar, name: String(power.personas?.[avatar] ?? avatar), book: String(power.persona_descriptions?.[avatar]?.lorebook ?? power.persona_description_lorebook ?? '') } : null,
     chat: persona.chatBook(),
     known: loreApi.names(),
+    zak: zak ? new Set(zak.linked()) : null,
   };
 }
 
@@ -45,11 +46,16 @@ function chip(name, data) {
 
 function render(box, sources) {
   const names = sources.known;
+  const zak = sources.zak;
   const books = chatLoreBooks(sources);
-  const summary = books.length
-    ? books.map(book => `<li class="pud-clore-book${book.missing ? ' missing' : ''}">
+  // Books only Kulisy reads (the tavern does not send them) stand in the same list, with a warning.
+  const only = zak ? [...zak].filter(name => !books.some(book => book.name === name)).map(name => ({ name, via: [], missing: names.length > 0 && !names.includes(name), zakOnly: true })) : [];
+  const zakSwitch = book => zak ? `<label class="pud-clore-zak" title="Закулисье читает эту книгу само: анализ ответов, поиск героев, секреты. Модели записи отправляет таверна, а не Закулисье."><input type="checkbox" data-zak="${escapeHtml(book.name)}" ${zak.has(book.name) ? 'checked' : ''}> читает Закулисье</label>` : '';
+  const summary = books.length || only.length
+    ? [...books, ...only].map(book => `<li class="pud-clore-book${book.missing ? ' missing' : ''}">
         <button type="button" class="pud-clore-open" data-open="${escapeHtml(book.name)}" title="Открыть в редакторе">${escapeHtml(book.name)}</button>
-        <span class="pud-clore-via">${book.via.map(item => `<span class="pud-clore-tag"><i class="fa-solid ${KIND_ICON[item.kind]}"></i> ${escapeHtml(item.label)}</span>`).join('')}</span>
+        <span class="pud-clore-via">${book.via.map(item => `<span class="pud-clore-tag"><i class="fa-solid ${KIND_ICON[item.kind]}"></i> ${escapeHtml(item.label)}</span>`).join('')}${book.zakOnly ? '<span class="pud-clore-tag warn" title="Закулисье её читает, но таверна модели не отправляет: подключите её ниже, в «Где подключены»">только Закулисье</span>' : ''}</span>
+        ${zakSwitch(book)}
         ${book.missing ? '<span class="pud-hint">файла нет — таверна его пропустит</span>' : duplicateNote(book) ? `<span class="pud-hint">${duplicateNote(book)}</span>` : ''}
       </li>`).join('')
     : '<li class="pud-hint">В этом чате не работает ни один лорбук.</li>';
@@ -62,6 +68,7 @@ function render(box, sources) {
     </div>`).join('');
   box.innerHTML = `<h3>Лорбуки этого чата</h3>
     <ul class="pud-clore-list">${summary}</ul>
+    ${zak ? `<div class="pud-clore-row"><span class="pud-clore-label"><i class="fa-solid fa-masks-theater"></i> Читает Закулисье</span>${addSelect('zak', [...zak], '')}<span class="pud-hint">добавить книгу в чтение</span></div>` : ''}
     <h4>Где подключены</h4>
     <div class="pud-clore-row">
       <span class="pud-clore-label"><i class="fa-solid fa-globe"></i> Глобально</span>
@@ -82,19 +89,22 @@ function render(box, sources) {
 }
 
 export async function openChatLore(doc, { persona = personaApi, chars = characterApi, lore = loreApi, shared = {} } = {}) {
+  const zak = shared.kulisyLore ?? null;
   await Promise.all([persona.ready(), chars.ready(), lore.ready()]);
   const ctx = globalThis.SillyTavern?.getContext?.();
-  if (!ctx || !persona.hasChat()) { globalThis.toastr?.info?.('Сначала открой чат.', 'Пудреница'); return; }
+  if (!ctx || !persona.hasChat()) { globalThis.toastr?.info?.('Сначала открой чат.', 'Закулисье'); return; }
   const box = doc.createElement('div');
   box.className = 'pud-ask pud-clore';
-  const redraw = () => render(box, gather(persona));
+  const redraw = () => render(box, gather(persona, zak));
   const run = async (what, task) => {
-    try { await task(); } catch (error) { report(`лорбуки чата: ${what}`, error); globalThis.toastr?.error?.(String(error?.message ?? error), 'Пудреница'); }
+    try { await task(); } catch (error) { report(`лорбуки чата: ${what}`, error); globalThis.toastr?.error?.(String(error?.message ?? error), 'Закулисье'); }
     redraw();
   };
   box.addEventListener('change', event => {
     const target = event.target;
     const value = target.value;
+    if (target.dataset.zak && zak) { run('чтение Закулисья', () => (target.checked ? zak.link(target.dataset.zak) : zak.unlink(target.dataset.zak))); return; }
+    if (target.dataset.add === 'zak' && value && zak) { run('чтение Закулисья', () => zak.link(value)); return; }
     if (target.dataset.add === 'global' && value) run('глобально', () => lore.setGlobal(doc, value, true));
     else if (target.dataset.add === 'extra' && value) run('доп. лорбук', () => persona.setExtraBooks(target.dataset.avatar, [...persona.extraBooks(target.dataset.avatar), value]));
     else if (target.dataset.set === 'card') run('лорбук персонажа', () => chars.setWorld(target.dataset.avatar, value));

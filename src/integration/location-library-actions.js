@@ -293,7 +293,7 @@ export function createLibraryCallbacks(deps) {
           return result.linked.length;
         }
         const attached = new Set(cardLinks(before).keys());
-        const after = unlinkCards(before, ids);
+        const after = unlinkCards(before, ids, library.get());
         if (after !== before) await deps.replaceState(after);
         return ids.filter(cardId => attached.has(cardId)).length;
       }
@@ -359,7 +359,7 @@ export function createLibraryCallbacks(deps) {
       const folderId = folderFor('', 'Временные');
       let card = null;
       for (let attempt = 0; attempt < 5 && !card; attempt += 1) {
-        try { card = addLibraryCharacter(library.get(), { folderId, name: attempt ? `${entity.name} (${attempt + 1})` : entity.name, aliases: (entity.aliases ?? []).slice(0, 10) }); }
+        try { card = addLibraryCharacter(library.get(), { folderId, name: attempt ? `${entity.name} (${attempt + 1})` : entity.name, aliases: (entity.aliases ?? []).slice(0, 10), gender: before.ui?.genders?.[entityId] ?? '' }); }
         catch (error) { if (attempt === 4 || !/уже есть карточка/.test(error?.message ?? '')) throw error; }
       }
       library.set(card.library);
@@ -596,6 +596,11 @@ export function createLibraryCallbacks(deps) {
       const image = await deps.upload(imageDataUrl, uniqueId(IDS[kind] ?? 'place'));
       const entry = await change(kind, id, { image });
       await forgetImages([old]);
+      // A persona's card: her picture is also her avatar in SillyTavern (the chat, its own lists), so it goes there too.
+      if (kind === 'characters' && entry?.persona && entry.avatar && deps.setPersonaAvatar) {
+        try { await deps.setPersonaAvatar(entry.avatar, imageDataUrl); }
+        catch (error) { deps.log?.('warn', `Картинка карточки «${entry.name}» не стала аватаром персоны в таверне`, error); }
+      }
       return entry;
     },
     onLibraryRemoveImage: async ({ kind = 'places', id }) => {

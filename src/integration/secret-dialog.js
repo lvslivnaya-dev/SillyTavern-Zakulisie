@@ -153,9 +153,9 @@ export async function openSecretDialog(ctx, options) {
     onOpen: () => { if (source.value.trim() && !(label.value.trim() && detail.value.trim())) run(); else if (!source.value.trim()) source.focus(); },
     onClosing: closing => {
       if (closing.result !== ctx.POPUP_RESULT.AFFIRMATIVE) return true;
-      if (ui.busy) { globalThis.toastr?.info?.('Подожди, секрет ещё составляется.', 'Кулисы'); return false; }
-      if (!label.value.trim() || !detail.value.trim()) { globalThis.toastr?.warning?.('Нужны подпись и подробности.', 'Кулисы'); return false; }
-      if (!known.size) { globalThis.toastr?.warning?.('Отметь хотя бы одного, кто знает секрет.', 'Кулисы'); return false; }
+      if (ui.busy) { globalThis.toastr?.info?.('Подожди, секрет ещё составляется.', 'Закулисье'); return false; }
+      if (!label.value.trim() || !detail.value.trim()) { globalThis.toastr?.warning?.('Нужны подпись и подробности.', 'Закулисье'); return false; }
+      if (!known.size) { globalThis.toastr?.warning?.('Отметь хотя бы одного, кто знает секрет.', 'Закулисье'); return false; }
       return true;
     },
   });

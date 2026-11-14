@@ -131,7 +131,7 @@ export function createRelationshipWidget(options = {}) {
 
     const body = element('div', { className: 'body' });
     // The Studio button sits on top so a long list never has to be scrolled to reach it.
-    const openButton = button(options.openLabel || 'Открыть Кулисы', 'open', () => {
+    const openButton = button(options.openLabel || 'Открыть Закулисье', 'open', () => {
       facade.invoke('onOpenStudio', { pairId: selectedPairId, pair });
       emit('open-studio', { pairId: selectedPairId, pair });
     });

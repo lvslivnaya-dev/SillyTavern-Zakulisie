@@ -37,6 +37,49 @@ export function button(label, className, onClick, title = label) {
 }
 
 /**
+ * The round «?» that keeps a long explanation out of the way: a click unfolds the text under it, another folds it back.
+ * `note` is the element that unfolds (it starts hidden); the dot is returned.
+ */
+export function infoDot(note, label = 'Пояснение') {
+  note.hidden = true;
+  note.classList.add('ku-info-note');
+  const dot = element('button', { type: 'button', className: 'ku-info-dot', text: '?', title: label, 'aria-label': label, 'aria-expanded': 'false' });
+  dot.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    note.hidden = !note.hidden;
+    dot.setAttribute('aria-expanded', String(!note.hidden));
+  });
+  return dot;
+}
+
+/** A title with the round «?» after it and its explanation folded under: [title ?] / text. */
+export function infoRow(title, text, tag = 'div') {
+  const note = element('p', { className: 'ku-hint', text });
+  const head = element(tag, { className: 'ku-inforow' }, [typeof title === 'string' ? element('span', { className: 'ku-inforow-title', text: title }) : title]);
+  head.append(infoDot(note, 'Пояснение'));
+  return element('div', { className: 'ku-infowrap' }, [head, note]);
+}
+
+const HINT_ANCHORS = 'h2,h3,h4,h5,.section-title,.ku-ctitlerow,.ku-ctitle,.ku-inforow-title,summary,label.ku-title';
+
+/**
+ * Every long «.ku-hint» paragraph under `root` folds into a round «?»: the dot stands at the end of the heading above the text
+ * (or alone, on a line of its own, when there is no heading). Short notes and the ones marked `.keep` stay as they are.
+ */
+export function collapseHints(root, minLength = 60) {
+  if (!root?.querySelectorAll) return;
+  for (const note of root.querySelectorAll('p.ku-hint:not(.keep):not(.ku-info-note), p.muted.ku-small:not(.keep), p.muted[style*="font-size"]:not(.keep):not(.factors-status)')) {
+    if (note.closest('.ku-info-note') || (note.textContent ?? '').trim().length < minLength) continue;
+    const before = note.previousElementSibling;
+    const anchor = before?.matches?.(HINT_ANCHORS) ? before : null;
+    const dot = infoDot(note, 'Пояснение');
+    if (anchor) anchor.append(dot);
+    else note.before(element('div', { className: 'ku-inforow alone' }, [dot]));
+  }
+}
+
+/**
  * Dropdown drawn by the extension itself: a native <select> popup cannot be
  * themed (colors, scrollbar), this one inherits the Studio's theme variables.
  * options: [{ value, label }]; onChange(value) fires only on a real change.

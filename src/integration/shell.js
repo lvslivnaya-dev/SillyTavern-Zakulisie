@@ -10,7 +10,7 @@ export function mountExtensionShell({ settings, onOpenStudio, onSettingsChanged,
   menu.className = 'list-group-item flex-container flexGap5 interactable';
   menu.tabIndex = 0;
   menu.setAttribute('role', 'button');
-  menu.innerHTML = '<i class="fa-solid fa-masks-theater"></i><span>Кулисы</span>';
+  menu.innerHTML = '<i class="fa-solid fa-masks-theater"></i><span>Закулисье</span>';
   menu.addEventListener('click', onOpenStudio);
   menu.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') onOpenStudio();
@@ -22,16 +22,16 @@ export function mountExtensionShell({ settings, onOpenStudio, onSettingsChanged,
   root.innerHTML = `
     <div class="inline-drawer">
       <div class="inline-drawer-toggle inline-drawer-header">
-        <b>Кулисы</b>
+        <b>Закулисье</b>
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
       </div>
       <div class="inline-drawer-content">
-        <label class="checkbox_label"><input type="checkbox" data-setting="enabled"><span>Включить Кулисы</span></label>
+        <label class="checkbox_label"><input type="checkbox" data-setting="enabled"><span>Включить Закулисье</span></label>
         <label class="checkbox_label"><input type="checkbox" data-setting="injectPrompt"><span>Учитывать отношения при генерации ответа</span></label>
         <label class="checkbox_label"><input type="checkbox" data-setting="autoAnalyze"><span>Автоматически анализировать новые ответы</span></label>
         <label class="checkbox_label"><input type="checkbox" data-setting="widget.visible"><span>Показывать компактный виджет</span></label>
         <label class="ku-label"><span>Порог подтверждения крупных изменений</span><input class="text_pole" type="number" min="1" max="25" data-setting="largeChangeThreshold"></label>
-        <button type="button" class="menu_button" data-action="open-studio"><i class="fa-solid fa-up-right-from-square"></i> Открыть Кулисы</button>
+        <button type="button" class="menu_button" data-action="open-studio"><i class="fa-solid fa-up-right-from-square"></i> Открыть Закулисье</button>
         <div data-conflicts></div>
       </div>
     </div>`;
@@ -85,10 +85,10 @@ export function mountTopBarButton({ onToggle }) {
   toggle.className = 'ku-topbar-toggle';
   const iconNode = document.createElement('div');
   iconNode.className = 'drawer-icon fa-solid fa-masks-theater fa-fw closedIcon interactable';
-  iconNode.title = 'Кулисы';
+  iconNode.title = 'Закулисье';
   iconNode.tabIndex = 0;
   iconNode.setAttribute('role', 'button');
-  iconNode.setAttribute('aria-label', 'Кулисы');
+  iconNode.setAttribute('aria-label', 'Закулисье');
   iconNode.setAttribute('aria-pressed', 'false');
   const run = event => {
     event.preventDefault();

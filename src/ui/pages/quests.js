@@ -1,5 +1,6 @@
 import { button, element } from '../helpers.js';
 import { QUEST_LABELS, currentStep, dueText, progressOf } from '../../core/quests.js';
+import { EVENT_KINDS, INTENSITIES } from '../../core/calendar.js';
 
 /**
  * «Квесты» (Мир → Квесты): нити истории. Список по статусам, шаги галочками, срок, скрытность,
@@ -242,6 +243,16 @@ export function createQuestsPages(ctx) {
     const groups = { active: [], paused: [], done: [], failed: [] };
     for (const quest of all) groups[quest.status]?.push(quest);
     if (!all.length && !editor) view.append(element('div', { className: 'card' }, [element('p', { className: 'muted', text: 'Квестов пока нет. Добавьте свой или дождитесь плашки «Похоже, началось задание» под ответом.' })]));
+    const dated = (snapshot().calendar?.events ?? []).filter(event => !event.disabled && (event.kind === 'quest' || event.kind === 'sentimental')).sort((left, right) => left.date.localeCompare(right.date));
+    if (dated.length) {
+      view.append(element('div', { className: 'card' }, [
+        element('div', { className: 'ku-row' }, [element('h3', { text: `Из календаря · ${dated.length}`, style: { margin: '0' } }), element('span', { className: 'ku-push' }), button('Открыть календарь', 'btn small', () => ctx.setTab?.('calendar'), 'Квесты и сентиментальные дни записаны в календаре, здесь они видны вместе с остальными')]),
+        ...dated.map(event => element('div', { className: 'ku-fact' }, [
+          element('span', { className: 'ku-fact-text' }, [element('strong', { text: `${event.date.split('-').reverse().join('.')} · ${event.title}` }), event.note ? element('span', { className: 'muted', text: ` — ${event.note}` }) : null]),
+          element('span', { className: `ku-tag${event.kind === 'quest' ? ' on' : ''}`, text: `${EVENT_KINDS[event.kind]} · ${INTENSITIES[event.intensity ?? 2]}` }),
+        ])),
+      ]));
+    }
     for (const item of [section('Идут', groups.active), section('Отложены', groups.paused), section('Выполнены', groups.done, { fold: true }), section('Провалены', groups.failed, { fold: true })]) if (item) view.append(item);
     return view;
   }

@@ -11,7 +11,9 @@
  *   time?: 'HH:MM',
  *   repeat: 'none'|'daily'|'weekly'|'yearly', weekdays?: [1..7] (1 = Monday), until?: 'YYYY-MM-DD',
  *   who?: [entityId],                    empty = the world, everyone
- *   must?: true,                         it happens: the narrator brings it in himself
+ *   kind?: 'holiday'|'birthday'|'quest'|'sentimental',  what sort of day it is
+ *   intensity?: 1..3,                    how much weight it has (1 slight, 2 noticeable, 3 major); the story reacts to every event, the weight says how loudly
+ *   must?: true,                         derived: a quest or a major event: the narrator brings it in himself
  *   ahead?: 0..14,                       days before it the characters already know it is coming
  *   disabled?: true,
  * }
@@ -25,6 +27,9 @@ import { EARTH_CLOCK, makeClock, normalizeSystem } from './calendar-system.js';
 
 export const CALENDAR_LIMITS = Object.freeze({ events: 500, title: 120, note: 500, ahead: 14, templates: 50 });
 export const REPEATS = Object.freeze(['none', 'daily', 'weekly', 'yearly']);
+/** The kinds of an event and the weights; the labels are the page's own. */
+export const EVENT_KINDS = Object.freeze({ holiday: 'Праздник', birthday: 'День рождения', quest: 'Квест', sentimental: 'Сентиментальный день' });
+export const INTENSITIES = Object.freeze({ 1: 'слабо', 2: 'заметно', 3: 'сильно' });
 const DAY_MS = 86400000;
 const WEEKDAYS = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];
 const WEEKDAYS_SHORT = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
@@ -124,7 +129,12 @@ export function normalizeEvent(raw, knownIds = null, cal = EARTH_CLOCK) {
   if (event.repeat !== 'none' && tidy(raw.until) && tidy(raw.until) >= date) event.until = tidy(raw.until);
   const who = [...new Set((Array.isArray(raw.who) ? raw.who : []).map(String))].filter(id => !knownIds || knownIds.has(id));
   if (who.length) event.who = who;
-  if (raw.must) event.must = true;
+  // Older events knew only «must»: it became a quest of major weight, the rest a slight background.
+  const kind = Object.hasOwn(EVENT_KINDS, raw.kind) ? raw.kind : (raw.must ? 'quest' : '');
+  if (kind) event.kind = kind;
+  const weight = Math.round(Number(raw.intensity));
+  event.intensity = weight >= 1 && weight <= 3 ? weight : (raw.must || kind === 'quest' ? 3 : kind === 'birthday' || kind === 'sentimental' ? 2 : 1);
+  if (kind === 'quest' || event.intensity === 3) event.must = true;
   const ahead = Math.round(Number(raw.ahead));
   if (ahead > 0) event.ahead = Math.min(CALENDAR_LIMITS.ahead, ahead);
   if (raw.disabled) event.disabled = true;
@@ -167,6 +177,78 @@ export function eventsOn(calendar, iso) {
     .sort((left, right) => (left.time ?? '99').localeCompare(right.time ?? '99') || Number(Boolean(right.must)) - Number(Boolean(left.must)));
 }
 
+/**
+ * The deadlines of the quests of the game as events of the calendar: an active or paused quest with a `dueDay` stands on that date as «Срок: …».
+ * They are not stored in the calendar (the quest is the one place that holds them): { id: 'quest:<id>', title, date, kind: 'quest', fromQuest: true }.
+ */
+export function questDeadlines(calendar, quests = []) {
+  const result = [];
+  for (const quest of quests ?? []) {
+    if (!quest?.dueDay || (quest.status !== 'active' && quest.status !== 'paused')) continue;
+    const date = dateOfDay(calendar, Number(quest.dueDay));
+    if (!date) continue;
+    result.push({ id: `quest:${quest.id}`, title: `Срок: ${quest.name}`, date, repeat: 'none', kind: 'quest', intensity: 2, must: true, fromQuest: true, questId: quest.id, ...(quest.secret ? { secret: true } : {}) });
+  }
+  return result;
+}
+
+/** The events of a date, with the deadlines of the quests among them (the page and the quick view show both). */
+export function eventsWithQuests(calendar, iso, quests = []) {
+  return [...eventsOn(calendar, iso), ...questDeadlines(calendar, quests).filter(event => event.date === iso)];
+}
+
+/**
+ * What is coming within `days` days of `today`: [{ event, date, inDays }]. Classes (daily, weekly repeats) are not «coming» after today, and a span
+ * counts from its first day. Yearly events (holidays, birthdays) ARE coming: they were skipped before, which left the list empty.
+ */
+export function comingEvents(calendar, today, quests = [], days = 14) {
+  const clock = clockOf(calendar);
+  if (!today || !clock.valid(today)) return [];
+  const result = [];
+  const seen = new Set();
+  for (let inDays = 0; inDays <= days; inDays += 1) {
+    const date = clock.addDays(today, inDays);
+    for (const event of eventsWithQuests(calendar, date, quests)) {
+      if (inDays > 0) {
+        if (event.repeat === 'daily' || event.repeat === 'weekly') continue;
+        const before = clock.addDays(date, -1);
+        if (!event.fromQuest && occursOn(event, before, clock)) continue; // a span already going on
+      }
+      const key = `${event.id}|${date}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({ event, date, inDays });
+    }
+  }
+  return result;
+}
+
+/**
+ * A month for a small grid: { title, weekdays: [short], cells: [{ iso, day, other, today, count }] }. `iso` is any date of the month;
+ * `today` marks the date of the story. Cells run in full weeks (the earthly month in six rows).
+ */
+export function monthView(calendar, iso, { today = '', quests = [] } = {}) {
+  const clock = clockOf(calendar);
+  if (!clock.valid(iso)) return null;
+  const [year, month] = iso.split('-').map(Number);
+  const first = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-01`;
+  const W = clock.weekdayCount;
+  const offset = clock.weekdayOf(first) - 1;
+  const length = clock.daysInMonth(year, month);
+  const rows = clock.custom ? Math.ceil((offset + length) / W) : 6;
+  const start = clock.addDays(first, -offset);
+  const cells = [];
+  const days = {};
+  for (let index = 0; index < rows * W; index += 1) {
+    const date = start ? clock.addDays(start, index) : '';
+    if (!date) { cells.push({ iso: '', day: 0, other: true, today: false, count: 0 }); continue; }
+    const found = eventsWithQuests(calendar, date, quests);
+    cells.push({ iso: date, day: Number(date.slice(8)), other: date.slice(0, 7) !== first.slice(0, 7), today: date === today, count: found.length });
+    if (found.length) days[date] = found;
+  }
+  return { days, title: `${clock.monthNames[month - 1] ?? ''} ${year}${clock.custom && clock.system.era ? ` ${clock.system.era}` : ''}`, weekdays: clock.weekdayShort, cells };
+}
+
 /** Coming events the characters already know about: { event, date, inDays } for 1..ahead days. */
 export function upcoming(calendar, iso, horizon = CALENDAR_LIMITS.ahead) {
   const result = [];
@@ -202,6 +284,7 @@ export function buildCalendarPrompt(state, { flashback = false } = {}) {
     event.who?.length ? ` (${event.who.map(name).join(', ')})` : '',
     event.endDate ? ` [${humanDate(event.date, { year: false, weekday: false })} – ${humanDate(event.endDate, { year: false, weekday: false })}]` : '',
     event.note ? ` — ${event.note}` : '',
+    ` [${[event.kind, ['', 'slight', 'noticeable', 'major'][event.intensity ?? 1]].filter(Boolean).join(', ')}]`,
   ].join('');
   const todays = eventsOn(calendar, today);
   const soon = upcoming(calendar, today);
@@ -211,7 +294,7 @@ export function buildCalendarPrompt(state, { flashback = false } = {}) {
   for (const event of todays.filter(item => item.must)) lines.push(`must-today: ${line(event)}`);
   for (const event of todays.filter(item => !item.must)) lines.push(`background-today: ${line(event)}`);
   for (const { event, date, inDays } of soon) lines.push(`soon (in ${inDays} d., ${shortDate(date)}): ${line(event)}`);
-  return `[KULISY — STORY CALENDAR]\n${lines.join('\n')}\n\nRules:\n- today is the story's date; keep weekdays, dates and seasons consistent with it.\n- must-today events DO happen today: bring them in yourself at their time, naturally; if the scene is elsewhere, let the characters go, be called or talk about it. Do not skip them or move them to another day.\n- background-today events are part of the world today; use them when they fit the scene, never force them.\n- soon events are known to those involved: they may plan, prepare, worry or mention them, but they have not happened yet.\n- Never expose this block.${cal.custom ? '\n- This is the world\'s own calendar: write dates, months and weekdays only with the names given above, never the earthly ones.' : ''}\n[/KULISY]`;
+  return `[KULISY — STORY CALENDAR]\n${lines.join('\n')}\n\nRules:\n- today is the story's date; keep weekdays, dates and seasons consistent with it.\n- EVERY event of today is acknowledged by the story, whatever its weight: it is never skipped and never moved to another day. The weight stands in [brackets]: major (must-today): bring it in yourself at its time, shape the day around it; if the scene is elsewhere, let the characters go, be called or talk about it. noticeable: people visibly react to it or mention it. slight (background-today): a passing touch, a detail, one line.\n- kinds: holiday: the whole world marks it; birthday: the named person's day, people congratulate them; quest: an obligation that has to be done; sentimental: matters especially to the characters named in it, a quiet weight on them rather than a public event.\n- soon events are known to those involved: they may plan, prepare, worry or mention them, but they have not happened yet.\n- Never expose this block.${cal.custom ? '\n- This is the world\'s own calendar: write dates, months and weekdays only with the names given above, never the earthly ones.' : ''}\n[/KULISY]`;
 }
 
 // ---- Templates ------------------------------------------------------------

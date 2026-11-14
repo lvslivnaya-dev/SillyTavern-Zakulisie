@@ -32,7 +32,10 @@ export function createWardrobePages(ctx) {
   // How the cards are ordered: by section (as always), what is worn first, by character (whose it is), newest first.
   let sortMode = 'section';
   let sortPerson = ''; // in the «by character» order: one person's things only ('' = everyone, grouped)
-  let composing = false;
+  const LOOKS = '__looks'; // the section «Образы»: outfits as collages of their pieces, and the board to put one together
+  let editing = false; // the board of an outfit is open (a new one, or the one of `lookId`)
+  let pickCat = ''; // the section of the picker on the board ('' = all)
+  let pickQuery = '';
   const picked = new Set();
   let lookId = '';
   let lookName = '';
@@ -227,13 +230,11 @@ export function createWardrobePages(ctx) {
   }
 
   function tile(card) {
-    const selected = composing ? picked.has(card.id) : openId === card.id;
-    const node = element('button', { type: 'button', className: `ku-tile${selected ? ' on' : ''}`, 'aria-label': `${cardLabel(card)} — ${composing ? (picked.has(card.id) ? 'убрать из образа' : 'в образ') : 'открыть'}`, 'aria-pressed': composing ? String(picked.has(card.id)) : null });
+    const node = element('button', { type: 'button', className: `ku-tile${openId === card.id ? ' on' : ''}`, 'aria-label': `${cardLabel(card)} — открыть` });
     const picture = card.image
       ? element('img', { className: 'ku-pic', src: imageUrl(card.image), alt: '', loading: 'lazy', draggable: false })
       : element('span', { className: 'ku-pic ku-nopic', 'aria-hidden': 'true' }, [icon('shirt'), element('span', { text: SECTION[card.category] })]);
     node.append(picture);
-    if (composing) node.append(element('span', { className: 'ku-check', 'aria-hidden': 'true' }, picked.has(card.id) ? [icon('check')] : []));
     if (sortMode === 'character') {
       const owners = ownersOf().get(card.id) ?? [];
       if (owners.length) node.append(element('span', { className: 'ku-owner', title: owners.map(person => person.name).join(', '), text: `у: ${owners.length > 1 ? `${owners[0].name} +${owners.length - 1}` : owners[0].name}` }));
@@ -242,8 +243,7 @@ export function createWardrobePages(ctx) {
     if (who.length) node.append(element('span', { className: 'ku-worn', text: who.length > 1 ? `${nameOf(who[0])} +${who.length - 1}` : nameOf(who[0]) }));
     node.append(element('span', { className: 'ku-cap', text: cardLabel(card) }));
     node.addEventListener('click', () => {
-      if (composing) { if (picked.has(card.id)) picked.delete(card.id); else picked.add(card.id); }
-      else { openId = card.id; askReplace = false; draft = null; }
+      openId = card.id; askReplace = false; draft = null;
       render();
     });
     return node;
@@ -316,6 +316,7 @@ export function createWardrobePages(ctx) {
     const view = element('div', { className: 'ku-wardrobe' });
     view.append(sceneStrip());
     const things = section === THINGS;
+    const looksTab = section === LOOKS;
     const cards = wardrobe().cards;
     if (openId && !cards.some(card => card.id === openId)) { openId = ''; draft = null; }
     if (!openId) focusedId = '';
@@ -325,12 +326,11 @@ export function createWardrobePages(ctx) {
     search.addEventListener('change', () => { query = search.value; render(); });
     const auto = element('input', { type: 'checkbox', className: 'ku-switch', checked: describeOnUpload, 'aria-label': 'Описывать картинки сразу' });
     auto.addEventListener('change', () => { describeOnUpload = auto.checked; });
-    if (!things) view.append(element('div', { className: 'ku-row ku-wtools' }, [
+    if (!things && !looksTab) view.append(element('div', { className: 'ku-row ku-wtools' }, [
       seg(Object.entries(WARDROBE_SHELVES), shelf, 'Полка', key => { shelf = key; picked.clear(); lookId = ''; target = ''; render(); }),
       seg(Object.entries(WARDROBE_GENDERS), gender, 'Женское, унисекс или мужское', key => { gender = key; render(); }),
       search,
       sortControls(),
-      button(composing ? 'Готово' : 'Собрать образ', composing ? 'btn primary small' : 'btn small', () => { composing = !composing; if (!composing) { picked.clear(); lookId = ''; lookName = ''; } render(); }),
       filePicker('+ Картинки', { className: 'btn primary small', onFiles: files => addPictures(files) }),
       filePicker('+ Готовый образ', { multiple: false, onFiles: files => addPictures(files, { asOutfit: true }) }),
       button('+ Без картинки', 'btn small', () => attempt(async () => {
@@ -340,7 +340,7 @@ export function createWardrobePages(ctx) {
       element('label', { className: 'ku-inline ku-small', title: 'Сразу просить модель описать новые картинки (тратит запрос на каждую)' }, [auto, 'описывать сразу']),
       ...(snapshot().inbox?.available ? [button(importing ? 'Забираю…' : 'Из папки', 'btn small', importInbox, 'Забрать картинки, которые вы положили в папку «Гардероб» на компьютере')] : []),
     ]));
-    const banner = things ? null : renderInboxBanner();
+    const banner = things || looksTab ? null : renderInboxBanner();
     if (banner) view.append(banner);
 
     const body = element('div', { className: 'ku-wbody' });
@@ -352,31 +352,21 @@ export function createWardrobePages(ctx) {
       node.addEventListener('click', () => { section = key; render(); });
       sections.append(node);
     }
+    const looksCount = wardrobe().looks.filter(look => look.shelf === shelf).length;
+    const looksNode = element('button', { type: 'button', className: `ku-wsb ku-wsb-things${looksTab ? ' on' : ''}`, 'aria-current': looksTab ? 'true' : null, title: 'Готовые образы: что в них входит видно по картинкам. Здесь же образ собирается и надевается.' }, [element('span', { text: 'Образы' }), element('i', { text: String(looksCount) })]);
+    looksNode.addEventListener('click', () => { section = LOOKS; render(); });
     const thingsCount = (snapshot().locationLibrary?.items ?? []).length + (world().items ?? []).filter(item => !item.libraryId).length;
     const thingsNode = element('button', { type: 'button', className: `ku-wsb ku-wsb-things${things ? ' on' : ''}`, 'aria-current': things ? 'true' : null, title: 'Любые предметы, не одежда: телефон, оружие, ноутбук, портсигар… Библиотека и то, что есть только в этом чате' }, [element('span', { text: 'Вещи' }), element('i', { text: String(thingsCount) })]);
     thingsNode.addEventListener('click', () => { section = THINGS; render(); });
-    sections.append(thingsNode);
+    sections.append(looksNode, thingsNode);
     body.append(sections);
     if (things) { body.append(renderThings()); view.append(body); return view; }
+    if (looksTab) { body.append(renderLooksTab()); view.append(body); return view; }
 
     const gallery = element('div', { className: 'ku-wgal' });
-    const looks = wardrobe().looks.filter(look => look.shelf === shelf);
-    if (looks.length) {
-      gallery.append(element('p', { className: 'section-title', text: 'Образы' }), element('div', { className: 'ku-looks' }, looks.map(look => {
-        const node = element('button', { type: 'button', className: `ku-look${lookId === look.id ? ' on' : ''}`, title: composeOutfit(wardrobe(), look.cardIds) }, [
-          element('span', { className: 'ku-mini', 'aria-hidden': 'true' }, look.cardIds.slice(0, 3).map(id => {
-            const card = cards.find(item => item.id === id);
-            return card?.image ? element('img', { src: imageUrl(card.image), alt: '' }) : element('span');
-          })),
-          element('span', { text: look.name }),
-        ]);
-        node.addEventListener('click', () => { composing = true; lookId = look.id; lookName = look.name; picked.clear(); look.cardIds.forEach(id => picked.add(id)); render(); });
-        return node;
-      })));
-    }
     const list = visibleCards();
     const title = element('p', { className: 'section-title', text: `${query.trim() ? 'Найдено' : (section ? SECTION[section] : 'Всё')} · ${list.length}` });
-    if (!composing && list.some(card => card.image)) {
+    if (list.some(card => card.image)) {
       // Every card shown here, described again from its picture: the description only.
       const redo = button(redescribing ? 'Переписываю…' : 'Переписать описания', 'btn small', () => {
         redescribing = true;
@@ -390,7 +380,6 @@ export function createWardrobePages(ctx) {
       redo.disabled = redescribing;
       gallery.append(element('div', { className: 'ku-row' }, [title, element('span', { className: 'ku-push' }), redo]));
     } else gallery.append(title);
-    if (composing) gallery.append(element('p', { className: 'muted ku-small', text: 'Отметьте всё, что войдёт в образ, из любых подразделов. Карточки складываются, а не заменяют друг друга.' }));
     const grid = element('div', { className: 'ku-tiles' }, list.map(tile));
     const drop = filePicker('Перетащите картинки сюда или нажмите', { className: 'ku-tile ku-drop', onFiles: files => addPictures(files) });
     grid.append(drop);
@@ -400,10 +389,9 @@ export function createWardrobePages(ctx) {
     gallery.append(grid);
     if (!cards.length) gallery.append(element('p', { className: 'muted', text: 'Гардероб пуст. Добавьте картинки — по одной вещи или готовый образ целиком. Вставить картинку можно и через Ctrl+V.' }));
     body.append(gallery);
-    if (composing) body.append(renderComposer());
     view.append(body);
     const opened = cards.find(card => card.id === openId);
-    if (opened && !composing) view.append(renderCard(opened, list));
+    if (opened) view.append(renderCard(opened, list));
     return view;
   }
 
@@ -512,7 +500,7 @@ export function createWardrobePages(ctx) {
       element('div', { className: 'ku-row ku-wfoot' }, [
         button('Удалить карточку', 'btn small danger', () => attempt(async () => { const removed = await act('onWardrobeRemoveCard', { cardId: card.id }, 'wardrobe-remove'); if (removed) openId = ''; })),
         element('span', { className: 'ku-push' }),
-        button('В образ…', 'btn small', () => { picked.add(card.id); composing = true; openId = ''; render(); }),
+        button('В образ…', 'btn small', () => { startLook(card.id); openId = ''; render(); }, 'Положить эту вещь в образ: откроется вкладка «Образы»'),
         // «Сохранить» closes the card; a failed save keeps it open with what was typed.
         button('Сохранить', 'btn primary small', () => attempt(async () => { await saveFirst(); openId = ''; askReplace = false; }, 'Карточка сохранена')),
       ]),
@@ -528,47 +516,134 @@ export function createWardrobePages(ctx) {
 
   // ---- The look composer ----------------------------------------------------------
 
-  function renderComposer() {
-    const side = element('aside', { className: 'ku-wside', 'aria-label': 'Образ' });
+  // ---- The outfits: a tab of collages and a board to put one together --------------------
+
+  function startLook(cardId = '', person = '') {
+    section = LOOKS; editing = true; picked.clear(); lookId = ''; lookName = ''; pickCat = ''; pickQuery = '';
+    if (cardId) picked.add(cardId);
+    if (person) target = person;
+  }
+  function openLook(look) {
+    section = LOOKS; editing = true; lookId = look.id; lookName = look.name; pickCat = ''; pickQuery = '';
+    picked.clear();
+    look.cardIds.forEach(id => picked.add(id));
+  }
+  function closeLook() { editing = false; picked.clear(); lookId = ''; lookName = ''; }
+
+  /** An outfit at a glance: up to four of its pieces side by side as one picture, «+N» for the rest. */
+  function collage(cardIds, cards) {
+    const pieces = cardIds.map(id => cards.find(card => card.id === id)).filter(Boolean);
+    const shown = [...pieces.filter(card => card.image), ...pieces.filter(card => !card.image)].slice(0, 4);
+    const box = element('span', { className: `ku-lkcollage n${shown.length}`, 'aria-hidden': 'true' }, shown.map(card => (card.image
+      ? element('img', { src: imageUrl(card.image), alt: '', loading: 'lazy', draggable: false })
+      : element('span', { className: 'ku-lkblank' }, [icon('shirt')]))));
+    if (!shown.length) box.append(element('span', { className: 'ku-lkblank' }, [icon('shirt')]));
+    if (pieces.length > 4) box.append(element('span', { className: 'ku-lkmore', text: `+${pieces.length - 4}` }));
+    return box;
+  }
+
+  function renderLooksTab() {
+    const root = element('div', { className: 'ku-wgal ku-lk' });
     const cards = wardrobe().cards;
-    const chosen = cards.filter(card => picked.has(card.id));
-    side.append(element('p', { className: 'section-title', text: `В образе · ${chosen.length}` }));
-    if (!chosen.length) side.append(element('p', { className: 'muted ku-small', text: 'Пока пусто: отметьте картинки слева.' }));
-    for (const card of cardsOf({ cards: chosen, looks: [] })) {
-      side.append(element('div', { className: 'ku-part' }, [
-        card.image ? element('img', { src: imageUrl(card.image), alt: '' }) : element('span', { className: 'ku-part-blank', 'aria-hidden': 'true' }),
-        element('span', { className: 'ku-part-text' }, [element('strong', { text: cardLabel(card) }), element('span', { className: 'muted ku-small', text: SECTION[card.category] })]),
-        Object.assign(element('button', { type: 'button', className: 'ku-ib', 'aria-label': `Убрать из образа: ${cardLabel(card)}`, title: 'Убрать из образа' }, [icon('close')]), { onclick: () => { picked.delete(card.id); render(); } }),
-      ]));
-    }
-    if (chosen.length) side.append(element('p', { className: 'ku-line ku-small', text: `Рассказчик получит: «${composeOutfit(wardrobe(), [...picked])}» и описания карточек, если хватит места.` }));
-    const name = element('input', { type: 'text', value: lookName, 'aria-label': 'Название образа', placeholder: 'Например: форма Тосвы' });
+    for (const id of [...picked]) if (!cards.some(card => card.id === id)) picked.delete(id);
+    const looks = wardrobe().looks.filter(look => look.shelf === shelf);
+    root.append(element('div', { className: 'ku-row ku-wtools' }, [
+      seg(Object.entries(WARDROBE_SHELVES), shelf, 'Полка', key => { shelf = key; closeLook(); target = ''; render(); }),
+      seg(Object.entries(WARDROBE_GENDERS), gender, 'Женское, унисекс или мужское', key => { gender = key; render(); }),
+      element('span', { className: 'ku-push' }),
+      button('+ Новый образ', 'btn primary small', () => { startLook(); render(); }),
+    ]));
+    root.append(element('p', { className: 'section-title', text: `Образы · ${looks.length}` }));
+    if (!looks.length) root.append(element('p', { className: 'muted', text: 'Образов пока нет. «+ Новый образ»: отметьте вещи по картинкам, и они сложатся в один образ.' }));
+    root.append(element('div', { className: 'ku-lkgrid' }, looks.map(look => {
+      const node = element('button', { type: 'button', className: `ku-lkcard${editing && lookId === look.id ? ' on' : ''}`, title: composeOutfit(wardrobe(), look.cardIds) }, [
+        collage(look.cardIds, cards),
+        element('span', { className: 'ku-lkname', text: look.name || 'Без названия' }),
+        element('span', { className: 'muted ku-small', text: `вещей: ${look.cardIds.length}` }),
+      ]);
+      node.addEventListener('click', () => { openLook(look); render(); });
+      return node;
+    })));
+    if (editing) root.append(renderLookBoard());
+    return root;
+  }
+
+  /** The board: the name, the pieces as pictures (what the outfit is made of), who wears it; under it the picker of every piece. */
+  function renderLookBoard() {
+    const cards = wardrobe().cards;
+    const chosen = cardsOf({ cards: cards.filter(card => picked.has(card.id)), looks: [] });
+    const box = element('section', { className: 'ku-lked', 'aria-label': 'Сборка образа' });
+
+    const name = element('input', { type: 'text', value: lookName, 'aria-label': 'Название образа', placeholder: 'Название образа, например: форма Тосвы' });
     name.addEventListener('input', () => { lookName = name.value; });
-    side.append(element('div', { className: 'field' }, [element('label', { text: 'Название образа' }), name]));
-    const saveLook = button(lookId ? 'Сохранить изменения' : 'Сохранить образ', 'btn small', () => attempt(async () => {
+    const save = button(lookId ? 'Сохранить' : 'Сохранить образ', 'btn primary small', () => attempt(async () => {
       if (lookId) await act('onWardrobeUpdateLook', { lookId, changes: { name: lookName, cardIds: [...picked] } }, 'wardrobe-look');
       else { const look = await act('onWardrobeAddLook', { shelf, name: lookName, cardIds: [...picked] }, 'wardrobe-look'); lookId = look?.id ?? ''; }
     }, 'Образ сохранён'));
-    saveLook.disabled = !chosen.length;
-    side.append(element('div', { className: 'ku-row' }, [saveLook, ...(lookId ? [button('Удалить образ', 'btn small danger', () => attempt(async () => {
-      await act('onWardrobeRemoveLook', { lookId }, 'wardrobe-look');
-      lookId = ''; lookName = ''; picked.clear();
-    }, 'Образ удалён'))] : [])]));
+    save.disabled = !chosen.length;
+    const head = element('div', { className: 'ku-lkhead' }, [
+      name, save,
+      ...(lookId ? [button('Удалить', 'btn small danger', () => attempt(async () => {
+        await act('onWardrobeRemoveLook', { lookId }, 'wardrobe-look');
+        closeLook();
+      }, 'Образ удалён'))] : []),
+      Object.assign(element('button', { type: 'button', className: 'ku-ib', 'aria-label': 'Закрыть сборку', title: 'Закрыть сборку (несохранённое пропадёт)' }, [icon('close')]), { onclick: () => { closeLook(); render(); } }),
+    ]);
+
+    const board = element('div', { className: 'ku-lkboard' }, chosen.length ? chosen.map(card => {
+      const piece = element('div', { className: 'ku-lkpiece' }, [
+        card.image ? element('img', { src: imageUrl(card.image), alt: '', draggable: false }) : element('span', { className: 'ku-lkblank', 'aria-hidden': 'true' }, [icon('shirt')]),
+        element('span', { className: 'ku-lkpiece-cap' }, [element('strong', { text: SECTION[card.category] }), element('span', { text: cardLabel(card) })]),
+      ]);
+      const drop = element('button', { type: 'button', className: 'ku-lkpiece-x', 'aria-label': `Убрать из образа: ${cardLabel(card)}`, title: 'Убрать из образа' }, [icon('close')]);
+      drop.addEventListener('click', () => { picked.delete(card.id); render(); });
+      piece.append(drop);
+      return piece;
+    }) : [element('p', { className: 'ku-lkempty', text: 'Образ пока пуст. Нажимайте на картинки ниже: выбранные вещи появятся здесь.' })]);
 
     const people = wearers();
     if (!people.includes(target)) target = people[0] ?? '';
-    const dress = element('div', { className: 'ku-wear' }, [element('strong', { className: 'ku-small', text: 'Надеть в этом чате' })]);
+    const dress = element('div', { className: 'ku-lkwear' });
     if (!people.length) {
-      dress.append(element('p', { className: 'muted ku-small', text: shelf === 'persona' ? 'Персона не выбрана в этом чате.' : 'В чате пока нет персонажей.' }));
+      dress.append(element('span', { className: 'muted ku-small', text: shelf === 'persona' ? 'Персона не выбрана в этом чате: надеть образ пока некому.' : 'В чате пока нет персонажей: надеть образ пока некому.' }));
     } else {
-      const who = element('select', { 'aria-label': 'Кому' }, people.map(id => element('option', { value: id, text: nameOf(id), selected: id === target })));
+      const who = element('select', { 'aria-label': 'Кому надеть' }, people.map(id => element('option', { value: id, text: nameOf(id), selected: id === target })));
       who.addEventListener('change', () => { target = who.value; });
-      const go = button('Надеть', 'btn primary small', () => attempt(() => act('onWear', { entityId: target, cardIds: [...picked], mode: wearMode }, 'wardrobe-wear'), `${nameOf(target)}: образ надет`));
+      const go = button('Надеть в этом чате', 'btn small', () => attempt(() => act('onWear', { entityId: target, cardIds: [...picked], mode: wearMode }, 'wardrobe-wear'), `${nameOf(target)}: образ надет`));
       go.disabled = !chosen.length;
       dress.append(who, seg([['replace', 'Вместо надетого'], ['add', 'Поверх']], wearMode, 'Как надеть', key => { wearMode = key; render(); }), go);
     }
-    side.append(dress);
-    return side;
+    box.append(element('div', { className: 'ku-lkstick' }, [
+      head, board,
+      ...(chosen.length ? [element('p', { className: 'ku-line ku-small', text: `Рассказчик получит: «${composeOutfit(wardrobe(), [...picked])}» и описания вещей, если хватит места.` })] : []),
+      dress,
+    ]));
+
+    // the picker: every piece of the shelf, by pictures; a click puts it in or takes it out
+    const ofShelf = cardsOf(wardrobe(), { shelf, gender });
+    const search = element('input', { type: 'search', value: pickQuery, placeholder: 'Поиск вещи', 'aria-label': 'Поиск вещи для образа', className: 'ku-search' });
+    search.addEventListener('change', () => { pickQuery = search.value; render(); });
+    const cats = element('div', { className: 'ku-lkcats', role: 'group', 'aria-label': 'Раздел' }, [['', 'Всё'], ...WARDROBE_CATEGORIES].map(([key, label]) => {
+      const count = key ? ofShelf.filter(card => card.category === key).length : ofShelf.length;
+      const chip = element('button', { type: 'button', className: `ku-lkcat${pickCat === key ? ' on' : ''}`, 'aria-pressed': String(pickCat === key) }, [element('span', { text: label }), element('i', { text: String(count) })]);
+      chip.addEventListener('click', () => { pickCat = key; render(); });
+      return chip;
+    }));
+    const pool = pickQuery.trim() ? searchCards(wardrobe(), pickQuery, { shelf }) : ofShelf.filter(card => !pickCat || card.category === pickCat);
+    const grid = element('div', { className: 'ku-lkpick' }, pool.map(card => {
+      const on = picked.has(card.id);
+      const tileNode = element('button', { type: 'button', className: `ku-tile${on ? ' on' : ''}`, 'aria-pressed': String(on), 'aria-label': `${cardLabel(card)} — ${on ? 'убрать из образа' : 'в образ'}` }, [
+        card.image ? element('img', { className: 'ku-pic', src: imageUrl(card.image), alt: '', loading: 'lazy', draggable: false })
+          : element('span', { className: 'ku-pic ku-nopic', 'aria-hidden': 'true' }, [icon('shirt'), element('span', { text: SECTION[card.category] })]),
+        element('span', { className: 'ku-check', 'aria-hidden': 'true' }, on ? [icon('check')] : []),
+        element('span', { className: 'ku-cap', text: cardLabel(card) }),
+      ]);
+      tileNode.addEventListener('click', () => { if (picked.has(card.id)) picked.delete(card.id); else picked.add(card.id); render(); });
+      return tileNode;
+    }));
+    box.append(element('div', { className: 'ku-row ku-lkfind' }, [element('p', { className: 'section-title', text: `Вещи · ${pool.length}` }), element('span', { className: 'ku-push' }), search]), cats, grid);
+    if (!pool.length) box.append(element('p', { className: 'muted', text: pickQuery.trim() ? 'Ничего не нашлось.' : 'В этом разделе пока пусто.' }));
+    return box;
   }
 
   // ---- Ctrl+V of a picture while the wardrobe is open -------------------------------
@@ -655,7 +730,7 @@ export function createWardrobePages(ctx) {
     }
     box.append(button(cards.length ? 'Открыть гардероб' : 'Одеть из гардероба', 'btn small', () => {
       shelf = id === personaId() ? 'persona' : 'characters';
-      composing = true; picked.clear(); target = id; lookId = ''; lookName = '';
+      startLook('', id);
       ctx.setTab('wardrobe');
     }));
     return box;
@@ -689,6 +764,7 @@ export const WARDROBE_STYLE = `
 .ku-wsb i{font-style:normal;font-size:11px;opacity:.8}
 .ku-chatthings{margin-bottom:8px}
 .ku-wsb-things{margin-top:8px;border-top:1px solid var(--k-line);border-radius:0 0 8px 8px}
+.ku-wsb-things+.ku-wsb-things{margin-top:0;border-top:0;border-radius:8px}
 .ku-scenebar{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .ku-schip{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 10px 0 4px;border-radius:999px;border:1px solid var(--k-line);background:transparent;color:var(--k-text);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .ku-schip:hover{background:var(--k-inset)}
@@ -706,7 +782,7 @@ export const WARDROBE_STYLE = `
 .ku-look.on,.ku-look:hover{border-color:var(--k-accent-line)}
 .ku-mini{display:flex;gap:2px}
 .ku-mini img,.ku-mini span{width:20px;height:26px;border-radius:4px;object-fit:cover;background:var(--k-line)}
-.ku-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;border-radius:14px}
+.ku-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:12px;border-radius:14px}
 .ku-tiles.over{outline:2px dashed var(--k-accent);outline-offset:4px}
 .ku-tile{position:relative;padding:0;border:1px solid var(--k-line);border-radius:13px;overflow:hidden;background:var(--k-inset);color:var(--k-text);font:inherit;text-align:left;display:flex;flex-direction:column;cursor:pointer;min-width:0}
 .ku-tile:hover{border-color:var(--k-accent-line)}
@@ -721,7 +797,6 @@ export const WARDROBE_STYLE = `
 .ku-check{position:absolute;top:7px;left:7px;width:22px;height:22px;border-radius:7px;border:2px solid var(--k-text);background:var(--k-panel);display:grid;place-items:center;color:var(--k-accent)}
 .ku-tile.on .ku-check{border-color:var(--k-accent)}
 .ku-drop{border-style:dashed;align-items:center;justify-content:center;min-height:120px;color:var(--k-muted);font-weight:700;font-size:12px;text-align:center;padding:10px;width:100%}
-.ku-wside{width:300px;flex:0 0 auto;display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid var(--k-line);border-radius:14px;background:var(--k-panel);position:sticky;top:0}
 .ku-part{display:flex;align-items:center;gap:10px;padding:6px;border-radius:11px;border:1px solid var(--k-line);background:var(--k-inset);min-width:0}
 .ku-part img,.ku-part-blank{width:34px;height:44px;border-radius:7px;object-fit:cover;flex:0 0 auto;background:var(--k-line)}
 .ku-part-text{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
@@ -730,6 +805,42 @@ export const WARDROBE_STYLE = `
 .ku-wear{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;border:1px solid var(--k-line);background:var(--k-inset)}
 .ku-who{min-height:30px;padding:0 12px;border-radius:20px;border:1px solid var(--k-line);background:var(--k-panel);color:var(--k-text);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
 .ku-who.on{border-color:var(--k-accent);background:var(--k-accent-soft);color:var(--k-accent)}
+.ku-lkgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+.ku-lkcard{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--k-line);border-radius:14px;background:var(--k-inset);color:var(--k-text);font:inherit;text-align:left;cursor:pointer;min-width:0}
+.ku-lkcard:hover{border-color:var(--k-accent-line)}
+.ku-lkcard.on{border-color:var(--k-accent);box-shadow:0 0 0 3px var(--k-accent-soft)}
+.ku-lkname{font-size:13.5px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
+.ku-lkcollage{position:relative;display:grid;gap:3px;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--k-panel)}
+.ku-lkcollage.n0,.ku-lkcollage.n1{grid-template-columns:1fr}
+.ku-lkcollage.n2{grid-template-columns:1fr 1fr}
+.ku-lkcollage.n3,.ku-lkcollage.n4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+.ku-lkcollage.n3>:first-child{grid-row:span 2}
+.ku-lkcollage img,.ku-lkblank{width:100%;height:100%;min-height:0;object-fit:cover;display:flex;align-items:center;justify-content:center;background:var(--k-line);color:var(--k-muted)}
+.ku-lkcollage .ku-lkblank .ku-ico{width:24px;height:24px}
+.ku-lkmore{position:absolute;right:6px;bottom:6px;padding:2px 8px;border-radius:20px;background:var(--k-panel);color:var(--k-text);font-size:11.5px;font-weight:800}
+.ku-lked{display:flex;flex-direction:column;gap:12px;padding:14px;border:1px solid var(--k-line);border-radius:16px;background:var(--k-panel)}
+.ku-lkstick{position:sticky;top:0;z-index:3;display:flex;flex-direction:column;gap:10px;margin:-14px -14px 0;padding:14px;border-radius:16px 16px 0 0;background:var(--k-panel);border-bottom:1px solid var(--k-line)}
+.ku-lkhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ku-lkhead input{flex:1 1 220px;min-width:0}
+.ku-lkboard{display:flex;flex-wrap:wrap;gap:10px;min-height:150px;padding:10px;border:1px dashed var(--k-line);border-radius:14px;background:var(--k-inset)}
+.ku-lkempty{margin:auto;color:var(--k-muted);text-align:center}
+.ku-lkpiece{position:relative;width:104px;display:flex;flex-direction:column;border:1px solid var(--k-line);border-radius:11px;overflow:hidden;background:var(--k-panel)}
+.ku-lkpiece img,.ku-lkpiece .ku-lkblank{width:100%;aspect-ratio:3/4;object-fit:cover;display:flex}
+.ku-lkpiece-cap{display:flex;flex-direction:column;gap:1px;padding:4px 6px 5px;font-size:11px;line-height:1.2;min-width:0}
+.ku-lkpiece-cap strong{color:var(--k-accent);font-size:10.5px}
+.ku-lkpiece-cap span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ku-lkpiece-x{position:absolute;top:4px;right:4px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:50%;background:color-mix(in srgb,var(--k-bg) 80%,transparent);color:var(--k-text);cursor:pointer;opacity:0;transition:opacity .15s ease}
+.ku-lkpiece-x .ku-ico{width:12px;height:12px}
+.ku-lkpiece:hover .ku-lkpiece-x,.ku-lkpiece-x:focus-visible{opacity:1}
+.ku-lkwear{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ku-lkwear select{flex:0 1 220px;width:auto}
+.ku-lkfind .ku-search{flex:1 1 220px;max-width:340px}
+.ku-lkcats{display:flex;gap:6px;flex-wrap:wrap}
+.ku-lkcat{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:999px;border:1px solid var(--k-line);background:transparent;color:var(--k-muted);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+.ku-lkcat i{font-style:normal;font-size:11px;opacity:.8}
+.ku-lkcat:hover{color:var(--k-text);background:var(--k-inset)}
+.ku-lkcat.on{border-color:var(--k-accent);background:var(--k-accent-soft);color:var(--k-accent)}
+.ku-lkpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:12px}
 .ku-wlayer{position:fixed;inset:0;z-index:2147483002;background:var(--k-backdrop);display:grid;place-items:center;padding:16px}
 .ku-wcard{width:min(940px,100%);max-height:100%;display:flex;border:1px solid var(--k-line);border-radius:18px;background:var(--k-bg);box-shadow:0 30px 80px var(--k-shadow);overflow:hidden}
 .ku-wview{flex:0 0 42%;position:relative;background:var(--k-inset);display:grid;place-items:center;min-height:360px}
@@ -745,6 +856,6 @@ export const WARDROBE_STYLE = `
 .ku-fit{gap:8px;padding:7px 10px;border-radius:10px;border:1px solid var(--k-line);margin:0}
 .ku-fit.dropped{border-color:var(--k-accent-line);background:var(--k-accent-soft)}
 .ku-flash{outline:2px solid var(--k-accent);outline-offset:4px;border-radius:10px}
-@container (max-width:700px){.ku-wbody{flex-direction:column}.ku-wsec{width:100%;flex-direction:row;flex-wrap:wrap;position:static}.ku-wside{width:100%;position:static}}
+@container (max-width:700px){.ku-wbody{flex-direction:column}.ku-wsec{width:100%;flex-direction:row;flex-wrap:wrap;position:static}}
 @media (max-width:760px){.ku-wcard{flex-direction:column;overflow:auto}.ku-wview{flex-basis:auto;min-height:240px}}
 `;

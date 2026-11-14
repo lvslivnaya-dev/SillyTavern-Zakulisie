@@ -7,7 +7,7 @@
  */
 import { report } from '../core/guard.js';
 import {
-  NOBODY, OFF, ORPHANS, UPDATE, assignBlocks, buildExtensions, extensionCounts, filterExtensions,
+  NOBODY, OFF, ORPHANS, SORT_NAME, SORT_RECENT, UPDATE, assignBlocks, buildExtensions, extensionCounts, filterExtensions,
 } from '../core/extensions.js';
 import { ALL, NO_FOLDER, createFolder, deleteFolder, folderOf, moveToFolder, renameFolder } from '../core/personas.js';
 import { extensionApi } from '../integration/extensions-api.js';
@@ -34,7 +34,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
   const view = doc.defaultView;
   const undo = [];
   const live = () => globalThis.SillyTavern?.getContext?.() ?? context;
-  const state = { view: ALL, query: '', picked: '', updates: {}, checked: false, checking: false, pending: new Set(), extras: false, ready: false };
+  const state = { view: ALL, query: '', sort: settings.extensionsSort === SORT_RECENT ? SORT_RECENT : SORT_NAME, installed: {}, picked: '', updates: {}, checked: false, checking: false, pending: new Set(), extras: false, ready: false };
 
   // ── окно ──
   const win = createWindow(doc, {
@@ -53,7 +53,13 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
   win.body.innerHTML = `
     <aside class="pud-exside"></aside>
     <section class="pud-exlist">
-      <label class="pud-search">${icon('search')}<input type="search" placeholder="Искать расширение" aria-label="Поиск расширений"></label>
+      <div class="pud-exlist-head">
+        <label class="pud-search">${icon('search')}<input type="search" placeholder="Искать расширение" aria-label="Поиск расширений"></label>
+        <select class="text_pole pud-exsort" aria-label="Порядок списка" title="Порядок списка">
+          <option value="${SORT_NAME}">По алфавиту</option>
+          <option value="${SORT_RECENT}">Последние установленные</option>
+        </select>
+      </div>
       <div class="pud-exrows" role="list"></div>
       <div class="pud-reload" hidden></div>
     </section>
@@ -161,7 +167,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
   };
 
   // ── данные ──
-  const items = () => buildExtensions(api.names(), api.manifest, api.disabled(), api.types(), state.updates);
+  const items = () => buildExtensions(api.names(), api.manifest, api.disabled(), api.types(), state.updates, state.installed);
   const byId = id => items().find(item => item.id === id);
   const replacedTitle = item => REPLACED_EXTENSIONS[item.folder];
 
@@ -185,9 +191,9 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
         + `<button type="button" class="pud-shelf-it pud-ex-newfold" data-tool="folder-add">${icon('folderplus')}<span>Новая папка</span></button>`
         + (active ? `<button type="button" class="pud-shelf-it pud-ex-delfold" data-tool="folder-del">${icon('trash')}<span>Удалить папку</span></button>` : '');
 
-      const shown = state.view === ORPHANS ? [] : filterExtensions(list, settings, { view: state.view, query: state.query });
+      const shown = state.view === ORPHANS ? [] : filterExtensions(list, settings, { view: state.view, query: state.query, sort: state.sort });
       rows.innerHTML = state.view === ORPHANS
-        ? '<p class="pud-lib-empty">Эти блоки настроек Пудреница не смогла приписать ни одному расширению. Справа выбери, чьи они.</p>'
+        ? '<p class="pud-lib-empty">Эти блоки настроек Закулисье не смогло приписать ни одному расширению. Справа выбери, чьи они.</p>'
         : shown.length ? shown.map(item => {
           const replaced = replacedTitle(item);
           return `<div class="pud-exrow${item.id === state.picked ? ' on' : ''}${item.enabled ? '' : ' off'}" role="listitem" tabindex="0" data-id="${escapeHtml(item.id)}">
@@ -198,7 +204,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
             </div>
             <div class="pud-exrow-tags">
               ${item.update ? '<span class="pud-ptag pud-ptag-upd">обновление</span>' : ''}
-              ${replaced ? '<span class="pud-ptag">заменено Пудреницей</span>' : ''}
+              ${replaced ? '<span class="pud-ptag">заменено Закулисьем</span>' : ''}
               ${state.pending.has(item.id) ? '<span class="pud-ptag pud-ptag-now">после перезагрузки</span>' : ''}
             </div>
             ${item.system ? '<span></span>' : `<button type="button" class="pud-crow-btn pud-danger" data-act="delete" title="Удалить расширение">${icon('trash')}</button>`}
@@ -233,7 +239,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
       <div class="pud-exhead-row"><h3>${escapeHtml(item.name)}</h3>
         <label class="pud-exswitch"><input type="checkbox" class="pud-exsw" data-id="${escapeHtml(item.id)}" ${item.enabled ? 'checked' : ''}><span>${item.enabled ? 'включено' : 'выключено'}</span></label></div>
       <span class="pud-tech">${[item.version && `версия ${item.version}`, item.author, item.system ? 'встроенное, обновляется вместе с таверной' : item.folder].filter(Boolean).map(escapeHtml).join(' · ')}</span>
-      ${replaced ? '<p class="pud-hint">Его работу делает Пудреница, его можно выключить.</p>' : ''}
+      ${replaced ? '<p class="pud-hint">Его работу делает Закулисье, его можно выключить.</p>' : ''}
       <div class="pud-exhead-acts">
         ${item.update ? `<button type="button" class="menu_button pud-exupd" data-act="update">${icon('update')}Обновить</button>` : ''}
         <label class="pud-field pud-exfold"><span>Папка</span><select class="text_pole" data-field="folder"><option value="">Без папки</option>${settings.folders.extensions.map(folder => `<option value="${escapeHtml(folder.id)}" ${folderOf(settings, item.id, KIND) === folder.id ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`).join('')}</select></label>
@@ -272,7 +278,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
       };
       await Promise.all([worker(), worker(), worker()]);
       const count = Object.values(state.updates).filter(Boolean).length;
-      if (count) globalThis.toastr?.info?.(`Есть обновления: ${count}. Они в «Нужно обновить».`, 'Пудреница');
+      if (count) globalThis.toastr?.info?.(`Есть обновления: ${count}. Они в «Нужно обновить».`, 'Закулисье');
     } catch (error) { report('проверка обновлений', error); } finally {
       state.checking = false;
       schedule();
@@ -287,7 +293,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
     win.element.classList.add('pud-busy');
     try { await api.ready(); await task(); } catch (error) {
       report(what, error);
-      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Пудреница');
+      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Закулисье');
     } finally {
       busy = false;
       win.element.classList.remove('pud-busy');
@@ -351,7 +357,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
         const hash = await api.update(id);
         state.updates[id] = false;
         state.pending.add(id);
-        globalThis.toastr?.success?.(hash ? `${byId(id)?.name} обновлено (${hash}). Перезагрузи страницу.` : 'Уже свежее.', 'Пудреница');
+        globalThis.toastr?.success?.(hash ? `${byId(id)?.name} обновлено (${hash}). Перезагрузи страницу.` : 'Уже свежее.', 'Закулисье');
       });
       return;
     }
@@ -381,6 +387,27 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
     else if (tool === 'install') run('Установить расширение', () => api.install());
   });
   search.addEventListener('input', () => { state.query = search.value; schedule(); });
+  const sortSelect = win.body.querySelector('.pud-exsort');
+  sortSelect.value = state.sort;
+  sortSelect.addEventListener('change', () => {
+    state.sort = sortSelect.value === SORT_RECENT ? SORT_RECENT : SORT_NAME;
+    settings.extensionsSort = state.sort;
+    try { save(); } catch (error) { report('расширения: сохранение порядка', error); }
+    schedule();
+  });
+  // Даты установки спрашиваем у сервера один раз, по три запроса за раз: список не ждёт, а сам переставится, когда они придут
+  const loadInstalled = async () => {
+    const ids = api.names().filter(id => id.startsWith('third-party/'));
+    let next = 0;
+    const worker = async () => {
+      while (next < ids.length) {
+        const id = ids[next++];
+        state.installed[id] = (await api.installedAt?.(id)) ?? 0;
+      }
+      schedule();
+    };
+    await Promise.all([worker(), worker(), worker()]);
+  };
 
   // расширения дописывают свои блоки на шторку позже нас
   for (const id of SETTINGS_ROOTS) {
@@ -391,7 +418,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
     undo.push(() => observer.disconnect());
   }
 
-  api.ready().then(() => { state.ready = true; schedule(); }).catch(error => report('расширения', error));
+  api.ready().then(() => { state.ready = true; schedule(); return loadInstalled(); }).catch(error => report('расширения', error));
   return () => { for (const fn of undo.reverse()) fn(); };
 }
 

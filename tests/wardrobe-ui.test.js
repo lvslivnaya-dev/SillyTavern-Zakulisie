@@ -95,20 +95,52 @@ test('a ready outfit picture becomes ONE card in «Комплекты»', async 
   } finally { studio.destroy(); }
 });
 
-test('the composer: picked cards add up, a look is saved and put on instead of or over the clothes', async () => {
+test('the looks tab: an outfit is a collage of its pieces, the board shows what it is made of, a look is saved and put on instead of or over the clothes', async () => {
   const { studio, shadow, byText, calls, jacket, pants } = open();
   try {
     byText('Мужское').click();
-    shadow.querySelector('.ku-look').click();
-    assert.equal(shadow.querySelectorAll('.ku-wside .ku-part').length, 2, 'the look opened in the composer');
+    const nav = [...shadow.querySelectorAll('.ku-wsb')].find(node => node.textContent.startsWith('Образы'));
+    assert.ok(nav, 'the looks are a tab of their own in the list');
+    nav.click();
+    assert.equal(shadow.querySelector('.ku-wside'), null, 'no side panel: the pieces are bigger');
+    assert.ok(shadow.querySelector('.ku-lkcard .ku-lkcollage'), 'an outfit is a card with a collage of its pieces');
+    shadow.querySelector('.ku-lkcard').click();
+    assert.equal(shadow.querySelectorAll('.ku-lkboard .ku-lkpiece').length, 2, 'the look opened on the board, piece by piece');
+    assert.equal(shadow.querySelectorAll('.ku-lkpick .ku-tile.on').length, 2, 'the picked pieces are marked in the picker too');
     assert.match(shadow.querySelector('.ku-line').textContent, /Штаны; Токкофуку/);
     byText('Поверх').click();
-    byText('Надеть').click();
+    byText('Надеть в этом чате').click();
     await flush();
     assert.deepEqual(calls.at(-1), ['onWear', { entityId: mikey.id, cardIds: [jacket.id, pants.id], mode: 'add' }]);
-    byText('Сохранить изменения').click();
+    byText('Сохранить').click();
     await flush();
     assert.equal(calls.at(-1)[0], 'onWardrobeUpdateLook');
+  } finally { studio.destroy(); }
+});
+
+test('a new outfit is put together on the board by pictures: pieces tick in and out, the cross takes one off, the name is saved with them', async () => {
+  const { studio, shadow, byText, calls, jacket } = open();
+  try {
+    byText('Мужское').click();
+    [...shadow.querySelectorAll('.ku-wsb')].find(node => node.textContent.startsWith('Образы')).click();
+    byText('+ Новый образ').click();
+    assert.equal(shadow.querySelectorAll('.ku-lkpiece').length, 0);
+    assert.ok(shadow.querySelector('.ku-lkempty'), 'an empty board says what to do');
+    const tile = shadow.querySelector('.ku-lkpick .ku-tile');
+    tile.click();
+    assert.equal(shadow.querySelectorAll('.ku-lkpiece').length, 1, 'the piece appears on the board at once');
+    assert.equal(shadow.querySelector('.ku-lkpick .ku-tile').getAttribute('aria-pressed'), 'true');
+    shadow.querySelector('.ku-lkpiece-x').click();
+    assert.equal(shadow.querySelectorAll('.ku-lkpiece').length, 0, 'the cross takes it off the board');
+    shadow.querySelector('.ku-lkpick .ku-tile').click();
+    const name = shadow.querySelector('input[aria-label="Название образа"]');
+    name.value = 'Форма';
+    name.dispatchEvent(new window.Event('input'));
+    byText('Сохранить образ').click();
+    await flush();
+    const call = calls.find(([action]) => action === 'onWardrobeAddLook');
+    assert.equal(call[1].name, 'Форма');
+    assert.equal(call[1].cardIds.length, 1);
   } finally { studio.destroy(); }
 });
 

@@ -1,6 +1,6 @@
 ﻿import { shieldKeys } from './key-shield.js';
 import {
-  button, characterId, characterName, createFacade, dispatch, element,
+  button, characterId, characterName, collapseHints, createFacade, dispatch, element,
   ensureContainer, getPair, nextControlId, normalizeSnapshot, pairId, pairLabel, pairSource, pairTarget,
 } from './helpers.js';
 import { hostThemeCss } from './theme.js';
@@ -31,7 +31,7 @@ import { QUESTS_STYLE, createQuestsPages } from './pages/quests.js';
 
 const STYLE = `
 ${hostThemeCss('--rs-bg:var(--k-bg);--rs-panel:var(--k-panel);--rs-inset:var(--k-inset);--rs-track:var(--k-track);--rs-line:var(--k-line);--rs-text:var(--k-text);--rs-muted:var(--k-muted);--rs-accent:var(--k-accent);--rs-danger:var(--k-danger);--rs-backdrop:var(--k-backdrop)')}
-*,*:before,*:after{box-sizing:border-box}.backdrop.embedded{position:static;inset:auto;z-index:auto;background:none;padding:0;display:block;height:100%}.studio.embed{width:100%;height:100%;border:0;border-radius:0;box-shadow:none;background:transparent;backdrop-filter:none;display:block;overflow:hidden}.embed-content{height:100%;overflow:auto}.studio.single{grid-template-columns:minmax(0,1fr)}.studio.single .sidebar{display:none}.backdrop{position:fixed;inset:0;z-index:2147483000;background:var(--rs-backdrop);display:grid;place-items:center;padding:clamp(8px,2vw,28px)}.backdrop[hidden]{display:none}.studio{width:min(1640px,100%);height:min(980px,100%);background:var(--rs-bg);backdrop-filter:blur(var(--k-blur));border:1px solid var(--rs-line);border-radius:18px;box-shadow:0 30px 90px var(--k-shadow);display:grid;grid-template-columns:240px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);overflow:hidden}.header{grid-column:1/-1;min-height:72px;border-bottom:1px solid var(--rs-line);display:flex;align-items:center;gap:14px;padding:14px 18px}.brand{margin-right:auto}.brand strong{display:block;font:700 20px/1.1 var(--k-font)}.brand span,.muted{color:var(--rs-muted);font-size:12px}.sidebar{border-right:1px solid var(--rs-line);padding:16px;overflow:auto}.content{min-width:0;overflow:auto;padding:clamp(16px,3vw,34px)}button,input,select,textarea{font:inherit}.btn,.nav button,.icon{border:1px solid var(--rs-line);background:var(--rs-panel);color:var(--rs-text);border-radius:9px;min-height:40px;padding:8px 12px;cursor:pointer}.btn:hover,.nav button:hover,.nav button.active{border-color:var(--rs-accent);background:color-mix(in srgb,var(--rs-panel) 86%,var(--rs-accent))}.btn.primary{background:color-mix(in srgb,var(--rs-accent) 30%,var(--rs-panel));border-color:var(--rs-accent);color:var(--rs-text);font-weight:700}.icon{width:42px;padding:6px;font-size:20px}.nav{display:grid;gap:7px;margin-bottom:24px}.nav button{text-align:left}.section-title{font:700 11px/1.2 inherit;letter-spacing:.13em;text-transform:uppercase;color:var(--rs-muted);margin:0 0 9px}.characters{display:grid;gap:7px}.character{display:flex;align-items:center;gap:9px;padding:8px;border-radius:9px;background:var(--rs-inset)}.avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;background:color-mix(in srgb,var(--rs-line) 70%,var(--rs-bg));display:grid;place-items:center;font-weight:700}.character span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:26px}.field{display:grid;gap:6px;min-width:160px}.field.grow{flex:1}.field label{font-size:12px;color:var(--rs-muted)}select,input,textarea{width:100%;color:var(--rs-text);background:color-mix(in srgb,var(--rs-inset) 70%,var(--SmartThemeChatTintColor));border:1px solid var(--rs-line);border-radius:8px;padding:9px}textarea{min-height:90px;resize:vertical}.hero{margin-bottom:24px}.hero h2{font:700 clamp(24px,4vw,42px)/1.1 var(--k-font);margin:0 0 7px}.grid{display:grid;grid-template-columns:repeat(2,minmax(240px,1fr));gap:14px}.card{background:var(--rs-panel);border:1px solid var(--rs-line);border-radius:13px;padding:16px}.card h3{margin:0 0 14px;font-size:15px}.metric{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,2fr) 58px;gap:12px;align-items:center;margin:13px 0}.metric output{text-align:right;font-variant-numeric:tabular-nums;color:var(--rs-accent);font-weight:700}input[type=range]{padding:0;accent-color:var(--rs-accent)}.stack{display:grid;gap:10px}.item{border:1px solid var(--rs-line);border-radius:10px;padding:12px;background:color-mix(in srgb,var(--rs-inset) 80%,var(--rs-bg))}.item-head{display:flex;gap:10px;justify-content:space-between;margin-bottom:6px}.item p{margin:0;white-space:pre-wrap;color:color-mix(in srgb,var(--rs-text) 85%,transparent)}.item time{color:var(--rs-muted);font-size:11px}.empty{border:1px dashed var(--rs-line);border-radius:10px;padding:28px;text-align:center;color:var(--rs-muted)}.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.journal-row{display:grid;grid-template-columns:150px minmax(120px,1fr) 2fr;gap:13px;border-bottom:1px solid var(--rs-line);padding:12px 3px}.settings{max-width:760px}.settings .field{margin:14px 0}.danger{color:var(--rs-danger)}.status{min-height:18px;color:var(--rs-muted);font-size:12px;margin-left:auto}
+*,*:before,*:after{box-sizing:border-box}.backdrop.embedded{position:static;inset:auto;z-index:auto;background:none;padding:0;display:block;height:100%}.studio.embed{width:100%;height:100%;border:0;border-radius:0;box-shadow:none;background:transparent;backdrop-filter:none;display:block;overflow:hidden}.embed-content{height:100%;overflow:hidden;display:flex;flex-direction:column}.embed-content>.ku-wlayer{flex:1 1 auto;min-height:0;height:auto}.studio.single{grid-template-columns:minmax(0,1fr)}.studio.single .sidebar{display:none}.backdrop{position:fixed;inset:0;z-index:2147483000;background:var(--rs-backdrop);display:grid;place-items:center;padding:clamp(8px,2vw,28px)}.backdrop[hidden]{display:none}.studio{width:min(1640px,100%);height:min(980px,100%);background:var(--rs-bg);backdrop-filter:blur(var(--k-blur));border:1px solid var(--rs-line);border-radius:18px;box-shadow:0 30px 90px var(--k-shadow);display:grid;grid-template-columns:240px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);overflow:hidden}.header{grid-column:1/-1;min-height:72px;border-bottom:1px solid var(--rs-line);display:flex;align-items:center;gap:14px;padding:14px 18px}.brand{margin-right:auto}.brand strong{display:block;font:700 20px/1.1 var(--k-font)}.brand span,.muted{color:var(--rs-muted);font-size:12px}.sidebar{border-right:1px solid var(--rs-line);padding:16px;overflow:auto}.content{min-width:0;overflow:auto;padding:clamp(16px,3vw,34px)}button,input,select,textarea{font:inherit}.btn,.nav button,.icon{border:1px solid var(--rs-line);background:var(--rs-panel);color:var(--rs-text);border-radius:9px;min-height:40px;padding:8px 12px;cursor:pointer}.btn:hover,.nav button:hover,.nav button.active{border-color:var(--rs-accent);background:color-mix(in srgb,var(--rs-panel) 86%,var(--rs-accent))}.btn.primary{background:color-mix(in srgb,var(--rs-accent) 30%,var(--rs-panel));border-color:var(--rs-accent);color:var(--rs-text);font-weight:700}.icon{width:42px;padding:6px;font-size:20px}.nav{display:grid;gap:7px;margin-bottom:24px}.nav button{text-align:left}.section-title{font:700 11px/1.2 inherit;letter-spacing:.13em;text-transform:uppercase;color:var(--rs-muted);margin:0 0 9px}.characters{display:grid;gap:7px}.character{display:flex;align-items:center;gap:9px;padding:8px;border-radius:9px;background:var(--rs-inset)}.avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;background:color-mix(in srgb,var(--rs-line) 70%,var(--rs-bg));display:grid;place-items:center;font-weight:700}.character span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:26px}.field{display:grid;gap:6px;min-width:160px}.field.grow{flex:1}.field label{font-size:12px;color:var(--rs-muted)}select,input,textarea{width:100%;color:var(--rs-text);background:color-mix(in srgb,var(--rs-inset) 70%,var(--SmartThemeChatTintColor));border:1px solid var(--rs-line);border-radius:8px;padding:9px}textarea{min-height:90px;resize:vertical}.hero{margin-bottom:24px}.hero h2{font:700 clamp(24px,4vw,42px)/1.1 var(--k-font);margin:0 0 7px}.grid{display:grid;grid-template-columns:repeat(2,minmax(240px,1fr));gap:14px}.card{background:var(--rs-panel);border:1px solid var(--rs-line);border-radius:13px;padding:16px}.card h3{margin:0 0 14px;font-size:15px}.metric{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,2fr) 58px;gap:12px;align-items:center;margin:13px 0}.metric output{text-align:right;font-variant-numeric:tabular-nums;color:var(--rs-accent);font-weight:700}input[type=range]{padding:0;accent-color:var(--rs-accent)}.stack{display:grid;gap:10px}.item{border:1px solid var(--rs-line);border-radius:10px;padding:12px;background:color-mix(in srgb,var(--rs-inset) 80%,var(--rs-bg))}.item-head{display:flex;gap:10px;justify-content:space-between;margin-bottom:6px}.item p{margin:0;white-space:pre-wrap;color:color-mix(in srgb,var(--rs-text) 85%,transparent)}.item time{color:var(--rs-muted);font-size:11px}.empty{border:1px dashed var(--rs-line);border-radius:10px;padding:28px;text-align:center;color:var(--rs-muted)}.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.journal-row{display:grid;grid-template-columns:150px minmax(120px,1fr) 2fr;gap:13px;border-bottom:1px solid var(--rs-line);padding:12px 3px}.settings{max-width:760px}.settings .field{margin:14px 0}.danger{color:var(--rs-danger)}.status{min-height:18px;color:var(--rs-muted);font-size:12px;margin-left:auto}
 @media(max-width:760px){.backdrop{padding:0}.studio{height:100dvh;border-radius:0;grid-template-columns:1fr;grid-template-rows:auto auto minmax(0,1fr)}.header{min-height:62px}.sidebar{border-right:0;border-bottom:1px solid var(--rs-line);padding:8px 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}.nav{display:flex;margin:0}.nav button{white-space:nowrap;min-height:44px}.characters,.sidebar .section-title{display:none}.content{padding:16px;-webkit-overflow-scrolling:touch}.grid{grid-template-columns:1fr}.metric{grid-template-columns:90px minmax(100px,1fr) 48px}.journal-row{grid-template-columns:1fr}.header{gap:8px;padding:10px 12px}.brand span{display:none}.btn,.nav button{min-height:44px;font-size:14px}.header .btn:not(.primary){display:none}.mobile-tools{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;justify-content:flex-end}.mobile-tools .btn{display:inline-flex;min-height:36px;font-size:12px;padding:6px 10px}.mobile-tools .icon{width:36px;min-height:36px;font-size:16px}.busy-pill{max-width:100%;overflow:hidden;text-overflow:ellipsis}}
 `;
 
@@ -143,7 +143,27 @@ export function createRelationshipStudio(options = {}) {
     .eye-toggle.off{opacity:.55}
     .eye-toggle.off::after{content:'';position:absolute;left:6px;right:6px;top:50%;height:2px;background:currentColor;transform:rotate(-35deg)}
     .relationship-card{position:relative}
-    .relationship-card .pair-card-head{padding-right:78px}
+    .relationship-card .pair-card-head{padding-right:124px}
+    .card-corner .gear-toggle .ku-ico{width:17px;height:17px;display:block}
+    .card-corner .gear-toggle.on{border-color:var(--rs-accent);color:var(--rs-accent)}
+    .relationship-card .metric.metric-compact,.metric.metric-compact{display:grid;grid-template-columns:none;gap:4px;margin:0;min-width:0}
+    .relationship-card .relationship-metrics,.relationship-metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px 16px}
+    .metric-head{display:flex;align-items:center;gap:6px;min-width:0}
+    .metric-icon{display:flex;align-items:center;gap:6px;min-width:0;flex:1;color:var(--rs-muted);cursor:default;font-size:12.5px}
+    .metric-icon .ku-ico{width:16px;height:16px;display:block;flex:0 0 auto}
+    .metric-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .metric-head output{font-variant-numeric:tabular-nums;color:var(--rs-accent);font-weight:700;font-size:13px}
+    .metric-track{display:flex;align-items:center;gap:6px}
+    .metric-track input[type=range]{flex:1;min-width:0;margin:0}
+    .metric-step{flex:0 0 auto;width:22px;height:22px;min-height:22px;padding:0;border-radius:50%;border:1px solid var(--rs-line);background:transparent;color:var(--rs-muted);font:inherit;font-size:14px;line-height:1;cursor:pointer}
+    .metric-step:hover{border-color:var(--rs-accent);color:var(--rs-accent)}
+    .line-settings{display:grid;gap:12px;margin:0 0 16px;padding:14px;border:1px solid var(--rs-line);border-radius:12px;background:var(--rs-inset)}
+    .line-settings-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .line-settings-row .ku-ico{width:18px;height:18px;color:var(--rs-muted)}
+    .line-settings-label{font-weight:700}
+    .line-settings-row select{margin-left:auto;width:auto;min-width:150px}
+    .line-settings .scale-editor{display:grid;gap:8px;padding-top:12px;border-top:1px solid var(--rs-line)}
+    .pair-foot{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-top:16px;padding-top:12px;border-top:1px solid var(--rs-line)}
     .headcanon-pairs{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:10px}
     .headcanon-pair{display:grid;gap:4px;text-align:left;padding:12px 14px;border:1px solid var(--rs-line);border-radius:10px;background:var(--rs-inset);color:var(--rs-text);cursor:pointer;font:inherit}
     .headcanon-pair:hover,.headcanon-pair:focus-visible{border-color:var(--rs-accent);outline:none}
@@ -216,7 +236,16 @@ export function createRelationshipStudio(options = {}) {
     .factor-controls .icon{flex:0 0 40px;width:40px;min-height:40px}
     .factor-row textarea{width:100%;min-height:44px;resize:vertical;overflow-wrap:anywhere;white-space:pre-wrap;line-height:1.35}
     .factors-generate{border-top:1px solid var(--rs-line);margin:14px 0 0;padding-top:12px}
-    .factors-generate-row{display:flex;gap:6px;flex-wrap:wrap}
+    .factors-generate-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+    .factors-generate-row>select,.factors-generate-row>input{flex:1 1 200px;min-width:0}
+    .factors-generate>*+*{margin-top:8px}
+    .factors-generate input,.factors-generate select,.factors-generate textarea{max-width:100%}
+    .factors-body>.ku-hint{margin:0 0 12px}
+    .factors-body>.btn{margin:2px 0 6px}
+    .factors-head h3{margin:0;flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
+    .factor-controls{flex-wrap:wrap}.factor-controls select{flex:1 1 96px;min-width:0}.factor-controls .btn.icon{flex:0 0 auto}
+    .ku-infowrap{margin:0 0 6px}
+    .goal-box textarea{width:100%}
     .factors-generate-row select,.factors-generate-row input{flex:1 1 180px;min-width:0}
     .factors-status{min-height:0;font-size:12px}
     /* Grouped menu: Сцена / Отношения / Система */
@@ -325,13 +354,12 @@ export function createRelationshipStudio(options = {}) {
   const backdrop = element('div', { className: 'backdrop', hidden: true });
   backdrop.setAttribute('role', 'dialog');
   backdrop.setAttribute('aria-modal', 'true');
-  backdrop.setAttribute('aria-label', options.label || 'Кулисы');
+  backdrop.setAttribute('aria-label', options.label || 'Закулисье');
   const panel = element('section', { className: 'studio', tabIndex: -1 });
   backdrop.append(panel);
   // Embedded: not a window but the editor of one persona card inside another window (options.container); nothing else is drawn.
   const embedded = Boolean(options.embedCard);
   let embedCardId = '';
-  let embedStripOpen = false;
   /** Docked panels may stand on either side of the chat; two of them share the width (several windows at once). */
   let side = options.side === 'left' ? 'left' : 'right';
   let share = options.dockShare === 2 ? 2 : 1;
@@ -466,7 +494,7 @@ export function createRelationshipStudio(options = {}) {
 
   function render() {
     if (resizing) { renderDeferred = true; return; }
-    if (embedded) { panel.replaceChildren(element('main', { className: 'embed-content' }, [renderEmbedStrip(), renderEmbeddedCard(embedCardId, { onGear: options.onGear })])); return; }
+    if (embedded) { panel.replaceChildren(element('main', { className: 'embed-content' }, [renderEmbeddedCard(embedCardId, { onGear: options.onGear })])); collapseHints(panel); return; }
     applyMode();
     panel.classList.toggle('single', scope.tabs.length === 1);
     const pair = getPair(snapshot, selectedPairId);
@@ -476,6 +504,7 @@ export function createRelationshipStudio(options = {}) {
     const scrollState = [panel, panel.querySelector('.content'), panel.querySelector('.sidebar'), panel.querySelector('.nav')]
       .map(node => node ? { top: node.scrollTop, left: node.scrollLeft } : null);
     panel.replaceChildren(renderHeader(), renderSidebar(), renderContent(pair), resizeHandle);
+    collapseHints(panel.querySelector('.content'));
     [panel, panel.querySelector('.content'), panel.querySelector('.sidebar'), panel.querySelector('.nav')].forEach((node, index) => {
       const saved = scrollState[index];
       if (node && saved) { node.scrollTop = saved.top; node.scrollLeft = saved.left; }
@@ -584,12 +613,12 @@ export function createRelationshipStudio(options = {}) {
       element('span', { className: `status${lastStatus.danger ? ' danger' : ''}`, role: 'status', 'aria-live': 'polite', text: lastStatus.message }),
       modeButton,
       ...(headerTools[tab]?.() ?? []).map(tool => iconOnly(button('', 'icon', tool.onClick, tool.title), tool.icon)),
-      iconOnly(button('', 'icon', close, 'Закрыть Кулисы'), 'close'),
+      iconOnly(button('', 'icon', close, 'Закрыть Закулисье'), 'close'),
     ]);
   }
 
   function renderSidebar() {
-    const nav = element('nav', { className: 'nav', 'aria-label': 'Разделы Кулис' });
+    const nav = element('nav', { className: 'nav', 'aria-label': 'Разделы Закулисья' });
     for (const group of NAV_GROUPS) {
       if (!group.items.some(([id]) => scope.tabs.includes(id))) continue;
       // Folding is for the wide menu only: the narrow dock shows icons and a hairline between groups.
@@ -628,16 +657,6 @@ export function createRelationshipStudio(options = {}) {
     // The pair under edit belongs to the relations window only.
     const tools = !isDocked() && scope.id === 'relations' ? [renderTools()] : [];
     return element('aside', { className: 'sidebar' }, [nav, ...tools]);
-  }
-
-  /** The strip over the embedded card: what belongs to the chat, not to the card — which persona it is, whether the card is sent, the AU. Folded. */
-  function renderEmbedStrip() {
-    const box = element('details', { className: 'fold ku-embed-strip' });
-    box.open = embedStripOpen;
-    box.addEventListener('toggle', () => { embedStripOpen = box.open; });
-    const binding = element('div', { className: 'card' }, [element('h3', { text: 'Персона этого чата' }), personaBinding()]);
-    box.append(element('summary', { text: 'Этот чат: персона, отправка карточки, АУ' }), element('div', { className: 'fold-body' }, [element('div', { className: 'ku-plaques' }, [binding, ...renderPersonaCard()])]));
-    return box;
   }
 
   /** Which SillyTavern persona this chat is: the select, «Привязать», «Отвязать» and the warnings. */
@@ -756,7 +775,7 @@ export function createRelationshipStudio(options = {}) {
     if (PENDING_TABS.has(tab)) {
       content.append(element('div', { className: 'empty pending' }, [
         element('strong', { text: 'Раздел в работе' }),
-        element('span', { text: 'Он появится в одном из следующих шагов разработки Кулис.' }),
+        element('span', { text: 'Он появится в одном из следующих шагов разработки Закулисья.' }),
       ]));
       return content;
     }
@@ -855,7 +874,14 @@ export function createRelationshipStudio(options = {}) {
   phoneQuery?.addEventListener?.('change', onLayoutChange);
   cleanups.push(() => phoneQuery?.removeEventListener?.('change', onLayoutChange));
   backdrop.addEventListener('pointerdown', (event) => { if (event.target === backdrop && !isDocked() && options.closeOnBackdrop !== false) close(); });
-  const onSnapshot = (value) => { snapshot = value; if (isOpen) render(); };
+  // Several changes of one step (a commit, the redraw of a store, the busy sign) draw the panel once: the whole page is rebuilt on each draw.
+  let drawQueued = false;
+  const onSnapshot = (value) => {
+    snapshot = value;
+    if (!isOpen || drawQueued) return;
+    drawQueued = true;
+    queueMicrotask(() => { drawQueued = false; if (isOpen) render(); });
+  };
   onSnapshot.wants = () => isOpen;
   cleanups.push(facade.subscribe(onSnapshot));
   render();

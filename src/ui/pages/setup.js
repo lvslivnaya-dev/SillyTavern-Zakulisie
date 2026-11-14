@@ -25,9 +25,9 @@ export function createSetupPage(ctx) {
       catch (error) { ctx.setStatus(error?.message || String(error), true); }
     }, 'Напоминание над полем ввода. Совсем выключить для всех чатов можно в «Настройки → Знания и сцена».');
     view.append(element('div', { className: 'card' }, [
-      element('h3', { text: ready ? 'Чат настроен' : 'Настроим Кулисы для этого чата' }),
+      element('h3', { text: ready ? 'Чат настроен' : 'Настроим Закулисье для этого чата' }),
       element('p', { className: 'muted', text: ready
-        ? 'Обязательные шаги сделаны, дальше Кулисы работают сами. Остальное по желанию: список ниже.'
+        ? 'Обязательные шаги сделаны, дальше Закулисье работает само. Остальное по желанию: список ниже.'
         : 'Шесть коротких шагов, по порядку. Обязательных два (персона и герои), остальные улучшают работу: можно пропустить и вернуться позже.' }),
       element('p', { className: 'ku-small', text: `Обязательные шаги: ${progress.done} из ${progress.total}${progress.optionalTotal ? ` · по желанию: ${progress.optionalDone} из ${progress.optionalTotal}` : ''}` }),
       bar,

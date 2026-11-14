@@ -91,7 +91,7 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
   const sortSelect = win.body.querySelector('[data-tool="sort"]');
   sortSelect.value = SORTS.some(item => item.value === prefs.sort) ? prefs.sort : 'native';
 
-  const toast = (kind, text) => globalThis.toastr?.[kind]?.(text, 'Пудреница');
+  const toast = (kind, text) => globalThis.toastr?.[kind]?.(text, 'Закулисье');
   const setStatus = text => { status.textContent = text; };
   const current = () => (state.data && state.uid !== null ? state.data.entries[state.uid] ?? null : null);
 

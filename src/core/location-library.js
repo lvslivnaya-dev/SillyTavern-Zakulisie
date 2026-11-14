@@ -230,6 +230,7 @@ function characterEntry(id, folderId, name, raw) {
     id, folderId, name,
     aliases,
     ...(words ? { words } : {}),
+    ...(raw?.gender === 'male' || raw?.gender === 'female' ? { gender: raw.gender } : {}),
     ...(raw?.persona === true ? { persona: true, ...(cleanText(raw.avatar, 200) ? { avatar: cleanText(raw.avatar, 200) } : {}), ...(cleanRecords(raw.records).length ? { records: cleanRecords(raw.records) } : {}) } : {}),
     sections: raw?.persona === true ? withPersonaSections(normalizeSections(raw?.sections)) : normalizeSections(raw?.sections),
     ...(raw?.lang === 'en' ? { lang: 'en' } : {}),
@@ -480,6 +481,7 @@ function applyCharacterFields(next, card, fields) {
   }
   if (fields.closet !== undefined) { const closet = cleanCloset(fields.closet); if (closet) card.closet = closet; else delete card.closet; }
   if (fields.nameId !== undefined) { const nameId = cleanText(fields.nameId, 80); if (nameId) card.nameId = nameId; else delete card.nameId; }
+  if (fields.gender !== undefined) { if (fields.gender === 'male' || fields.gender === 'female') card.gender = fields.gender; else delete card.gender; }
   if (fields.lang !== undefined) { if (fields.lang === 'en') card.lang = 'en'; else delete card.lang; }
   if (fields.source !== undefined) { const source = cleanSource(fields.source); if (source) card.source = source; else delete card.source; }
   applyPicture(card, fields, oldName);
@@ -839,7 +841,7 @@ export function addCharacterDrafts(library, drafts, targetFolderId = '') {
  * exist by name in their folder are skipped. IDs from the file are never trusted.
  */
 export function importLibrary(library, data, targetFolderId = '') {
-  if (!data || typeof data !== 'object' || (data.kind != null && data.kind !== LIBRARY_EXPORT_KIND)) throw new TypeError('Это не файл библиотеки Кулис');
+  if (!data || typeof data !== 'object' || (data.kind != null && data.kind !== LIBRARY_EXPORT_KIND)) throw new TypeError('Это не файл библиотеки Закулисья');
   const incoming = normalizeLibrary(data);
   const pathOf = folderId => folderPath(incoming, folderId).map(step => step.name);
   const nameById = new Map(incoming.locations.map(location => [location.id, location.name]));
@@ -878,7 +880,7 @@ export function importLibrary(library, data, targetFolderId = '') {
 
 /** What an exported file holds, to pick from: [{ id, kind: 'places' | 'items' | 'characters', name, folder }]. */
 export function listExport(data) {
-  if (!data || typeof data !== 'object' || (data.kind != null && data.kind !== LIBRARY_EXPORT_KIND)) throw new TypeError('Это не файл библиотеки Кулис');
+  if (!data || typeof data !== 'object' || (data.kind != null && data.kind !== LIBRARY_EXPORT_KIND)) throw new TypeError('Это не файл библиотеки Закулисья');
   const incoming = normalizeLibrary(data);
   const where = folderId => folderPath(incoming, folderId).map(step => step.name).join(' › ');
   const rows = (list, kind) => (list ?? []).map(entry => ({ id: entry.id, kind, name: entry.name, folder: where(entry.folderId), ...(entry.persona ? { persona: true } : {}) }));

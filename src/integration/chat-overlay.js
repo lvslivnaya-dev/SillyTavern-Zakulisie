@@ -11,9 +11,16 @@
  * ST theme variables only. All markup is built with textContent: names and
  * quotes come from the chat and are never parsed as HTML.
  */
+import { iconSvg } from '../ui/icons.js';
+import { NAV_TABS } from '../ui/layout.js';
+
 const CHIPS_ID = 'ku-scene-chips';
 const STRIP_ID = 'ku-scene-strip';
 const SETUP_ID = 'ku-setup-banner';
+const AU_ID = 'ku-au-banner';
+const KIND_LABELS = { holiday: 'Праздник', birthday: 'День рождения', quest: 'Квест', sentimental: 'Сентиментальный день' };
+/** The steps shown in the banner, as icon buttons (the full list is on the page «Настройка чата»). */
+const BANNER_STEPS = new Set(['persona', 'characters', 'lorebooks', 'calendar', 'weather', 'wardrobe']);
 
 const LEAK_CLASS = 'ku-leak';
 const SLIP_CLASS = 'ku-slip';
@@ -76,13 +83,14 @@ function chipButton(text, action, data = {}, title = '', className = 'ku-dir-btn
  *                  secrets: [{ eventId, label, text }] }
  * eventIdeas() → [text]: today's calendar events, offered as ready scene events.
  */
-export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, onQuestStep, onSong, onQuestPush, onDiceRoll, onDiceToggle, onDiceLock, onDiceAdd, onDiceSend, onDiceClear, onSetTime, onWeather, onSceneMode, onTogglePresent, onLeak, onSlip, onDeath, onReveal, onSecretHint, onOpenStudio, onSetupOff,
+export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, onQuestStep, onSong, onQuestPush, onDiceRoll, onDiceToggle, onDiceLock, onDiceAdd, onDiceSend, onDiceClear, onSetTime, onWeather, onSceneMode, onTogglePresent, onLeak, onSlip, onDeath, onReveal, onSecretHint, onOpenStudio, onOpenPersonas, onSetupOff, onCalendarSave, onCalendarRemove,
   onCue, onRemoveCue, onKickNow, onToggleOpen, onFavorite, describe, eventIdeas }) {
   // The panel's own state: what is selected and typed survives every re-render.
-  const fresh = () => ({ stageNote: null, diceAdd: '', diceDraft: '', clock: null, selected: '', pane: '', wait: 0, draft: '', eventDraft: '', sceneDraft: '', noteDraft: '', placeDraft: '', placeId: '', skip: 'none', sceneCast: [], songFind: '' });
+  const fresh = () => ({ stageNote: null, diceAdd: '', diceDraft: '', clock: null, selected: '', pane: '', wait: 0, draft: '', eventDraft: '', sceneDraft: '', noteDraft: '', placeDraft: '', placeId: '', skip: 'none', sceneCast: [], songFind: '', calDay: '', calForm: null });
   const ui = fresh();
   let lastView = null;
   const snoozed = new Set(); // chats whose setup reminder was put off until the page is reloaded
+  const snoozedAu = new Set(); // the same for the «АУ не выбрана» warning
   let lastMenu = null;
 
   const resetMenu = () => Object.assign(ui, fresh());
@@ -224,6 +232,21 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
         rerender();
         return true;
       }
+      case 'dir-cal-day': { ui.calDay = ui.calDay === data.iso ? '' : data.iso; ui.calForm = null; rerender(); return true; }
+      case 'dir-cal-new': { ui.calForm = { title: '', date: ui.calDay, kind: '', intensity: 2, time: '', repeat: 'none' }; rerender(); return true; }
+      case 'dir-cal-edit': {
+        const found = (lastView?.calendar?.days?.[ui.calDay] ?? []).find(item => item.id === data.id);
+        if (found) { ui.calForm = { ...found }; rerender(); }
+        return true;
+      }
+      case 'dir-cal-cancel': { ui.calForm = null; rerender(); return true; }
+      case 'dir-cal-save': {
+        const form = ui.calForm;
+        if (!form || !String(form.title ?? '').trim()) return true;
+        Promise.resolve(onCalendarSave?.({ ...form, title: form.title.trim(), date: form.date || ui.calDay })).then(() => { ui.calForm = null; rerender(); }).catch(error => globalThis.toastr?.error?.(error?.message || String(error), 'Закулисье'));
+        return true;
+      }
+      case 'dir-cal-del': Promise.resolve(onCalendarRemove?.({ id: data.id })).then(() => rerender()); return true;
       case 'dir-note': {
         const text = ui.noteDraft.trim();
         if (text) arm({ kind: 'note', text });
@@ -249,6 +272,8 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       else if (action === 'studio') onOpenStudio?.(target.dataset.tab);
       else if (action === 'setup-later') { snoozed.add(target.dataset.chat ?? ''); if (lastView) renderSetupBanner(lastView); }
       else if (action === 'setup-off') onSetupOff?.();
+      else if (action === 'au-later') { snoozedAu.add(target.dataset.chat ?? ''); if (lastView) renderAuBanner(lastView); }
+      else if (action === 'open-personas') onOpenPersonas?.(target.dataset.avatar ?? '');
       else if (action.startsWith('reveal-')) onReveal?.(action.slice(7), { messageIndex: Number(messageIndex), entityId, eventId });
       else if (action.startsWith('secret-')) onSecretHint?.(action.slice(7), { messageIndex: Number(messageIndex), eventId });
       else if (action.startsWith('quest-')) onQuestHint?.(action.slice(6), { messageIndex: Number(messageIndex), hintId: target.dataset.hintId });
@@ -272,6 +297,10 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     if (field === 'song-find') { ui.songFind = event.target.value; rerender(); }
     if (field === 'dice-add') ui.diceDraft = event.target.value;
     if (field === 'stage-note') ui.stageNote = event.target.value;
+    if (field === 'cal-title' && ui.calForm) ui.calForm.title = event.target.value;
+    if (field === 'cal-time' && ui.calForm) ui.calForm.time = event.target.value;
+    if (field === 'cal-kind' && ui.calForm) ui.calForm.kind = event.target.value;
+    if (field === 'cal-intensity' && ui.calForm) ui.calForm.intensity = Number(event.target.value) || 2;
     if (field === 'clock-time') clockDraft().time = event.target.value;
     if (field === 'clock-day') clockDraft().day = event.target.value;
     if (field === 'clock-label') clockDraft().label = event.target.value;
@@ -283,7 +312,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     }
   };
   // Enter sends from one-line fields; the scene's text is a textarea, Enter there is a new line.
-  const ENTER_ACTIONS = { custom: 'dir-custom', event: 'dir-event-custom', note: 'dir-note', 'dice-add': 'dir-dice-add-save', 'stage-note': 'dir-stage-note', 'clock-time': 'dir-clock-save', 'clock-day': 'dir-clock-save', 'clock-label': 'dir-clock-save' };
+  const ENTER_ACTIONS = { custom: 'dir-custom', event: 'dir-event-custom', note: 'dir-note', 'dice-add': 'dir-dice-add-save', 'stage-note': 'dir-stage-note', 'clock-time': 'dir-clock-save', 'clock-day': 'dir-clock-save', 'clock-label': 'dir-clock-save', 'cal-title': 'dir-cal-save' };
   const onKey = event => {
     const action = ENTER_ACTIONS[event.target?.dataset?.kuField];
     if (action && event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -662,7 +691,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       if (last.stage) sent.push(`стадия «${last.stage.label}»${last.stage.note ? `, заметка «${last.stage.note}»` : ''}`);
       sent.push(...last.cues);
       const line = node('span', 'ku-ss-last');
-      line.append(node('b', null, 'В последний запрос ушло: '), node('span', sent.length ? 'ku-ss-tag' : 'ku-ss-none', sent.length ? sent.join(' · ') : 'ничего от Кулис, кроме обычной сцены'));
+      line.append(node('b', null, 'В последний запрос ушло: '), node('span', sent.length ? 'ku-ss-tag' : 'ku-ss-none', sent.length ? sent.join(' · ') : 'ничего от Закулисья, кроме обычной сцены'));
       parts.push(line);
       // Library entries: the sections of the character cards and the place, so that «was it used» is seen, not guessed.
       const lib = node('span', 'ku-ss-last ku-ss-lib');
@@ -712,11 +741,48 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       banner.id = SETUP_ID;
       form.parentElement.insertBefore(banner, form);
     }
+    // the steps right here, each one opens its page: no need to go and look the guide up
+    const steps = node('div', 'ku-sb-steps');
+    for (const step of setup.steps ?? []) {
+      if (step.done === null || !BANNER_STEPS.has(step.id)) continue;
+      // the same icon the section has in the menu; it is drawn in the colour of the text, so any theme paints it
+      const icon = iconSvg(NAV_TABS.find(([id]) => id === step.tab)?.[2] ?? (step.tab === 'personas' ? 'card' : 'check'));
+      const stepButton = chipButton('', 'studio', { tab: step.tab }, `${step.title}${step.done ? ': сделано' : step.required ? '' : ' (по желанию)'}`, `ku-dir-btn ku-sb-step${step.done ? ' done' : ''}`);
+      stepButton.setAttribute('aria-label', stepButton.title);
+      stepButton.innerHTML = icon;
+      if (step.done) stepButton.insertAdjacentHTML('beforeend', '<i class="ku-sb-tick" aria-hidden="true"></i>');
+      steps.append(stepButton);
+    }
     banner.replaceChildren(
-      node('span', 'ku-sb-text', `Кулисы: этот чат ещё не настроен (обязательных шагов ${setup.done} из ${setup.total}).`),
-      chipButton('Пошаговая инструкция', 'studio', { tab: 'setup' }, 'Открыть «Настройка чата»: что нажать и зачем', 'ku-dir-btn ku-sb-go'),
+      node('span', 'ku-sb-text', setup.done >= setup.total ? 'Закулисье: обязательное настроено. Остальные шаги по желанию:' : `Закулисье: этот чат ещё не настроен (обязательных шагов ${setup.done} из ${setup.total}). Пройдите шаги:`),
+      steps,
+      chipButton('Подробно', 'studio', { tab: 'setup' }, 'Открыть «Настройка чата»: что нажать и зачем', 'ku-dir-btn ku-sb-go'),
       chipButton('Позже', 'setup-later', { chat: setup.chat }, 'Скрыть до перезагрузки страницы'),
-      chipButton('Не напоминать здесь', 'setup-off', {}, 'Больше не показывать плашку в этом чате'),
+      chipButton('×', 'setup-off', {}, 'Закрыть плашку: в этом чате она больше не появится', 'ku-dir-btn ku-sb-close'),
+    );
+  }
+
+  /**
+   * The warning above the message box when the cards in play hold AU-only text but this chat plays no AU (view.auWarning = { names, hidden, chat, avatar }):
+   * it names the cards and opens the persona window, where the «АУ» button of a card picks the AU.
+   */
+  function renderAuBanner(view) {
+    let banner = document.getElementById(AU_ID);
+    const warning = view.auWarning;
+    if (!warning || snoozedAu.has(warning.chat)) { banner?.remove(); return; }
+    const form = document.getElementById('send_form');
+    if (!form?.parentElement) return;
+    if (!banner) {
+      banner = node('div', 'ku-setup-banner');
+      banner.id = AU_ID;
+      banner.setAttribute('role', 'status');
+      form.parentElement.insertBefore(banner, form);
+    }
+    const who = warning.names.slice(0, 3).map(name => `«${name}»`).join(', ') + (warning.names.length > 3 ? ` и ещё ${warning.names.length - 3}` : '');
+    banner.replaceChildren(
+      node('span', 'ku-sb-text', `АУ не выбрана: у ${who} есть разделы и записи для АУ (${warning.hidden}), в этом чате они не отправляются. Выберите АУ кнопкой «АУ» в карточке.`),
+      chipButton('Открыть карточку', 'open-personas', { avatar: warning.avatar ?? '' }, 'Окно «Персоны»: внизу карточки кнопка «АУ»', 'ku-dir-btn ku-sb-go'),
+      chipButton('Позже', 'au-later', { chat: warning.chat }, 'Скрыть до перезагрузки страницы'),
     );
   }
 
@@ -807,6 +873,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       tile(MODE_MARK[mode], 'Тип', MODE_LABEL[mode], 'dir-pane', { pane: 'mode' }, { on: pane === 'mode', title: 'Тип сцены: от него зависит, какие разделы анкет уходят модели' }),
       ...(mode === 'intim' || view.dice?.stage?.id ? [tile('🎲', 'Кубик', view.dice?.picks?.length ? (view.dice.sent ? 'отправлен' : 'выбрано') : (view.dice?.stage?.label || 'бросить'), 'dir-pane', { pane: 'dice' }, { on: pane === 'dice', title: 'Кубик близости: лесенка стадий, бросок, своя заметка' })] : []),
       tile('🔥', 'Накал', view.heat?.value ? `${view.heat.value} · ${view.heat.label}` : 'спокойно', 'dir-pane', { pane: 'heat' }, { on: pane === 'heat', title: 'Накал сцены: насколько она заряжена. Падает логично, поправить можно рукой' }),
+      tile('📅', 'Календарь', view.calendar?.next?.[0] ? view.calendar.next[0].when : (view.calendar ? 'пусто' : 'не задан'), 'dir-pane', { pane: 'calendar' }, { on: pane === 'calendar', title: 'Календарь: ближайшие события и месяц целиком' }),
       tile('🧭', 'Квесты', view.quests?.length ? `${view.quests.length} идут` : 'нет', 'dir-pane', { pane: 'quests' }, { on: pane === 'quests', title: 'Квесты: отметить шаг, ввести его в сюжет' }),
       tile('🎵', 'Песни', view.songs?.playing?.length ? `▶ ${view.songs.playing.length}` : view.songs?.found?.some(item => !item.muted) ? 'слышно' : 'тихо', 'dir-pane', { pane: 'songs' }, { on: pane === 'songs', title: 'Песни: что звучит, кто поёт, какая узнана в постах' }),
       tile('🎬', 'Сцена', 'новая', 'dir-pane', { pane: 'scene' }, { on: pane === 'scene', title: 'Начать новую сцену: с чего, когда, где и с кем' }),
@@ -869,6 +936,60 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
         row.append(buttons);
         card.append(row);
       }
+      return card;
+    };
+    /** The calendar at a glance: a small month, the next events; the big window is for editing. */
+    const calendarCard = () => {
+      const card = node('div', 'ku-dir-card ku-dir-calendar');
+      card.append(node('div', 'ku-dir-card-head', '📅 Календарь'));
+      const data = view.calendar;
+      if (!data) {
+        card.append(node('span', 'ku-dir-caption', 'Дата истории не задана: поставьте её в окне «Календарь».'), chipButton('Открыть календарь', 'studio', { tab: 'calendar' }, 'Окно календаря', 'ku-dir-btn'));
+        return card;
+      }
+      card.append(node('span', 'ku-dir-caption', `${data.month.title}${data.today ? ` · сегодня ${data.today}` : ''}`));
+      const grid = node('div', 'ku-cal-mini');
+      grid.style.gridTemplateColumns = `repeat(${data.month.weekdays.length}, minmax(0, 1fr))`;
+      for (const label of data.month.weekdays) grid.append(node('span', 'ku-cal-mini-head', label));
+      for (const cell of data.month.cells) {
+        if (!cell.iso) { grid.append(node('span', 'ku-cal-mini-cell other', '')); continue; }
+        const item = chipButton(String(cell.day), 'dir-cal-day', { iso: cell.iso }, cell.count ? `Событий: ${cell.count}` : 'Открыть день', `ku-cal-mini-cell${cell.other ? ' other' : ''}${cell.today ? ' today' : ''}${cell.count ? ' has' : ''}${ui.calDay === cell.iso ? ' on' : ''}`);
+        grid.append(item);
+      }
+      card.append(grid);
+      if (ui.calDay) {
+        const day = node('div', 'ku-cal-day');
+        day.append(node('b', null, ui.calDay.split('-').reverse().join('.')));
+        const events = data.month.days?.[ui.calDay] ?? [];
+        if (!events.length) day.append(node('span', 'ku-dir-caption', ' ничего не записано'));
+        for (const event of events) {
+          const row = node('div', 'ku-dir-row');
+          row.append(node('span', null, `${event.time ? `${event.time} ` : ''}${event.title}`), node('span', 'ku-dir-caption', event.kind ? ` · ${KIND_LABELS[event.kind] ?? ''}` : ''));
+          if (event.fromQuest) row.append(chipButton('К квестам', 'studio', { tab: 'quests' }, 'Срок записан у квеста', 'ku-dir-btn'));
+          else row.append(chipButton('✎', 'dir-cal-edit', { id: event.id }, 'Изменить', 'ku-dir-btn'), chipButton('×', 'dir-cal-del', { id: event.id }, 'Удалить событие', 'ku-dir-btn'));
+          day.append(row);
+        }
+        const form = ui.calForm;
+        if (form) {
+          const field = (name, value, placeholder, type = 'text') => { const input = node('input', 'text_pole ku-dir-input'); input.type = type; input.value = value ?? ''; input.placeholder = placeholder; input.dataset.kuField = name; return input; };
+          const select = (name, options, value) => { const box = node('select', 'text_pole'); box.dataset.kuField = name; for (const [key, label] of options) { const option = node('option', null, label); option.value = String(key); option.selected = String(key) === String(value); box.append(option); } return box; };
+          const row = node('div', 'ku-dir-row');
+          row.append(
+            field('cal-title', form.title, 'Что случится'), field('cal-time', form.time, 'время', 'time'),
+            select('cal-kind', [['', 'Обычное'], ...Object.entries(KIND_LABELS)], form.kind ?? ''), select('cal-intensity', [[1, 'слабо'], [2, 'заметно'], [3, 'сильно']], form.intensity ?? 2),
+            chipButton(form.id ? 'Сохранить' : 'Добавить', 'dir-cal-save', {}, 'Записать событие', 'ku-dir-btn ku-sb-go'), chipButton('Отмена', 'dir-cal-cancel', {}, 'Закрыть форму', 'ku-dir-btn'),
+          );
+          day.append(row);
+        } else day.append(chipButton('+ Событие', 'dir-cal-new', {}, 'Добавить событие на этот день', 'ku-dir-btn'));
+        card.append(day);
+      }
+      if (!data.next.length) card.append(node('span', 'ku-dir-caption', 'Ближайшие две недели: ничего не запланировано.'));
+      for (const event of data.next) {
+        const row = node('div', 'ku-dir-cal-row');
+        row.append(node('b', null, event.when), node('span', null, ` ${event.title}`), ...(event.kind ? [node('span', 'ku-dir-caption', ` · ${event.kind}`)] : []));
+        card.append(row);
+      }
+      card.append(chipButton('Открыть календарь', 'studio', { tab: 'calendar' }, 'Окно календаря: править события, шаблоны, свой календарь', 'ku-dir-btn'));
       return card;
     };
     const songsCard = () => {
@@ -996,6 +1117,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     else if (pane === 'others') parts.push(stage, othersMenu(director));
     else if (pane === 'time') parts.push(timeCard());
     else if (pane === 'quests') parts.push(questsCard());
+    else if (pane === 'calendar') parts.push(calendarCard());
     else if (pane === 'songs') parts.push(songsCard());
     else if (pane === 'heat') parts.push(heatCard());
     else if (pane === 'dice') parts.push(diceCard(view));
@@ -1178,6 +1300,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       lastView = view;
       try {
         renderSetupBanner(view);
+        renderAuBanner(view);
         renderChips(view);
         renderStrip(view);
         renderLeaks(view);

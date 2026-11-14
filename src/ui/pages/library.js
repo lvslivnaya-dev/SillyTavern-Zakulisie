@@ -150,7 +150,7 @@ export function createLibraryPages(ctx) {
       element('option', { value: '', text: 'Импорт…' }),
       ...(personaMode ? [] : [element('option', { value: 'lorebook', text: cards() ? 'Из лорбука (анкеты «[ Имя ] - Раздел»)' : 'Из лорбука' })]),
       element('option', { value: 'markdown', text: personaMode ? 'Из папки персон (Obsidian / Markdown)' : cards() ? 'Из папки анкет (Obsidian / Markdown)' : 'Из папки заметок (Obsidian / Markdown)' }),
-      ...(personaMode ? [] : [element('option', { value: 'json', text: 'Из файла Кулис (.json)' })]),
+      ...(personaMode ? [] : [element('option', { value: 'json', text: 'Из файла Закулисья (.json)' })]),
     ]);
     importMenu.value = s.importMode;
     importMenu.addEventListener('change', () => { s.importMode = importMenu.value; render(); });
@@ -638,6 +638,29 @@ export function createLibraryPages(ctx) {
   const RECORDS = '__records';
 
   /**
+   * The portrait with its buttons on the picture itself, seen on hover: the whole picture picks a new one, a cross in the corner takes it off
+   * (only when the card has its own). Nothing sits beside it, so the picture can be big.
+   */
+  function portraitFrame(entry, portrait) {
+    const input = element('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': 'Картинка карточки' });
+    input.addEventListener('change', () => {
+      const files = [...(input.files ?? [])];
+      input.value = '';
+      if (files.length) attempt(async () => invoke('onLibrarySetImage', { kind, id: entry.id, imageDataUrl: await fileToDataUrl(files[0]) }), 'Картинка сохранена');
+    });
+    const label = entry.image ? 'Заменить картинку' : 'Добавить картинку';
+    const pick = element('button', { type: 'button', className: 'ku-cport-pick', 'aria-label': label, title: label }, [icon('image')]);
+    pick.addEventListener('click', () => input.click());
+    const nodes = [portrait, pick, input];
+    if (entry.image) {
+      const clear = element('button', { type: 'button', className: 'ku-cport-x', 'aria-label': 'Убрать картинку', title: 'Убрать картинку' }, [icon('close')]);
+      clear.addEventListener('click', event => { event.stopPropagation(); attempt(() => invoke('onLibraryRemoveImage', { kind, id: entry.id }), 'Картинка убрана'); });
+      nodes.push(clear);
+    }
+    return element('div', { className: 'ku-cport-wrap' }, nodes);
+  }
+
+  /**
    * The sheet of a card, laid out as: who (a strip on top), the sections (a list on the left), one section at a time (on the right).
    * What was typed lives in `s.draft` until «Сохранить» or the card is closed, so any redraw keeps it.
    */
@@ -645,7 +668,7 @@ export function createLibraryPages(ctx) {
     const lib = library();
     const emb = embed;
     const layer = element('div', { className: `ku-wlayer${emb ? ' ku-embedded' : ''}` });
-    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; };
+    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; };
     const close = () => { s.openId = ''; forget(); render(); };
     if (!emb) layer.addEventListener('click', event => { if (event.target === layer) close(); });
     const dialog = element('section', { className: 'ku-wcard ku-ccard', role: emb ? 'region' : 'dialog', ...(emb ? {} : { 'aria-modal': 'true' }), 'aria-label': entry.name });
@@ -657,7 +680,7 @@ export function createLibraryPages(ctx) {
     // The draft: what the user changed and has not saved yet. Sections are a list of plain objects edited in place.
     if (s.draft?.id !== entry.id) {
       s.draft = { id: entry.id, fields: {
-        name: entry.name, folderId: entry.folderId, aliases: entry.aliases.join(', '),
+        name: entry.name, folderId: entry.folderId, aliases: entry.aliases.join(', '), gender: entry.gender ?? '',
         sections: entry.sections.map(section => ({ ...section, keys: [...(section.keys ?? [])] })),
         words: (entry.words ?? []).map(word => ({ ...word })),
         records: recordsToDraft(entry.records),
@@ -674,24 +697,17 @@ export function createLibraryPages(ctx) {
       ? element('img', { className: 'ku-cport', src: imageUrl(entry.image), alt: entry.name })
       : personaMode && entry.avatar ? element('img', { className: 'ku-cport', src: `/User Avatars/${encodeURIComponent(entry.avatar)}`, alt: entry.name })
       : element('span', { className: 'ku-cport ku-cnoport', 'aria-hidden': 'true', text: (draft.name || entry.name).slice(0, 1).toUpperCase() });
-    const nameInput = element('input', { type: 'text', value: draft.name, 'aria-label': 'Имя персонажа', className: 'ku-cname' });
+    const nameInput = element('input', { type: 'text', value: draft.name, 'aria-label': 'Имя персонажа', className: 'ku-cname', title: 'Имя и «другие имена» — как героя зовут в постах: имя, фамилия, клички, прозвища. Через запятую.' });
     nameInput.addEventListener('input', () => { draft.name = nameInput.value; });
-    const aliasInput = element('input', { type: 'text', value: draft.aliases, 'aria-label': 'Другие имена', placeholder: 'Манджиро, Майки' });
+    const aliasInput = element('input', { type: 'text', value: draft.aliases, 'aria-label': 'Другие имена', placeholder: 'Манджиро, Майки', title: 'Имя и «другие имена» — как героя зовут в постах: имя, фамилия, клички, прозвища. Через запятую.' });
     aliasInput.addEventListener('input', () => { draft.aliases = aliasInput.value; });
-    const folderSelect = element('select', { 'aria-label': 'Папка' }, foldersOf().concat(lib.folders.filter(item => item.id === entry.folderId && !foldersOf().includes(item))).map(item => element('option', { value: item.id, text: item.hidden ? 'Без папки' : pathText(item.id), selected: item.id === draft.folderId })));
-    folderSelect.addEventListener('change', () => { draft.folderId = folderSelect.value; });
+    const genderPick = element('select', { 'aria-label': 'Пол', className: 'ku-cgender', title: 'Пол героя: модель получает его вместе с остальным о персонаже, а тексты «пришёл / пришла» пишутся в нужном роде.' },
+      [['', 'Пол: не указан'], ['female', 'Женский'], ['male', 'Мужской']].map(([value, text]) => element('option', { value, text, selected: value === draft.gender })));
+    genderPick.addEventListener('change', () => { draft.gender = genderPick.value; });
     const top = element('header', { className: 'ku-ctop' }, [
-      element('div', { className: 'ku-cport-box' }, [
-        portrait,
-        element('div', { className: 'ku-cport-tools' }, [
-          portraitPicker(entry.image ? 'Заменить картинку' : 'Добавить картинку', async files => {
-            await attempt(async () => invoke('onLibrarySetImage', { kind, id: entry.id, imageDataUrl: await fileToDataUrl(files[0]) }), 'Картинка сохранена');
-          }),
-          ...(entry.image ? [iconButton('trash', 'Убрать картинку', () => attempt(() => invoke('onLibraryRemoveImage', { kind, id: entry.id }), 'Картинка убрана'))] : []),
-        ]),
-      ]),
+      element('div', { className: 'ku-cport-box' }, [portraitFrame(entry, portrait)]),
       element('div', { className: 'ku-ctop-main' }, [
-        element('div', { className: 'ku-cfields' }, emb ? [nameInput, aliasInput] : [nameInput, aliasInput, folderSelect]),
+        element('div', { className: 'ku-cfields' }, [nameInput, aliasInput, genderPick]),
         element('p', { className: 'ku-hint', text: 'Имя и «другие имена» — как героя зовут в постах: имя, фамилия, клички, прозвища. Через запятую. Английские варианты и знаки сами убираются. Склонения каждого слова пишутся слева в разделе «Имена»: оттуда модель берёт написание и падежи, а карточка узнаёт героя в постах. В одной папке имена не повторяются, в разных можно.' }),
       ]),
       element('div', { className: 'ku-ctop-tools' }, emb ? (emb.onGear ? [Object.assign(element('button', { type: 'button', className: 'ku-ib ku-gear', 'aria-label': 'Настройки персоны в таверне', title: 'Настройки персоны в таверне' }, [icon('gear')]), { onclick: emb.onGear })] : []) : [
@@ -701,48 +717,24 @@ export function createLibraryPages(ctx) {
       ]),
     ]);
 
+    // ---- The records of a persona: a list under the sections; the selected one is edited on the right
+    const recordIndex = Math.min(Math.max(Number(s.selRecord) || 0, 0), Math.max(draft.records.length - 1, 0));
+    const addRecord = () => {
+      draft.records.push({ id: '', text: '', about: '', knows: '', au: [], secret: false, off: false });
+      s.selSection = RECORDS;
+      s.selRecord = draft.records.length - 1;
+      render();
+    };
+    const removeRecord = index => {
+      draft.records.splice(index, 1);
+      s.selRecord = Math.max(0, Math.min(index, draft.records.length - 1));
+      render();
+    };
+
     // ---- The list of sections (left)
     const filled = draft.sections.filter(section => section.text.trim()).length;
     const nav = element('nav', { className: 'ku-cnavbox', 'aria-label': 'Разделы карточки' }, [
-      ...(entry.persona ? [
-        element('p', { className: 'ku-hint ku-cnavhead', text: 'О персоне' }),
-        (() => {
-          const row = element('button', { type: 'button', className: `ku-cnav${s.selSection === RECORDS ? ' on' : ''}`, 'aria-current': s.selSection === RECORDS ? 'true' : null }, [
-            element('span', { className: 'ku-cnav-title', text: 'Записи о персоне' }),
-            element('span', { className: 'ku-hint', text: draft.records.length ? String(draft.records.length) : 'пусто' }),
-          ]);
-          row.addEventListener('click', () => { s.selSection = RECORDS; render(); });
-          return row;
-        })(),
-      ] : []),
-      element('p', { className: 'ku-hint ku-cnavhead', text: 'Имена героя' }),
-      (() => {
-        const written = (draft.words ?? []).filter(word => word.same || ['gen', 'dat', 'acc', 'ins', 'pre'].some(key => word[key])).length;
-        const row = element('button', { type: 'button', className: `ku-cnav${s.selSection === NAMES ? ' on' : ''}`, 'aria-current': s.selSection === NAMES ? 'true' : null }, [
-          element('span', { className: 'ku-cnav-title', text: 'Имена и склонения' }),
-          element('span', { className: 'ku-hint', text: written ? `слов: ${written}` : 'пусто' }),
-        ]);
-        row.addEventListener('click', () => { s.selSection = NAMES; render(); });
-        return row;
-      })(),
-      element('p', { className: 'ku-hint ku-cnavhead', text: 'Одежда героя' }),
-      (() => {
-        const row = element('button', { type: 'button', className: `ku-cnav${s.selSection === CLOSET ? ' on' : ''}`, 'aria-current': s.selSection === CLOSET ? 'true' : null }, [
-          element('span', { className: 'ku-cnav-title', text: 'Шкаф' }),
-          element('span', { className: 'ku-hint', text: draft.closet.cardIds.length + draft.closet.lookIds.length ? `${draft.closet.lookIds.length} компл. · ${draft.closet.cardIds.length} вещ.` : 'пусто' }),
-        ]);
-        row.addEventListener('click', () => { s.selSection = CLOSET; s.closetFirst = null; render(); });
-        return row;
-      })(),
-      element('div', { className: 'ku-row ku-cnavhead' }, [
-        element('span', { className: 'ku-hint', text: `Разделы · ${filled} из ${draft.sections.length}` }),
-        element('span', { className: 'ku-push' }),
-        (() => {
-          const toggle = button(s.showSizes ? 'Размеры ✓' : 'Размеры', 'btn small', () => { s.showSizes = !s.showSizes; render(); }, 'Показать, сколько знаков занимает каждый раздел и какую долю карточки он съедает: видно, что стоит сократить');
-          toggle.setAttribute('aria-pressed', String(Boolean(s.showSizes)));
-          return toggle;
-        })(),
-      ]),
+      element('p', { className: 'ku-hint ku-cnavhead', text: `Разделы · ${filled} из ${draft.sections.length}` }),
       ...(s.showSizes ? (() => {
         const sizes = draft.sections.map(section => ({ title: section.title || CARD_SECTION_KINDS[section.kind], length: section.text.trim().length })).filter(item => item.length);
         const total = sizes.reduce((sum, item) => sum + item.length, 0);
@@ -762,6 +754,29 @@ export function createLibraryPages(ctx) {
         row.addEventListener('click', () => { s.selSection = section.id; render(); });
         return row;
       }),
+      ...(entry.persona ? [
+        element('div', { className: 'ku-cnavsep', role: 'separator' }),
+        element('div', { className: 'ku-cnavgroup' }, [
+          element('span', { className: 'ku-cnavgroup-title', text: 'Записи о персоне' }),
+          element('span', { className: 'ku-hint', text: draft.records.length ? String(draft.records.length) : '' }),
+          element('span', { className: 'ku-push' }),
+          Object.assign(element('button', { type: 'button', className: 'ku-ib ku-cnav-add', 'aria-label': 'Добавить запись', title: 'Добавить запись о персоне' }, [icon('plus')]), { onclick: addRecord }),
+        ]),
+        ...draft.records.map((record, position) => {
+          const first = String(record.text ?? '').trim().split('\n')[0];
+          const here = s.selSection === RECORDS && recordIndex === position;
+          const row = element('button', { type: 'button', className: `ku-cnav ku-crec${here ? ' on' : ''}${record.off ? ' off' : ''}`, 'aria-current': here ? 'true' : null,
+            title: record.off ? 'Запись выключена' : record.secret ? 'Секретная запись' : '' }, [
+            element('span', { className: `ku-cnav-title ku-crec-title${first ? '' : ' empty'}`, text: first ? (first.length > 160 ? `${first.slice(0, 159)}…` : first) : 'Пустая запись' }),
+            ...(record.secret ? [icon('lock')] : []),
+          ]);
+          row.addEventListener('click', () => { s.selSection = RECORDS; s.selRecord = position; render(); });
+          // a cross at the row: a record goes without scrolling down to its own page (it stays there too)
+          const drop = element('button', { type: 'button', className: 'ku-crec-x', 'aria-label': 'Удалить запись', title: 'Удалить запись' }, [icon('close')]);
+          drop.addEventListener('click', event => { event.stopPropagation(); removeRecord(position); });
+          return element('div', { className: 'ku-crecwrap' }, [row, drop]);
+        }),
+      ] : []),
       element('span', { className: 'ku-push' }),
       button('+ Свой раздел', 'btn small', () => {
         const created = makeSection({ kind: 'other', title: 'Новый раздел', text: '' });
@@ -773,16 +788,12 @@ export function createLibraryPages(ctx) {
         const copy = await invoke('onLibraryDuplicateCharacter', { cardId: entry.id });
         if (copy?.id) { s.openId = copy.id; forget(); }
       }, 'Копия создана')),
-      button('Удалить карточку', 'btn small danger', () => attempt(async () => {
-        const removed = await invoke('onLibraryRemoveCharacter', { cardId: entry.id });
-        if (removed) { s.openId = ''; forget(); }
-      })),
     ]);
 
     // ---- One section (right)
     const position = draft.sections.findIndex(section => section.id === s.selSection);
     const pane = s.selSection === RECORDS
-      ? renderPersonaRecords({ records: draft.records, au: snapshot().personaCards?.au ?? [], cards: (library().characters ?? []).filter(card => !card.persona).map(card => ({ id: card.id, name: card.name })).sort((left, right) => left.name.localeCompare(right.name, 'ru-RU')), redraw: render })
+      ? renderPersonaRecords({ records: draft.records, au: snapshot().personaCards?.au ?? [], cards: (library().characters ?? []).filter(card => !card.persona).map(card => ({ id: card.id, name: card.name })).sort((left, right) => left.name.localeCompare(right.name, 'ru-RU')), redraw: render, selected: recordIndex, add: addRecord, remove: removeRecord })
       : s.selSection === NAMES
       ? renderNameWords({ name: draft.name, aliases: draft.aliases.split(','), words: draft.words, redraw: render, setStatus, fill: payload => invoke('onCardNamesFill', payload) })
       : s.selSection === CLOSET ? renderClosetPane(entry, draft.closet) : position < 0
@@ -792,25 +803,100 @@ export function createLibraryPages(ctx) {
     // ---- The footer
     const persist = async () => {
       await invoke('onLibraryUpdateCharacter', { cardId: entry.id, changes: {
-        name: draft.name, folderId: draft.folderId, aliases: draft.aliases.split(','), sections: draft.sections, words: draft.words, closet: draft.closet, ...(entry.persona ? { records: recordsFromDraft(draft.records) } : {}),
+        name: draft.name, folderId: draft.folderId, aliases: draft.aliases.split(','), gender: draft.gender, sections: draft.sections, words: draft.words, closet: draft.closet, ...(entry.persona ? { records: recordsFromDraft(draft.records) } : {}),
       } });
       forget();
     };
     const linked = linkedSet().has(entry.id);
     const owner = Object.entries(snapshot().cardByEntity ?? {}).find(([, card]) => card.id === entry.id)?.[0];
     const ownerName = owner ? characterName((snapshot().characters ?? []).find(character => characterId(character) === owner), '') : '';
+    /** A small square button of the footer, as tall as the switch beside it: opens a page of the card (or flips a view). */
+    const footTool = (iconName, label, on, onClick, pressed = false) => {
+      const node = element('button', { type: 'button', className: `ku-cfoot-tool${on ? ' on' : ''}`, 'aria-label': label, title: label }, [icon(iconName)]);
+      if (pressed) node.setAttribute('aria-pressed', String(on)); else if (on) node.setAttribute('aria-current', 'true');
+      node.addEventListener('click', onClick);
+      return node;
+    };
+    /** The AU of the chat: a button with a caption, and the little window over it that switches them (the same list as the cards' sections and records use). */
+    const auList = () => snapshot().personaCards?.au ?? [];
+    const auOn = () => new Set(snapshot().personaAu ?? []);
+    const auButton = () => {
+      const count = auList().filter(item => auOn().has(item.id)).length;
+      const node = element('button', { type: 'button', className: `ku-cfoot-tool ku-cfoot-au${s.auOpen ? ' on' : ''}`, 'aria-expanded': String(Boolean(s.auOpen)),
+        title: count ? `АУ этого чата: включено ${count}. Тексты карточек с меткой АУ уходят рассказчику, только когда нужное АУ включено.` : 'АУ этого чата: сейчас не выбрано ни одного. Тексты карточек с меткой АУ в чат не уходят.' }, [
+        element('span', { className: 'ku-au-text', text: 'АУ' }),
+        ...(count ? [element('span', { className: 'ku-au-badge', text: String(count) })] : (auList().length ? [element('span', { className: 'ku-au-badge warn', text: '!' })] : [])),
+      ]);
+      node.addEventListener('click', () => { s.auOpen = !s.auOpen; render(); });
+      return node;
+    };
+    const auWindow = () => {
+      const on = auOn();
+      const box = element('div', { className: 'ku-aupop', role: 'dialog', 'aria-label': 'АУ этого чата' }, [
+        element('div', { className: 'ku-row' }, [
+          element('strong', { text: 'АУ этого чата' }),
+          element('span', { className: 'ku-push' }),
+          Object.assign(element('button', { type: 'button', className: 'ku-ib', 'aria-label': 'Закрыть', title: 'Закрыть' }, [icon('close')]), { onclick: () => { s.auOpen = false; render(); } }),
+        ]),
+        element('p', { className: 'ku-hint', text: 'Включённые АУ играет этот чат: разделы и записи карточек с этой меткой уходят рассказчику. Без метки уходит всегда. Можно включить несколько сразу.' }),
+      ]);
+      if (!auList().length) box.append(element('p', { className: 'ku-hint', text: 'АУ пока нет. Добавьте первое, например «Универ» или «Мафия».' }));
+      for (const item of auList()) {
+        const check = element('input', { type: 'checkbox', className: 'set-switch', checked: on.has(item.id), 'aria-label': `АУ «${item.name}» включено в этом чате` });
+        check.addEventListener('change', () => attempt(() => act('onPersonaAuToggle', { id: item.id, on: check.checked }, 'persona-au-toggle'), check.checked ? `АУ «${item.name}» включено` : `АУ «${item.name}» выключено`));
+        box.append(element('div', { className: 'ku-fact' }, [
+          element('label', { className: 'ku-fact-text' }, [check, ` ${item.name}`]),
+          button('×', 'btn icon small', () => attempt(() => act('onPersonaAuRemove', { id: item.id }, 'persona-au-remove'), 'АУ удалено'), `Удалить АУ «${item.name}» (метка пропадёт и с карточек)`),
+        ]));
+      }
+      const name = element('input', { type: 'text', placeholder: 'Название нового АУ', 'aria-label': 'Название нового АУ' });
+      box.append(element('div', { className: 'ku-row' }, [name, button('Добавить', 'btn small', () => attempt(async () => { await act('onPersonaAuAdd', { name: name.value }, 'persona-au-add'); name.value = ''; }, 'АУ добавлено'))]));
+      return box;
+    };
+
+    /** The foot of a persona's card: whether she is the one you wear (nothing to switch: the worn persona is the persona of the chat), and whether her card goes to the model. */
+    const personaFoot = card => {
+      if (!personaMode) return [];
+      const snap = snapshot();
+      const mine = snap.personaCardId === card.id;
+      const sending = snap.personaCards?.enabled !== false;
+      const other = snap.chatPersonaName || snap.personaBoundName;
+      return [
+        element('span', { className: `ku-chip ku-pstate${mine ? ' told' : ''}`,
+          title: mine ? 'Эта персона надета в таверне: её карточка и есть карточка твоей персоны в этом чате.' : `Сейчас в этом чате ты${other ? ` — ${other}` : ' другая персона'}. Чтобы эта карточка заработала, нажми «Надеть» вверху окна.`,
+          text: mine ? 'Это ты в этом чате' : 'Не надета сейчас' }),
+        element('label', { className: 'ku-inline ku-wear', title: 'Отправлять ли карточку персоны рассказчику (общий выключатель для всех персон)' }, [
+          toggle(sending, 'Отправлять карточку персоны модели', on => attempt(() => act('onPersonaCardsEnabled', { enabled: on }, 'persona-card-enabled'), on ? 'Карточка персоны отправляется' : 'Карточка персоны не отправляется')),
+          element('strong', { className: 'ku-small', text: sending ? 'Отправляется модели' : 'Не отправляется модели' }),
+        ]),
+      ];
+    };
+
     const foot = element('footer', { className: 'ku-cfoot' }, [
-      element('label', { className: 'ku-inline ku-wear' }, [
-        toggle(linked, personaMode ? `${entry.name}: персона этого чата` : `${entry.name} в этом чате`, on => attempt(() => (personaMode ? act('onPersonaCardUse', { cardId: on ? entry.id : '' }, 'persona-card-use') : act('onLibraryLink', { libraryIds: [entry.id], on, kind }, 'library-link')), on ? (personaMode ? 'Это персона чата' : 'Карточка включена') : (personaMode ? 'Персона по умолчанию' : 'Карточка выключена'))),
+      ...(personaMode ? [] : [      element('label', { className: 'ku-inline ku-wear' }, [
+        toggle(linked, `${entry.name} в этом чате`, on => attempt(() => act('onLibraryLink', { libraryIds: [entry.id], on, kind }, 'library-link'), on ? 'Карточка включена' : 'Карточка выключена')),
         element('span', {}, [
           element('strong', { className: 'ku-small', text: linked ? 'Включена в этом чате' : 'Выключена в этом чате' }),
           element('span', { className: 'muted ku-small', text: linked
             ? ` — рассказчик читает её про ${ownerName || 'этого персонажа'}, когда он в сцене`
             : ' — включите: персонаж с таким именем подключится к карточке, а если его в чате нет, он появится' }),
         ]),
+      ])]),
+      ...personaFoot(entry),
+      element('span', { className: 'ku-cfoot-tools', role: 'group', 'aria-label': 'Разделы карточки' }, [
+        footTool('letter', 'Имена и склонения: как героя зовут в постах и в каких падежах', s.selSection === NAMES, () => { s.selSection = NAMES; render(); }),
+        footTool('shirt', 'Шкаф: комплекты и вещи героя', s.selSection === CLOSET, () => { s.selSection = CLOSET; s.closetFirst = null; render(); }),
+        footTool('bars', 'Размеры: сколько знаков занимает каждый раздел', Boolean(s.showSizes), () => { s.showSizes = !s.showSizes; render(); }, true),
+        auButton(),
       ]),
       ...(linked || personaMode ? [] : [attachChoice(entry)]),
       element('span', { className: 'ku-push' }),
+      Object.assign(element('button', { type: 'button', className: 'ku-cfoot-del', 'aria-label': 'Удалить карточку', title: 'Удалить карточку' }, [icon('trash')]), {
+        onclick: () => attempt(async () => {
+          const removed = await invoke('onLibraryRemoveCharacter', { cardId: entry.id });
+          if (removed) { s.openId = ''; forget(); }
+        }),
+      }),
       button('Сохранить', 'btn primary', () => attempt(async () => { await persist(); s.openId = ''; }, 'Карточка сохранена')),
     ]);
 
@@ -842,7 +928,12 @@ export function createLibraryPages(ctx) {
     remember(pane, 'pane');
     remember(nav, 'nav');
     const restore = () => { if (s.scroll?.key !== scrollKey) return; if (s.scroll.pane) pane.scrollTop = s.scroll.pane; if (s.scroll.nav) nav.scrollTop = s.scroll.nav; };
+    const wearLabel = foot.querySelector('.ku-wear');
+    if (wearLabel) wearLabel.title = wearLabel.textContent.replace(/\s+/g, ' ').trim();
+    const stripNote = strip.querySelector('.ku-cstrip-note');
+    if (stripNote && strip.firstElementChild) strip.firstElementChild.title = stripNote.textContent;
     dialog.append(top, strip, element('div', { className: 'ku-cbodybox' }, [nav, pane]), foot);
+    if (s.auOpen) foot.append(auWindow());
     queueMicrotask(restore);
     setTimeout(restore, 0);
     layer.append(dialog);
@@ -1063,7 +1154,10 @@ export function createLibraryPages(ctx) {
     const showCount = () => { count.textContent = `Что рассказчик должен знать об этом: факты, привычки, как говорит. Пустой раздел в запрос не уходит. Сейчас ${section.text.trim().length} зн.`; };
     showCount();
     const text = element('textarea', { rows: 9, value: section.text, id: 'ku-card-text', 'aria-label': `Текст раздела ${section.title}` });
-    text.addEventListener('input', () => { section.text = text.value; showCount(); });
+    // grows with its text: one scroll (the pane's), not a scroll inside a scroll
+    const fitText = () => { text.style.height = 'auto'; text.style.height = `${Math.max(220, text.scrollHeight + 4)}px`; };
+    setTimeout(fitText, 0);
+    text.addEventListener('input', () => { section.text = text.value; showCount(); fitText(); });
 
     // «When»: two plain choices; the second opens the list of own rules.
     const own_when = Boolean(section.when);
@@ -1129,17 +1223,23 @@ export function createLibraryPages(ctx) {
 
     // The AU the section is written for (the list is the persona's: one for all chats); the chat says which are on.
     const auAll = snapshot().personaCards?.au ?? [];
-    const auRow = section.kind === 'private' ? element('p', { className: 'ku-hint', text: 'Это раздел для генерации факторов отношений: модель читает его, когда пишет факторы линии с участием персоны. Рассказчику, анализу ответов и остальным он не уходит, правил отправки и АУ у него нет.' }) : element('div', { className: 'ku-fld' }, [
-      element('label', { className: 'ku-clabel', text: 'В каких АУ раздел отправляется' }),
-      element('div', { className: 'ku-row' }, auAll.map(item => {
+    // One small button with the count instead of a row of chips: the choice opens in a little window of ticks.
+    const auCount = (section.au ?? []).length;
+    const auHere = section.kind !== 'private' && auAll.length > 0;
+    const auButtonHere = auHere ? Object.assign(element('button', { type: 'button', className: `btn small ku-secau${s.secAuOpen ? ' on' : ''}${auCount ? ' set' : ''}`, 'aria-expanded': String(Boolean(s.secAuOpen)),
+      title: auCount ? 'Раздел уходит модели только в выбранных АУ' : 'Раздел уходит во всех АУ. Нажмите, чтобы привязать к определённым' }, ['АУ', auCount ? element('span', { className: 'ku-au-badge', text: String(auCount) }) : null]), { onclick: () => { s.secAuOpen = !s.secAuOpen; render(); } }) : null;
+    const auRow = auHere && s.secAuOpen ? element('div', { className: 'ku-aupop ku-secaupop', role: 'group', 'aria-label': 'В каких АУ раздел отправляется' }, [
+      element('strong', { text: 'В каких АУ раздел отправляется' }),
+      element('p', { className: 'ku-hint', text: 'Ни одного: во всех АУ. Раздел для АУ ждёт, пока оно не включено в этом чате (кнопка «АУ» внизу карточки).' }),
+      ...auAll.map(item => {
         const on = (section.au ?? []).includes(item.id);
-        const node = element('button', { type: 'button', className: `ku-chip${on ? ' told' : ''}`, text: item.name, 'aria-pressed': String(on) });
-        node.addEventListener('click', () => { section.au = on ? (section.au ?? []).filter(id => id !== item.id) : [...(section.au ?? []), item.id]; if (!section.au.length) delete section.au; render(); });
-        return node;
-      })),
-      element('p', { className: 'ku-hint', text: auAll.length ? 'Ни одного — во всех АУ. Раздел для АУ ждёт, пока оно не включено в этом чате (Отношения → Записи или Сцена → Персона).' : 'АУ пока нет: добавьте их на странице «Персона» (Сцена → Персона), и их можно будет отмечать здесь. Раздел без отметок идёт во всех АУ.' }),
-    ]);
+        const box = element('input', { type: 'checkbox', checked: on, 'aria-label': item.name });
+        box.addEventListener('change', () => { section.au = box.checked ? [...(section.au ?? []), item.id] : (section.au ?? []).filter(id => id !== item.id); if (!section.au.length) delete section.au; render(); });
+        return element('label', { className: 'ku-fact-text' }, [box, ` ${item.name}`]);
+      }),
+    ]) : (section.kind === 'private' ? element('p', { className: 'ku-hint', text: 'Это раздел для генерации факторов отношений: модель читает его, когда пишет факторы линии с этим героем. Модели в чат он не уходит.' }) : null);
 
+    if (auButtonHere) tools.append(auButtonHere);
     return element('div', { className: 'ku-cpane' }, [
       element('div', { className: 'ku-ctitlerow' }, [element('h3', { className: 'ku-ctitle', text: section.title || CARD_SECTION_KINDS[section.kind] }), ...(chip ? [chip] : []),
         ...(personaMode && entry && (section.kind === 'visual' || section.kind === 'voice') ? [element('span', { className: 'ku-push' }), button('Описать по картинке…', 'btn small', () => { lookState(entry).open = true; render(); }, 'Модель опишет по картинке то, что не меняется: лицо, глаза, волосы, рост, сложение (и голос, если отметить)')] : [])]),
@@ -1148,7 +1248,7 @@ export function createLibraryPages(ctx) {
       ...(personaMode ? [] : [whenBox]),
       ...(personaMode ? [element('p', { className: 'ku-hint', text: 'Разделы персоны уходят модели всегда: ни правил отправки, ни ключевых слов тут не нужно.' })] : []),
       ...(personaMode ? [] : [element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', htmlFor: 'ku-card-keys', text: 'Ключевые слова' }), keys, regexRow, element('p', { className: 'ku-hint', text: byKeys ? 'Раздел попадёт в запрос, только если одно из этих слов встретится в вашем последнем посте или в предыдущем ответе. Каждое слово с новой строки (или через запятую). Без слов такой раздел не уйдёт никогда. Обычное слово находится и внутри других слов («байк» найдёт и «байкер»); «Надеть регекс» делает поиск точнее: только слово с окончаниями, только целиком или любое начинающееся так. Свой регекс можно писать вручную: /байк(а|у)?/i.' : 'Поле работает, когда правило раздела — «по ключевым словам». Сейчас у раздела другое правило, слова не нужны: выберите «Своё правило» → «по ключевым словам» выше.' })])]),
-      auRow,
+      ...(auRow ? [auRow] : []),
       more,
       tools,
     ]);
@@ -1364,7 +1464,7 @@ export function createLibraryPages(ctx) {
         element('p', { className: 'muted ku-small', text: personaMode
           ? 'Каждая заметка .md из папки персон (Obsidian: Person) — одна карточка, подпапки — папки. Первая строка — имя («кличка» в ёлочках станет прозвищем), строки под ним — «Public Info», затем абзац внешности и абзац голоса. Загружается русский текст: переведите его кнопкой «Перевести русские» над списком.'
           : cards()
-          ? 'Каждая заметка .md — одна карточка, подпапки — папки. Загружается русский текст: разделы — заголовки «### …» (Basic Info, Voice…); подсказки %% … %%, пустые вопросы и английская часть «# Translate» не попадут. Имена берутся из aliases, name_en и keys шапки. Перевод на английский делается потом, кнопкой на карточке. Папку Кулисы запомнят и подскажут, если заметка изменилась.'
+          ? 'Каждая заметка .md — одна карточка, подпапки — папки. Загружается русский текст: разделы — заголовки «### …» (Basic Info, Voice…); подсказки %% … %%, пустые вопросы и английская часть «# Translate» не попадут. Имена берутся из aliases, name_en и keys шапки. Перевод на английский делается потом, кнопкой на карточке. Папку Закулисье запомнят и подскажут, если заметка изменилась.'
           : things()
           ? 'Каждая заметка .md — одна вещь, подпапки — папки. В шапке можно указать aliases, «владелец» и «важность» (важная / ключевая).'
           : 'Каждая заметка .md — одна локация, подпапки — папки. В шапке можно указать aliases, traits и «находится в».' }),
@@ -1381,7 +1481,7 @@ export function createLibraryPages(ctx) {
           render();
         } catch (error) { setStatus(error instanceof SyntaxError ? 'Файл не читается как JSON' : (error?.message || 'Файл не прочитан'), true); }
       } });
-      box.append(element('h3', { text: 'Из файла Кулис' }), element('p', { className: 'muted ku-small', text: `${s.folderId ? `Папки файла лягут в «${folderName}».` : 'Папки файла лягут в корень библиотеки.'} Из файла берутся локации, вещи и карточки: выберите файл, потом отметьте, что загрузить.` }),
+      box.append(element('h3', { text: 'Из файла Закулисья' }), element('p', { className: 'muted ku-small', text: `${s.folderId ? `Папки файла лягут в «${folderName}».` : 'Папки файла лягут в корень библиотеки.'} Из файла берутся локации, вещи и карточки: выберите файл, потом отметьте, что загрузить.` }),
         ...(s.file ? [renderFileChooser()] : []), element('div', { className: 'ku-row' }, [pick, close]));
     }
     return box;
@@ -1499,21 +1599,52 @@ export const LIBRARY_STYLE = `
 /* the editor inside another window: no overlay, fills the place it is given */
 .ku-wlayer.ku-embedded{position:static;inset:auto;z-index:auto;display:block;padding:0;background:none;backdrop-filter:none;height:100%}
 .ku-wlayer.ku-embedded .ku-ccard{width:100%;height:100%;max-height:none;border:0;border-radius:0;box-shadow:none;background:transparent}
+/* the same editor in a narrow window: a tighter head, a slimmer list (the long hints are tooltips everywhere, see below) */
+.ku-embedded .ku-ctop{gap:12px;padding:10px 14px;align-items:center}
+.ku-embedded .ku-cport-wrap,.ku-embedded .ku-cport{width:96px;height:120px}
+.ku-embedded .ku-cfields input{min-height:38px}
+.ku-embedded .ku-cstrip{padding:6px 14px;gap:6px 10px}
+.ku-embedded .ku-cnavbox{flex:0 0 196px;padding:10px 8px}
+.ku-embedded .ku-cnav{min-height:38px;padding:0 10px;font-size:13px}
+.ku-embedded .ku-cpane{padding:16px 18px;gap:16px}
+.ku-embedded .ku-cfoot{position:sticky;bottom:0;z-index:2;flex:0 0 auto;gap:10px;padding:8px 14px}
 .ku-ctop{display:flex;gap:18px;align-items:flex-start;padding:20px 24px;border-bottom:1px solid var(--k-line)}
-.ku-cport-box{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;align-items:stretch;width:86px}
-.ku-cport{width:86px;height:86px;border-radius:14px;object-fit:cover;display:block;background:var(--k-inset)}
-.ku-cnoport{display:grid;place-items:center;font-size:36px;font-weight:700;color:var(--k-accent)}
-.ku-cport-tools{display:flex;gap:6px;justify-content:center}
-.ku-cport-tools .ku-ib{border:1px solid var(--k-line);width:32px;height:32px}
-.ku-cport-tools .ku-ib:hover{color:var(--k-text);border-color:var(--k-accent-line)}
+.ku-cport-box{flex:0 0 auto;display:block}
+.ku-cport-wrap{position:relative;width:124px;height:156px;border-radius:14px;overflow:hidden}
+.ku-cport{width:124px;height:156px;border-radius:14px;object-fit:cover;display:block;background:var(--k-inset)}
+.ku-cport-pick{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border:0;border-radius:inherit;background:color-mix(in srgb,var(--k-bg) 62%,transparent);color:var(--k-text);cursor:pointer;opacity:0;transition:opacity .18s ease}
+.ku-cport-pick .ku-ico{width:26px;height:26px}
+.ku-cport-x{position:absolute;top:5px;right:5px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:50%;background:color-mix(in srgb,var(--k-bg) 78%,transparent);color:var(--k-text);cursor:pointer;opacity:0;transition:opacity .18s ease}
+.ku-cport-x .ku-ico{width:13px;height:13px}
+.ku-cport-wrap:hover .ku-cport-pick,.ku-cport-wrap:focus-within .ku-cport-pick,.ku-cport-wrap:hover .ku-cport-x,.ku-cport-wrap:focus-within .ku-cport-x{opacity:1}
+.ku-cport-x:hover{background:var(--k-warn)}
+.ku-cnoport{display:grid;place-items:center;font-size:44px;font-weight:700;color:var(--k-accent)}
 .ku-ctop-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:8px}
 .ku-cfields{display:flex;gap:10px;flex-wrap:wrap}
 .ku-cfields input,.ku-cfields select{flex:1 1 200px;min-width:0;min-height:42px}
+.ku-cfields .ku-cgender{flex:0 1 150px}
 .ku-cname{font-size:18px;font-weight:700}
 .ku-ctop-tools{display:flex;gap:6px;align-items:center}
 .ku-cbodybox{flex:1 1 auto;min-height:0;display:flex}
 .ku-cnavbox{flex:0 0 260px;box-sizing:border-box;padding:16px 14px;border-right:1px solid var(--k-line);display:flex;flex-direction:column;gap:4px;overflow:auto}
 .ku-cnavhead{padding:0 8px 8px}
+.ku-cnavbox>*{flex-shrink:0}
+.ku-cnavsep{height:1px;margin:12px 4px 8px;background:var(--k-line)}
+.ku-cnavgroup{display:flex;align-items:center;gap:8px;padding:0 4px 4px 8px}
+.ku-cnavgroup-title{font-size:12.5px;font-weight:600;color:var(--k-text);overflow-wrap:anywhere}
+.ku-cnav-add{width:28px;height:28px;border:1px solid var(--k-line);border-radius:50%}
+.ku-cnav-add:hover{color:var(--k-text);border-color:var(--k-accent-line)}
+.ku-crec{height:auto;min-height:40px;align-items:flex-start;padding:8px 12px;line-height:1.3}
+.ku-crec .ku-crec-title{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word}
+.ku-crec .ku-crec-title.empty{color:var(--k-muted);font-style:italic}
+.ku-crec.off{opacity:.55}
+.ku-crecwrap{position:relative;flex:0 0 auto}
+.ku-crecwrap .ku-crec{padding-right:34px}
+.ku-crec-x{position:absolute;top:6px;right:6px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:50%;background:transparent;color:var(--k-muted);cursor:pointer;opacity:0;transition:opacity .15s ease,color .15s ease,background-color .15s ease}
+.ku-crec-x .ku-ico{width:12px;height:12px}
+.ku-crecwrap:hover .ku-crec-x,.ku-crec-x:focus-visible{opacity:1}
+.ku-crec-x:hover{color:var(--k-warn);background:var(--k-inset)}
+.ku-crec .ku-ico{flex:0 0 auto;width:14px;height:14px;margin-top:2px;color:var(--k-muted)}
 .ku-cnav{display:flex;align-items:center;gap:10px;width:100%;box-sizing:border-box;min-height:44px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:var(--k-text);font-size:13.5px;text-align:left;cursor:pointer}
 .ku-cnav:hover{background:var(--k-inset)}
 .ku-cnav.on{background:var(--k-accent-soft);color:var(--k-accent);font-weight:600;box-shadow:inset 3px 0 0 var(--k-accent)}
@@ -1578,7 +1709,26 @@ export const LIBRARY_STYLE = `
 .ku-cmore summary{cursor:pointer;font-size:13.5px;font-weight:600;padding:6px 0}
 .ku-cmore .ku-fld{margin-top:12px}
 .ku-ctools{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:14px;border-top:1px solid var(--k-line)}
-.ku-cfoot{display:flex;gap:12px;align-items:center;padding:14px 24px;border-top:1px solid var(--k-line)}
+.ku-cfoot{display:flex;gap:10px;align-items:stretch;padding:12px 24px;border-top:1px solid var(--k-line)}
+.ku-cfoot{position:relative}
+.ku-cfoot>.btn{align-self:center}
+.ku-cfoot>.ku-chip{align-self:center}
+.ku-cfoot-au{width:auto;gap:6px;padding:0 14px;font-weight:800;font-size:14px;letter-spacing:.02em}
+.ku-au-badge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--k-accent);color:var(--k-bg);font-size:11px;line-height:18px;text-align:center}
+.ku-au-badge.warn{background:var(--k-warn)}
+.ku-aupop{position:absolute;right:24px;bottom:calc(100% + 8px);z-index:6;width:min(360px,calc(100% - 32px));max-height:min(420px,70vh);overflow:auto;display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--k-line);border-radius:14px;background:var(--k-bg);box-shadow:0 18px 50px var(--k-shadow)}
+.ku-aupop .ku-hint{margin:0}
+.ku-pstate{white-space:nowrap}
+.ku-secau{gap:6px}.ku-secau.set,.ku-secau.on{border-color:var(--k-accent);color:var(--k-accent)}
+.ku-secaupop{position:static;width:auto;max-width:420px;margin:0 0 10px;box-shadow:none}
+.ku-cfoot-tools{display:flex;gap:8px;align-items:stretch}
+.ku-cfoot-tool,.ku-cfoot-del{flex:0 0 auto;width:48px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--k-line);border-radius:12px;background:var(--k-inset);color:var(--k-muted);cursor:pointer;transition:color .15s ease,border-color .15s ease,background-color .15s ease}
+.ku-cfoot-tool .ku-ico,.ku-cfoot-del .ku-ico{width:21px;height:21px}
+.ku-cfoot-tool:hover{color:var(--k-text);border-color:var(--k-accent-line)}
+.ku-cfoot-tool.on{color:var(--k-accent);border-color:var(--k-accent);background:var(--k-accent-soft)}
+.ku-cfoot-del:hover{color:var(--k-warn);border-color:var(--k-warn)}
+.ku-cstrip-note{display:none}
+.ku-cfoot .ku-wear .muted{display:none}
 .ku-attach{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 @media (max-width:760px){.ku-ctop{flex-wrap:wrap}.ku-cbodybox{flex-direction:column;overflow:auto}.ku-cnavbox{flex-basis:auto;border-right:0;border-bottom:1px solid var(--k-line)}}
 @container (max-width:700px){.ku-lib .ku-wsec{width:100%}.ku-lnew{flex:1 1 100%}}

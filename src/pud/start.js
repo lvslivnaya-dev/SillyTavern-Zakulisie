@@ -13,6 +13,7 @@ import { startMessenger } from './ui/messenger.js';
 import { startAssistants } from './ui/assistants.js';
 import { startWalkCat } from './ui/walkcat.js';
 import { startHub } from './ui/hub.js';
+import { startConnection } from './ui/connection.js';
 import { startChips } from './ui/chips.js';
 import { startPalette } from './ui/palette.js';
 import { startPrompts } from './ui/prompts.js';
@@ -37,8 +38,12 @@ const MODULES = [
   { name: 'скрыть сообщения', start: ({ context }) => startHider(document, { context }) },
   { name: 'котик при стриминге', start: ({ context }) => startWalkCat(document, { context }) },
   {
-    name: 'окно Пудреница',
+    name: 'окно Закулисья',
     start: ({ context, settings, stopAll, shared }) => startHub(document, { settings, save: () => context.saveSettingsDebounced?.(), stopAll, shared }),
+  },
+  {
+    name: 'профили соединения',
+    start: ({ context, settings }) => startConnection(document, { context, settings, save: () => context.saveSettingsDebounced?.() }),
   },
   {
     name: 'палитра',
@@ -115,7 +120,7 @@ export async function initPudrenitsa({ bridge = null } = {}) {
   const running = [];
   const failed = [];
   const stopAll = () => controller?.stop();
-  const shared = {};
+  const shared = { kulisyLore: bridge?.lore ?? null };
   if (settings.enabled) {
     for (const module of MODULES) {
       try {

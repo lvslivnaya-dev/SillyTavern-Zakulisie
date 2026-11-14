@@ -28,8 +28,8 @@ export function hasCustomCss(context) {
 export function themeWarnings(doc, context) {
   const warnings = [];
   const replaced = activeReplacedExtensions(doc);
-  if (replaced.length) warnings.push(`Пудреница заменяет эти расширения, выключи их, чтобы окна не дрались: ${replaced.join(', ')}.`);
-  if (hasCustomCss(context)) warnings.push('В настройках таверны есть свой CSS (User Settings → Custom CSS). Он может перекрасить Пудреницу, лучше очистить его или выбрать стандартную тему.');
+  if (replaced.length) warnings.push(`Закулисье заменяет эти расширения, выключи их, чтобы окна не дрались: ${replaced.join(', ')}.`);
+  if (hasCustomCss(context)) warnings.push('В настройках таверны есть свой CSS (User Settings → Custom CSS). Он может перекрасить Закулисье, лучше очистить его или выбрать стандартную тему.');
   return warnings;
 }
 
@@ -43,7 +43,7 @@ export function startTheme(doc, context) {
 
   for (const text of themeWarnings(doc, context)) {
     console.warn(`${TAG} ${text}`);
-    globalThis.toastr?.warning?.(text, 'Пудреница', { timeOut: 12000 });
+    globalThis.toastr?.warning?.(text, 'Закулисье', { timeOut: 12000 });
   }
 
   return () => {

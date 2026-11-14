@@ -158,6 +158,7 @@ const RULES = Object.freeze([
 export function buildPersonaPrompt(card, { present = [], activeAu = [], presentCardIds = [], cardNames = new Map(), maxCharacters = PERSONA_LIMITS.promptCharacters } = {}) {
   if (!card) return '';
   const lines = [];
+  if (card.gender === 'female' || card.gender === 'male') lines.push(`gender: ${card.gender}`);
   const auOn = new Set(activeAu);
   for (const section of filledSections(card).filter(item => !item.au?.length || item.au.some(id => auOn.has(id)))) {
     const text = sectionText(section).replace(/\s*\n\s*/g, ' ');

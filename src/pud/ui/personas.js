@@ -38,7 +38,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
 
   try {
     if (importLegacyPersonas(settings, key => storage?.getItem(key) ?? null)) {
-      globalThis.toastr?.info?.('Избранное и папки из Persona Panel перенесены в окно персон.', 'Пудреница');
+      globalThis.toastr?.info?.('Избранное и папки из Persona Panel перенесены в окно персон.', 'Закулисье');
     }
     save();
   } catch (error) { report('перенос из Persona Panel', error); }
@@ -148,7 +148,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
   // своя на каждую загрузку страницы, а после нажатия «сменить картинку» минуту обновляется при каждой перерисовке.
   const pageStamp = Date.now();
   let freshUntil = 0;
-  const thumb = avatar => `${api.thumbUrl(avatar)}&t=${Date.now() < freshUntil ? Date.now() : pageStamp}`;
+  const thumb = avatar => `${api.thumbUrl(avatar)}&t=${Date.now() < freshUntil ? Date.now() : Math.max(pageStamp, api.imageStamp?.() ?? 0)}`;
   // у карточки персоны может быть свой портрет (его ставят в окне карточки): в списке он важнее заглушки аватара таверны
   const rowPicture = avatar => { try { return bridge?.cardImageFor?.(avatar) || thumb(avatar); } catch { return thumb(avatar); } };
   const nameOf = connection => {
@@ -181,7 +181,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
     if (left.firstElementChild !== tavBar) { left.innerHTML = ''; left.append(tavBar, tavPane, cardHost); shown = ''; }
     const current = api.current() === persona.avatar;
     tavBar.innerHTML = `${current ? '<span class="pud-ptag pud-ptag-now">сейчас ты</span>' : `<button type="button" class="pud-pwear" data-act="wear">${icon('persona')}<span>Надеть</span></button>`}
-      <button type="button" class="pud-pdescbtn pud-tavtoggle${state.paneOpen ? ' on' : ''}" data-act="pane" aria-expanded="${state.paneOpen}">${icon('gear')}<span>Связи и настройки таверны</span></button>`;
+      <button type="button" class="pud-pdescbtn pud-tavtoggle${state.paneOpen ? ' on' : ''}" data-act="pane" aria-expanded="${state.paneOpen}" title="Привязки к персонажам, картинка, папка, лорбук персоны: настройки самой таверны">${icon('gear')}<span>Связи и настройки</span></button>`;
     tavPane.hidden = !state.paneOpen;
     tavPane.innerHTML = state.paneOpen ? tavernHtml(persona, { card: true }) : '';
     const key = `${persona.avatar}|${cardId}`;
@@ -218,6 +218,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
       <div class="pud-pleft-ph">
         <img src="${escapeHtml(img(persona.avatar))}" alt="">
         <button type="button" class="pud-pleft-img" data-act="image" title="Сменить картинку">${icon('image')}</button>
+        ${bridge?.cardImageFor?.(persona.avatar) ? `<button type="button" class="pud-pdescbtn" data-act="image-card" title="Взять картинку карточки как аватар персоны в таверне: она появится в чате и в родных списках">${icon('image')}<span>Взять с карточки</span></button>` : ''}
       </div>
       <div class="pud-pleft-tags">
         ${card ? '' : current ? '<span class="pud-ptag pud-ptag-now">сейчас ты</span>' : `<button type="button" class="pud-pwear" data-act="wear">${icon('persona')}<span>Надеть</span></button>`}
@@ -392,7 +393,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
     win.element.classList.add('pud-busy');
     try { await api.ready(); await task(); } catch (error) {
       report(what, error);
-      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Пудреница');
+      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Закулисье');
     } finally {
       busy = false;
       win.element.classList.remove('pud-busy');
@@ -446,7 +447,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
           if (folder) moveToFolder(settings, copy, folder);
           save();
           state.picked = copy;
-          globalThis.toastr?.success?.(`Копия «${persona.name}» готова.`, 'Пудреница');
+          globalThis.toastr?.success?.(`Копия «${persona.name}» готова.`, 'Закулисье');
         }
       });
       return;
@@ -495,6 +496,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
     else if (act === 'make-card') run('Карточка персоны', async () => { bridge?.ensureCard({ avatar, name: byAvatar(avatar)?.name ?? '' }); state.leftMode = 'card'; state.forceLeft = true; });
     else if (act === 'desc') run('Описание персоны', () => openDesc(avatar));
     else if (act === 'look') lookWin.open(avatar);
+    else if (act === 'image-card') { freshUntil = Date.now() + 60000; run('Картинка из карточки', async () => { await bridge.pushCardImage(avatar); globalThis.toastr?.success?.('Картинка карточки теперь и аватар персоны в таверне.', 'Закулисье'); }); }
     else if (act === 'image') { freshUntil = Date.now() + 60000; run('Картинка персоны', () => api.changeImage(doc, avatar)); }
     else if (act === 'lore') run('Лорбук персоны', () => api.openLorebook(byAvatar(avatar)?.lorebook));
     else if (act === 'link-open') { state.linkOpen = !state.linkOpen; schedule(); }
@@ -511,7 +513,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
         state.linkOpen = false;
         if (unlinked.length) {
           const names = unlinked.map(other => api.power().personas[other]).filter(Boolean).join(', ');
-          globalThis.toastr?.info?.(`Несколько персон на одного персонажа выключено, поэтому отвязала: ${names}.`, 'Пудреница');
+          globalThis.toastr?.info?.(`Несколько персон на одного персонажа выключено, поэтому отвязала: ${names}.`, 'Закулисье');
         }
       });
     } else if (act === 'unlink') {
@@ -627,7 +629,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
         const count = state.checked.size;
         if (!await popup(`Удалить ${plural(count, 'персону', 'персоны', 'персон')}? Картинки и описания удалятся насовсем.`)) return;
         const done = await removeMany([...state.checked]);
-        globalThis.toastr?.success?.(`Удалено: ${done}.`, 'Пудреница');
+        globalThis.toastr?.success?.(`Удалено: ${done}.`, 'Закулисье');
       });
     }
   });
@@ -656,7 +658,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
       if (folder) moveToFolder(settings, avatar, folder);
       save();
       state.picked = avatar;
-      globalThis.toastr?.success?.(`Персона «${persona.name}» добавлена.`, 'Пудреница');
+      globalThis.toastr?.success?.(`Персона «${persona.name}» добавлена.`, 'Закулисье');
     });
   });
 

@@ -19,8 +19,13 @@ export function recentSceneText(chat, count = 3, maxCharacters = 3000) {
 export function mentionedEntities(state, text) {
   const lower = String(text ?? '').toLocaleLowerCase('ru-RU');
   const found = new Set();
-  for (const entity of Object.values(state.entities ?? {})) {
-    if (matchingKeys(entity).some(key => lower.includes(key))) found.add(entity.id);
+  // A word two characters share (a surname) names whoever of them is on stage; with none on stage it names nobody.
+  const everyone = Object.values(state.entities ?? {});
+  const owners = new Map();
+  for (const entity of everyone) for (const key of matchingKeys(entity)) owners.set(key, (owners.get(key) ?? 0) + 1);
+  const here = new Set(state.knowledge?.scene?.presentIds ?? []);
+  for (const entity of everyone) {
+    if (matchingKeys(entity).some(key => lower.includes(key) && ((owners.get(key) ?? 0) < 2 || here.has(entity.id)))) found.add(entity.id);
   }
   const personaId = state.ui?.personaId || '';
   if (personaId && state.entities?.[personaId]) found.add(personaId);

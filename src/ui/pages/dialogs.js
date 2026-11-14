@@ -1,4 +1,4 @@
-import { button, element, metricDefinitions, pairId, pairLabel, pairSource, pairTarget } from '../helpers.js';
+import { button, element, infoDot, infoRow, metricDefinitions, pairId, pairLabel, pairSource, pairTarget } from '../helpers.js';
 
 /**
  * Factor and triangle setup sheets (shown in the factors layer).
@@ -186,20 +186,19 @@ export function createDialogs(ctx) {
     const close = button('Закрыть', 'btn factors-close', closeFactors);
 
     body.append(
-      element('h4', { className: 'sheet-section', text: 'Конечная точка' }),
-      element('p', { className: 'muted', style: { fontSize: '11px', margin: '0 0 6px' }, text: 'Её видят анализатор и модель — как далёкое направление сюжета, а не задачу на ближайший ответ.' }),
-      goal,
-      element('div', { className: 'factors-generate-row', style: { marginTop: '6px' } }, [wish, generateGoal]),
-      element('h4', { className: 'sheet-section', text: 'Готовый троп' }),
-      element('p', { className: 'muted', style: { fontSize: '11px', margin: '0 0 6px' }, text: 'Троп треугольника расписан по ролям сразу на все линии. Троп линии можно поставить на все линии или на одну. Линии, у которых в карточке уже стоит свой троп, пропускаются — он важнее.' }),
+      infoRow('Готовый троп', 'Троп треугольника расписан по ролям сразу на все линии. Троп линии можно поставить на все линии или на одну. Линии, у которых в карточке уже стоит свой троп, пропускаются: он важнее.'),
       element('div', { className: 'factors-generate-row' }, [tropeSelect, targetSelect, applyTrope]),
       tropeHint,
-      element('h4', { className: 'sheet-section', text: 'Факторы по линиям' }),
-      element('p', { className: 'muted', style: { fontSize: '11px', margin: '0 0 8px' }, text: 'Это те же факторы, что и в окне «Факторы роста» каждой линии: здесь они собраны для всего треугольника.' }),
+      infoRow('Факторы по линиям', 'Это те же факторы, что и в окне «Факторы роста» каждой линии: здесь они собраны для всего треугольника.'),
       list, addRow, paceBox,
       element('div', { className: 'factors-generate' }, [
-        element('p', { className: 'muted', style: { fontSize: '11px' }, text: 'Автогенерация учитывает конечную точку, лор подключённых книг и общие сцены троих.' }),
+        infoRow('Автогенерация', 'Учитывает конечную точку, лор подключённых книг и общие сцены троих.'),
         generateFactors,
+      ]),
+      element('div', { className: 'goal-box' }, [
+        infoRow('Конечная точка', 'Её видят анализатор и модель: как далёкое направление сюжета, а не задачу на ближайший ответ.'),
+        goal,
+        element('div', { className: 'factors-generate-row', style: { marginTop: '6px' } }, [wish, generateGoal]),
       ]),
       status,
     );
@@ -280,35 +279,13 @@ export function createDialogs(ctx) {
     const sheet = element('div', { className: 'factors-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Факторы роста' });
     const factors = [...(pair.factors ?? [])].map(factor => ({ ...factor }));
     let pace = { ...(pair.pace ?? {}) };
-    const head = element('div', { className: 'factors-head' }, [
-      element('h3', { text: `Факторы роста: ${pairLabel(ctx.snapshot, pair)}` }),
-    ]);
+    const lineName = pairLabel(ctx.snapshot, pair);
+    const intro = element('p', { className: 'ku-hint', text: 'От чего растут или падают чувства первого ко второму: что делает второй и что происходит между ними. Не то, что должен делать первый. Факторы передаются анализатору: сцена, совпавшая с фактором, двигает шкалу в выбранную сторону. Темп справа от «рост / падение» ускоряет или замедляет именно эту шкалу.' });
+    const head = element('div', { className: 'factors-head' }, [element('h3', { text: `Факторы роста: ${lineName}` }), infoDot(intro, 'Что такое факторы роста')]);
     const body = element('div', { className: 'factors-body' });
     const status = element('p', { className: 'muted factors-status', role: 'status' });
     const setSheetStatus = (message, danger = false) => { status.textContent = message || ''; status.classList.toggle('danger', danger); };
-    body.append(element('p', { className: 'muted', style: { fontSize: '11px', marginTop: '0' }, text: 'От чего растут или падают чувства первого ко второму: что делает второй и что происходит между ними. Не то, что должен делать первый. Факторы передаются анализатору: сцена, совпавшая с фактором, двигает шкалу в выбранную сторону.' }));
-
-    // End point of THIS directed line. The reverse line is a separate object with its own.
-    const lineName = pairLabel(ctx.snapshot, pair);
-    const goalField = element('textarea', { value: pair.goal ?? '', rows: 2, className: 'goal-field', 'aria-label': `Конечная точка линии ${lineName}`, placeholder: 'К чему в итоге придёт эта линия. Например: признаёт её равной и перестаёт опекать' });
-    const goalWish = element('input', { type: 'text', placeholder: 'Пожелание для подсказки (необязательно)', 'aria-label': 'Пожелание к конечной точке' });
-    const goalGenerate = button('Предложить', 'btn', async () => {
-      goalGenerate.disabled = true;
-      setSheetStatus('Подбираю конечную точку по лору и сценам…');
-      try {
-        const goal = await facade.invoke('onGeneratePairGoal', { sourceId: pairSource(pair), targetId: pairTarget(pair), wish: goalWish.value.trim() });
-        if (goal) goalField.value = goal;
-        setSheetStatus('Конечная точка предложена. Поправьте и нажмите «Сохранить».');
-      } catch (error) {
-        setSheetStatus(error?.message || 'Не удалось предложить конечную точку', true);
-      } finally { goalGenerate.disabled = false; }
-    });
-    body.append(element('div', { className: 'factors-generate goal-box' }, [
-      element('p', { className: 'section-title', style: { margin: '0 0 6px' }, text: 'Конечная точка' }),
-      element('p', { className: 'muted', style: { fontSize: '11px', margin: '0 0 6px' }, text: `Куда в итоге должна прийти именно линия ${lineName}. Обратное направление — отдельная линия со своей точкой. Модель получает её как далёкий ориентир: без спешки и только через события сюжета.` }),
-      goalField,
-      element('div', { className: 'factors-generate-row' }, [goalWish, goalGenerate]),
-    ]));
+    body.append(intro);
 
     // How the model read these two for the last generated factors: the proof it analysed, not copied.
     const analysisBox = element('details', { className: 'factor-analysis' });
@@ -322,7 +299,6 @@ export function createDialogs(ctx) {
       );
     };
     renderAnalysis(ctx.snapshot.ui?.analyses?.[pairId(pair)] ?? null);
-    body.append(analysisBox);
 
     const list = element('div', { className: 'factor-list' });
     function renderRows() {
@@ -330,11 +306,18 @@ export function createDialogs(ctx) {
       factors.forEach((factor, index) => {
         const scale = element('select', { 'aria-label': 'Шкала' });
         for (const definition of metricDefinitions(ctx.snapshot, pair)) scale.append(element('option', { value: definition.key, text: definition.label, selected: definition.key === factor.scaleId }));
-        scale.addEventListener('change', () => { factor.scaleId = scale.value; });
+        scale.addEventListener('change', () => { factor.scaleId = scale.value; renderRows(); });
         const direction = element('select', { 'aria-label': 'Направление' });
         direction.append(element('option', { value: 'up', text: '+ рост', selected: factor.direction === 'up' }));
         direction.append(element('option', { value: 'down', text: '− падение', selected: factor.direction === 'down' }));
         direction.addEventListener('change', () => { factor.direction = direction.value; });
+        // The pace belongs to the scale of the line: every factor of that scale shows the same one.
+        const tempo = element('select', { 'aria-label': 'Темп шкалы', title: 'Темп этой шкалы у линии: обычно, медленно (не больше ±2 за ответ) или быстро (×1,5)' },
+          [['', 'темп: обычно'], ['slow', 'темп: медленно'], ['fast', 'темп: быстро']].map(([value, text]) => element('option', { value, text, selected: (pace[factor.scaleId] ?? '') === value })));
+        tempo.addEventListener('change', () => {
+          if (tempo.value) pace = { ...pace, [factor.scaleId]: tempo.value }; else { pace = { ...pace }; delete pace[factor.scaleId]; }
+          renderRows();
+        });
         const text = element('textarea', { value: factor.text ?? '', 'aria-label': 'Условие', placeholder: 'Например: Судзу держит слово, даже когда ей невыгодно', rows: 2 });
         const hits = ctx.snapshot.factorHits?.[pairId(pair)]?.[String(factor.text ?? '').trim()] ?? 0;
         const autoGrow = () => { text.style.height = 'auto'; text.style.height = `${Math.max(44, text.scrollHeight + 4)}px`; };
@@ -342,7 +325,7 @@ export function createDialogs(ctx) {
         requestAnimationFrame(autoGrow);
         const remove = button('×', 'btn icon', () => { factors.splice(index, 1); renderRows(); }, 'Удалить фактор');
         list.append(element('div', { className: 'factor-row' }, [
-          element('div', { className: 'factor-controls' }, [scale, direction, remove]),
+          element('div', { className: 'factor-controls' }, [scale, direction, tempo, remove]),
           text,
           element('span', { className: `factor-hits${hits ? ' on' : ''}`, text: hits ? `сработал: ${hits}` : 'ещё не срабатывал', title: 'Сколько раз анализатор изменил шкалу, сославшись на этот фактор (по журналу чата)' }),
           originBadge(factor),
@@ -351,9 +334,6 @@ export function createDialogs(ctx) {
       if (!factors.length) list.append(element('p', { className: 'muted', text: 'Факторов пока нет.' }));
     }
     renderRows();
-    const paceBox = element('div', { className: 'pace-box' });
-    const renderPace = () => paceBox.replaceChildren(paceEditor(pair, pace, next => { pace = next; renderPace(); }));
-    renderPace();
 
     const addRow = button('+ Добавить фактор', 'btn', () => {
       factors.push({ scaleId: metricDefinitions(ctx.snapshot, pair)[0]?.key ?? 'trust', direction: 'up', text: '' });
@@ -361,31 +341,21 @@ export function createDialogs(ctx) {
       list.querySelector('.factor-row:last-child textarea')?.focus();
     });
 
-    const directionSelect = element('select', { 'aria-label': 'Направление развития' });
-    const presets = options.directionPresets ? options.directionPresets() : [
-      { id: 'romance', label: 'Романтика' }, { id: 'friendship', label: 'Дружба' },
-      { id: 'rivalry', label: 'Вражда' }, { id: 'obsession', label: 'Одержимость' },
-      { id: 'fear', label: 'Страх' }, { id: 'custom', label: 'Своё направление' },
-    ];
-    for (const preset of presets) directionSelect.append(element('option', { value: preset.id, text: preset.label }));
-    const customDirection = element('input', { type: 'text', placeholder: 'Опишите желаемое направление развития', 'aria-label': 'Своё направление' });
-    const generate = button('Сгенерировать по персонажу', 'btn', async () => {
-      generate.disabled = true;
-      setSheetStatus('Генерирую факторы по лору и сценам…');
+    // End point of THIS directed line. The reverse line is a separate object with its own. It stands last: it is set once, the factors are worked on more.
+    const goalField = element('textarea', { value: pair.goal ?? '', rows: 2, className: 'goal-field', 'aria-label': `Конечная точка линии ${lineName}`, placeholder: 'К чему в итоге придёт эта линия. Например: признаёт её равной и перестаёт опекать' });
+    const goalWish = element('input', { type: 'text', placeholder: 'Пожелание для подсказки (необязательно)', 'aria-label': 'Пожелание к конечной точке' });
+    const goalGenerate = button('Предложить', 'btn', async () => {
+      goalGenerate.disabled = true;
+      setSheetStatus('Подбираю конечную точку по лору и сценам…');
       try {
-        await facade.invoke('onGenerateFactors', {
-          sourceId: pairSource(pair), targetId: pairTarget(pair),
-          directionId: directionSelect.value, customDirection: customDirection.value, replace: true,
-          // Generation closes the sheet: the end point typed so far is saved with the factors.
-          goal: goalField.value,
-        });
-        emit('factors-generate', {});
-        setStatus('Факторы сгенерированы');
-        closeFactors();
+        const goal = await facade.invoke('onGeneratePairGoal', { sourceId: pairSource(pair), targetId: pairTarget(pair), wish: goalWish.value.trim() });
+        if (goal) goalField.value = goal;
+        setSheetStatus('Конечная точка предложена. Поправьте и нажмите «Сохранить».');
       } catch (error) {
-        setSheetStatus(error?.message || 'Не удалось сгенерировать факторы', true);
-      } finally { generate.disabled = false; }
+        setSheetStatus(error?.message || 'Не удалось предложить конечную точку', true);
+      } finally { goalGenerate.disabled = false; }
     });
+
     const save = button('Сохранить', 'btn primary', async () => {
       save.disabled = true;
       try {
@@ -404,58 +374,110 @@ export function createDialogs(ctx) {
     });
     const close = button('Закрыть', 'btn factors-close', closeFactors);
 
-    // Ready-made tropes: prewritten factors, no model request. A line's own trope replaces
-    // factors of any previous trope (its own or a triangle's); hand-written ones stay.
+    // One drop-down for the ready-made trope and the direction of the story, a divider between them (the two groups).
+    // A trope is prewritten factors (the model rewrites them for these two); a direction is generated from the lore.
     const tropes = facade.invoke('onPairTropes', {}) ?? [];
-    const tropeSelect = element('select', { 'aria-label': 'Готовый троп' });
-    for (const trope of tropes) tropeSelect.append(element('option', { value: trope.id, text: trope.label }));
-    const tropeHint = element('p', { className: 'muted trope-hint' });
-    const describeTrope = () => {
-      const trope = tropes.find(item => item.id === tropeSelect.value);
-      tropeHint.textContent = trope ? `${trope.description}${Object.keys(trope.pace ?? {}).length ? ` Темп: ${paceText(trope.pace)}.` : ''}` : '';
+    const presets = options.directionPresets ? options.directionPresets() : [
+      { id: 'romance', label: 'Романтика' }, { id: 'friendship', label: 'Дружба' },
+      { id: 'rivalry', label: 'Вражда' }, { id: 'obsession', label: 'Одержимость' },
+      { id: 'fear', label: 'Страх' }, { id: 'custom', label: 'Своё направление' },
+    ];
+    const pick = element('select', { 'aria-label': 'Готовый троп или направление' });
+    const tropeGroup = element('optgroup', { label: 'Готовые тропы' });
+    for (const trope of tropes) tropeGroup.append(element('option', { value: `t:${trope.id}`, text: trope.label }));
+    const directionGroup = element('optgroup', { label: 'Направления развития' });
+    for (const preset of presets) directionGroup.append(element('option', { value: `d:${preset.id}`, text: preset.label }));
+    if (tropes.length) pick.append(tropeGroup);
+    pick.append(directionGroup);
+    const customDirection = element('input', { type: 'text', placeholder: 'Опишите желаемое направление развития', 'aria-label': 'Своё направление' });
+    const pickNote = element('p', { className: 'ku-hint', text: '' });
+    const pickDot = infoDot(pickNote, 'Что это даёт');
+    const kindOf = () => { const [kind, ...rest] = pick.value.split(':'); return { kind, id: rest.join(':') }; };
+    const describePick = () => {
+      const { kind, id } = kindOf();
+      customDirection.hidden = !(kind === 'd' && id === 'custom');
+      template.hidden = kind !== 't';
+      const trope = kind === 't' ? tropes.find(item => item.id === id) : null;
+      pickNote.textContent = trope
+        ? `${trope.description}${Object.keys(trope.pace ?? {}).length ? ` Темп: ${paceText(trope.pace)}.` : ''} Модель перепишет факторы тропа под этих двоих по лорбуку. Заменяет факторы прежнего тропа, ручные остаются; троп линии важнее тропа треугольника.`
+        : 'Направление, в котором должна развиваться линия. Модель сочинит факторы по лору этих двоих, их общим сценам и конечной точке. «Своё направление» впишите текстом. Список факторов будет заменён.';
     };
-    tropeSelect.addEventListener('change', describeTrope);
-    describeTrope();
     const putTrope = (result, note) => {
       const kept = factors.filter(factor => !factor.origin);
       const replaced = factors.length - kept.length;
       factors.splice(0, factors.length, ...kept);
       const added = appendUniqueFactors(factors, result?.factors ?? []);
-      pace = { ...(result?.pace ?? {}) };
+      pace = { ...pace, ...(result?.pace ?? {}) };
       renderRows();
-      renderPace();
       setSheetStatus(`${note}Добавлено факторов: ${added}${replaced ? `, факторы прежнего тропа убраны: ${replaced}` : ''}. Ручные факторы сохранены. Проверьте и нажмите «Сохранить».`);
     };
-    const ids = { tropeId: '', sourceId: pairSource(pair), targetId: pairTarget(pair) };
-    // The trope is written for these two by the model, from the lorebook; the template is the fallback.
-    const addTrope = button('Поставить троп', 'btn', async () => {
-      addTrope.disabled = true;
-      setSheetStatus('Пишу троп под этих персонажей по лорбуку…');
+    const ids = { sourceId: pairSource(pair), targetId: pairTarget(pair) };
+    const generateWith = async (directionId, customText) => {
+      await facade.invoke('onGenerateFactors', {
+        ...ids, directionId, customDirection: customText, replace: true,
+        // Generation closes the sheet: the end point typed so far is saved with the factors.
+        goal: goalField.value,
+      });
+      emit('factors-generate', {});
+      setStatus('Факторы сгенерированы');
+      closeFactors();
+    };
+    const apply = button('Поставить', 'btn primary', async () => {
+      apply.disabled = true;
+      const { kind, id } = kindOf();
       try {
-        const result = await facade.invoke('onTropeFactorsFromLore', { ...ids, tropeId: tropeSelect.value });
-        renderAnalysis(result?.analysis ?? null);
-        putTrope(result, 'Троп написан по разбору персонажей (раскройте «Как модель поняла персонажей»). ');
-      } catch (error) {
-        try {
-          putTrope(facade.invoke('onPairTropeFactors', { ...ids, tropeId: tropeSelect.value }), `Модель не ответила (${error?.message || error}), поставлен шаблон тропа. `);
-        } catch (fallback) { setSheetStatus(fallback?.message || 'Не удалось поставить троп', true); }
-      } finally { addTrope.disabled = false; }
-    }, 'Модель пишет факторы тропа под этих двоих: по их характерам в лорбуке и сценам');
-    const addTemplate = button('Шаблон', 'btn small', () => {
-      try { putTrope(facade.invoke('onPairTropeFactors', { ...ids, tropeId: tropeSelect.value }), 'Шаблон тропа без модели. '); }
+        if (kind === 't') {
+          setSheetStatus('Пишу троп под этих персонажей по лорбуку…');
+          try {
+            const result = await facade.invoke('onTropeFactorsFromLore', { ...ids, tropeId: id });
+            renderAnalysis(result?.analysis ?? null);
+            putTrope(result, 'Троп написан по разбору персонажей (раскройте «Как модель поняла персонажей»). ');
+          } catch (error) {
+            putTrope(facade.invoke('onPairTropeFactors', { ...ids, tropeId: id }), `Модель не ответила (${error?.message || error}), поставлен шаблон тропа. `);
+          }
+        } else {
+          setSheetStatus('Генерирую факторы по лору и сценам…');
+          await generateWith(id, customDirection.value);
+        }
+      } catch (error) { setSheetStatus(error?.message || 'Не удалось поставить', true); }
+      finally { apply.disabled = false; }
+    }, 'Троп: модель пишет факторы под этих двоих. Направление: модель сочиняет факторы по лору.');
+    const template = button('Шаблон', 'btn small', () => {
+      try { putTrope(facade.invoke('onPairTropeFactors', { ...ids, tropeId: kindOf().id }), 'Шаблон тропа без модели. '); }
       catch (error) { setSheetStatus(error?.message || 'Не удалось поставить троп', true); }
     }, 'Заранее написанные факторы тропа, без запроса к модели');
+    pick.addEventListener('change', describePick);
+    describePick();
+
+    // «Generate by the character»: its own button with its own field for wishes, like the end point has.
+    const genWish = element('input', { type: 'text', placeholder: 'Пожелание (необязательно): например, «пусть медленно оттаивает»', 'aria-label': 'Пожелание к генерации факторов' });
+    const generate = button('Сгенерировать по персонажу', 'btn', async () => {
+      generate.disabled = true;
+      setSheetStatus('Генерирую факторы по лору и сценам…');
+      try {
+        await generateWith('custom', genWish.value.trim() || 'whatever fits these two best, judging by their nature, the lore and the scenes they share');
+      } catch (error) {
+        setSheetStatus(error?.message || 'Не удалось сгенерировать факторы', true);
+      } finally { generate.disabled = false; }
+    }, 'Модель читает лорбук этих двоих, их карточки и общие сцены и сочиняет факторы. Список будет заменён');
 
     body.append(
-      list, addRow, paceBox,
+      list, addRow,
       element('div', { className: 'factors-generate' }, [
-        element('p', { className: 'muted', style: { fontSize: '11px' }, text: 'Готовый троп: заранее прописанные факторы без запроса к модели. Заменяет факторы прежнего тропа, ручные остаются. Троп линии важнее тропа треугольника.' }),
-        element('div', { className: 'factors-generate-row' }, [tropeSelect, addTrope, addTemplate]),
-        tropeHint,
+        infoRow('Готовый троп или направление', 'Троп — заранее прописанные факторы (модель переписывает их под этих двоих). Направление — куда должна развиваться линия: модель сочиняет факторы сама. Между ними разделитель в списке.'),
+        element('div', { className: 'factors-generate-row' }, [pick, pickDot, apply, template]),
+        customDirection,
+        pickNote,
       ]),
       element('div', { className: 'factors-generate' }, [
-        element('p', { className: 'muted', style: { fontSize: '11px' }, text: 'Автогенерация: учитывает лорбук этих персонажей (их анкеты и общие записи), сцены с обоими и конечную точку линии. «Своё направление» — впишите текстом.' }),
-        element('div', { className: 'factors-generate-row' }, [directionSelect, customDirection, generate]),
+        infoRow('Сгенерировать по персонажу', 'Учитывает лорбук этих персонажей (их анкеты и общие записи), сцены с обоими и конечную точку линии. Пожелание необязательно: пусто значит «как подойдёт этим двоим».'),
+        element('div', { className: 'factors-generate-row' }, [genWish, generate]),
+      ]),
+      analysisBox,
+      element('div', { className: 'factors-generate goal-box' }, [
+        infoRow('Конечная точка', `Куда в итоге должна прийти именно линия ${lineName}. Обратное направление: отдельная линия со своей точкой. Модель получает её как далёкий ориентир: без спешки и только через события сюжета.`),
+        goalField,
+        element('div', { className: 'factors-generate-row' }, [goalWish, goalGenerate]),
       ]),
       status,
     );

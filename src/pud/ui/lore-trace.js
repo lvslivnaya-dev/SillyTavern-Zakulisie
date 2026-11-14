@@ -299,7 +299,7 @@ export function startLoreTrace(doc, { context, settings, save = () => {}, shared
         const uid = Number(open.dataset.uid);
         const book = open.dataset.book;
         if (shared.loreEditor?.open) shared.loreEditor.open(book, Number.isFinite(uid) ? uid : null);
-        else globalThis.toastr?.info?.(`Запись в лорбуке «${book}», UID ${open.dataset.uid}.`, 'Пудреница');
+        else globalThis.toastr?.info?.(`Запись в лорбуке «${book}», UID ${open.dataset.uid}.`, 'Закулисье');
       }
     });
     undo.push(() => { win.destroy(); win = null; });
@@ -319,7 +319,7 @@ export function startLoreTrace(doc, { context, settings, save = () => {}, shared
 
   const runCheck = async () => {
     const c = ctx();
-    if (!c?.getCurrentChatId?.()) { globalThis.toastr?.info?.('Сначала открой чат.', 'Пудреница'); return; }
+    if (!c?.getCurrentChatId?.()) { globalThis.toastr?.info?.('Сначала открой чат.', 'Закулисье'); return; }
     if (state.checking) return;
     state.checking = true;
     parts.check.disabled = true;
@@ -328,12 +328,12 @@ export function startLoreTrace(doc, { context, settings, save = () => {}, shared
       await c.generate('normal', {}, true);
       if (state.wantCheck) {
         state.wantCheck = false;
-        globalThis.toastr?.info?.('Таверна не стала сканировать лорбуки: может, к чату не подключено ни одной книги.', 'Пудреница');
+        globalThis.toastr?.info?.('Таверна не стала сканировать лорбуки: может, к чату не подключено ни одной книги.', 'Закулисье');
       }
     } catch (error) {
       state.wantCheck = false;
       report('что сработало: проверка', error);
-      globalThis.toastr?.error?.('Проверка не получилась. Подробности в консоли (F12).', 'Пудреница');
+      globalThis.toastr?.error?.('Проверка не получилась. Подробности в консоли (F12).', 'Закулисье');
     } finally {
       state.checking = false;
       if (parts) parts.check.disabled = false;
@@ -377,13 +377,13 @@ export function startLoreTrace(doc, { context, settings, save = () => {}, shared
   /** Слова шумных ключей в буфер: по одному в строке, для таблицы «Регексы» в Obsidian. */
   const copyWords = async () => {
     const text = wordsText(auditChat(ctx()?.chat));
-    if (!text) { globalThis.toastr?.info?.('Шумных ключей нет.', 'Пудреница'); return; }
+    if (!text) { globalThis.toastr?.info?.('Шумных ключей нет.', 'Закулисье'); return; }
     try {
       await view.navigator.clipboard.writeText(text);
-      globalThis.toastr?.success?.('Слова скопированы.', 'Пудреница');
+      globalThis.toastr?.success?.('Слова скопированы.', 'Закулисье');
     } catch (error) {
       report('аудит ключей: буфер', error);
-      globalThis.toastr?.warning?.(`Не удалось скопировать. Вот слова: ${text.replace(/\n/g, ', ')}`, 'Пудреница', { timeOut: 15000 });
+      globalThis.toastr?.warning?.(`Не удалось скопировать. Вот слова: ${text.replace(/\n/g, ', ')}`, 'Закулисье', { timeOut: 15000 });
     }
   };
 
@@ -406,7 +406,7 @@ export function startLoreTrace(doc, { context, settings, save = () => {}, shared
           if (removed) plan.push({ book, uid: ref.u, title: ref.t, removed });
         }
       }
-      if (!plan.length) { globalThis.toastr?.info?.(`Ключа «${key}» в этих записях уже нет.`, 'Пудреница'); state.stripped.add(key); renderWindow(); return; }
+      if (!plan.length) { globalThis.toastr?.info?.(`Ключа «${key}» в этих записях уже нет.`, 'Закулисье'); state.stripped.add(key); renderWindow(); return; }
       const list = plan.slice(0, 14).map(row => `<li>${escapeHtml(row.title)} <small>(${escapeHtml(row.book)})</small></li>`).join('');
       const box = doc.createElement('div');
       box.innerHTML = `<h3>Убрать ключ «${escapeHtml(key)}»</h3>
@@ -432,11 +432,11 @@ export function startLoreTrace(doc, { context, settings, save = () => {}, shared
         await api.save(book, data);
       }
       state.stripped.add(key);
-      globalThis.toastr?.success?.(`Ключ «${key}» убран из записей: ${changed}.`, 'Пудреница');
+      globalThis.toastr?.success?.(`Ключ «${key}» убран из записей: ${changed}.`, 'Закулисье');
       renderWindow();
     } catch (error) {
       report('аудит ключей: убрать ключ', error);
-      globalThis.toastr?.error?.('Не получилось изменить лорбук. Подробности в консоли (F12).', 'Пудреница');
+      globalThis.toastr?.error?.('Не получилось изменить лорбук. Подробности в консоли (F12).', 'Закулисье');
     }
   };
 

@@ -37,7 +37,7 @@ export {
   looksRefused, rebuildScene, refusedSummaries, removeScene, removeSummary, scenesOf, unfoldSummary,
 } from './chronicle.js';
 export {
-  CALENDAR_LIMITS, MONTHS, REPEATS, addDays, anchorFor, calendarShortDate, clockOf, buildCalendarPrompt, dateOfDay, eventsOn, formatDate, fromTemplate, humanDate,
+  CALENDAR_LIMITS, EVENT_KINDS, INTENSITIES, MONTHS, REPEATS, addDays, anchorFor, calendarShortDate, clockOf, buildCalendarPrompt, comingEvents, dateOfDay, eventsOn, eventsWithQuests, monthView, questDeadlines, formatDate, fromTemplate, humanDate,
   normalizeCalendar, normalizeEvent, normalizeTemplates, occursOn, parseDate, shortDate, toTemplate, upcoming, weekdayOf,
 } from './calendar.js';
 export { LORE_SECRET_LIMITS, cleanSecretText, isSecretEntry, loreSecretEvent, parseSecretMark, secretEntriesOf, stripSecretEntries } from './lore-secrets.js';

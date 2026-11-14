@@ -29,6 +29,10 @@ import {
   anchorFor,
   calendarShortDate,
   clockOf,
+  EVENT_KINDS,
+  comingEvents,
+  eventsWithQuests,
+  monthView,
   READY_SYSTEMS,
   makeClock,
   normalizeSystem,
@@ -155,6 +159,7 @@ import { mountSelectionChip } from './src/integration/selection-chip.js';
 import { DEFAULT_LOCAL_MODEL, LOCAL_MODELS, cosine, embedTexts } from './src/integration/embeddings.js';
 import { createChatStorage } from './src/integration/storage.js';
 import { createLibraryCallbacks, createLocationLibraryStore, syncChat, syncChatCards } from './src/integration/location-library-actions.js';
+import { personaApi } from './src/pud/integration/personas-api.js';
 import { createRelationshipStudio } from './src/ui/studio.js';
 import { createRelationshipWidget } from './src/ui/widget.js';
 
@@ -294,7 +299,7 @@ async function initKulisy() {
       gm: assistantView(),
       personaMismatch: Boolean(persona && chatPersona && boundPersonaName
         && boundPersonaName.toLocaleLowerCase('ru-RU') !== chatPersona.toLocaleLowerCase('ru-RU')),
-      lorebooks: { available: SillyTavern.getContext().getWorldInfoNames?.() ?? [], selected: state.ui?.linkedLorebooks ?? [], cardWorlds: cardWorldNames(), tavern: tavernBooks, status: 'Этот список — книги, которые читают сами Кулисы (анализ, поиск персонажей, секреты). Модели записи отправляет таверна, и только из книг, подключённых в ней самой: к карточке, персоне, чату или глобально. Исходные файлы не изменяются.' },
+      lorebooks: { available: SillyTavern.getContext().getWorldInfoNames?.() ?? [], selected: state.ui?.linkedLorebooks ?? [], cardWorlds: cardWorldNames(), tavern: tavernBooks, status: 'Этот список — книги, которые читает само Закулисье (анализ, поиск персонажей, секреты). Модели записи отправляет таверна, и только из книг, подключённых в ней самой: к карточке, персоне, чату или глобально. Исходные файлы не изменяются.' },
       settings: {
         autoTrack: settings.autoAnalyze, widgetEnabled: settings.widget.visible, studioMulti: settings.studioMulti === true, railSide: settings.railSide === 'right' ? 'right' : 'left',
         maxPromptCharacters: settings.maxPromptCharacters,
@@ -349,6 +354,7 @@ async function initKulisy() {
       questSecretsHidden: settings.sendQuests === false,
       namesChatOff: Boolean(state.ui?.namesOff),
       setup: setupSnapshot(),
+      cardGenders: cardGenders(),
       namesTokens,
       calendarTokens,
       reveals: openReveals(),
@@ -368,7 +374,7 @@ async function initKulisy() {
           gm: settings.sendGm !== false ? true : 'Выключено: «Отправлять договорённости с ассистентом» (Настройки).',
           songs: normalizeSongs(settings.songLibrary).enabled ? true : 'Выключено: переключатель «Отправлять песни» (Мир → Песни).',
           relationships: settings.injectPrompt ? true : 'Выключено: отправка отношений.',
-        } : Object.fromEntries(['chronicle', 'scene', 'calendar', 'knowledge', 'cards', 'persona', 'names', 'quests', 'gm', 'songs', 'relationships', 'direction'].map(id => [id, 'Кулисы выключены.'])),
+        } : Object.fromEntries(['chronicle', 'scene', 'calendar', 'knowledge', 'cards', 'persona', 'names', 'quests', 'gm', 'songs', 'relationships', 'direction'].map(id => [id, 'Закулисье выключено.'])),
       }),
       tidy: { autoSecrets: autoSecrets(state).length, foldable: duplicateBuckets(state).reduce((sum, bucket) => sum + bucket.events.length, 0) },
       dossiers: Object.fromEntries(Object.keys(state.entities).map(id => [id, dossier(state, id)])),
@@ -435,8 +441,15 @@ async function initKulisy() {
       } catch (error) { console.error('[Kulisy] UI subscriber failed.', error); }
     }
     refreshChatOverlay();
-    warnLooksRoom();
+    scheduleLooksRoom();
     emitAssistant();
+  }
+
+  /** The check of the clothes' room builds the scene text: once for a burst of changes, not on each of them. */
+  let looksTimer = 0;
+  function scheduleLooksRoom() {
+    if (looksTimer) return;
+    looksTimer = setTimeout(() => { looksTimer = 0; warnLooksRoom(); }, 600);
   }
 
   /**
@@ -455,7 +468,7 @@ async function initKulisy() {
       const names = fresh.map(id => state.entities[id]?.name ?? id).join(', ');
       const now = Number(settings.scenePromptCharacters) || 1500;
       const enough = fit.need ? `Хватит объёма сцены ${fit.need} (сейчас ${now}).` : `Даже 6000 мало (сейчас ${now}): сократите описания.`;
-      globalThis.toastr?.warning?.(`Описания одежды не влезли в сцену: ${names}. Модель знает только, во что одеты. ${enough} Нажмите, чтобы поднять объём сцены.`, 'Кулисы', {
+      globalThis.toastr?.warning?.(`Описания одежды не влезли в сцену: ${names}. Модель знает только, во что одеты. ${enough} Нажмите, чтобы поднять объём сцены.`, 'Закулисье', {
         timeOut: 12000,
         extendedTimeOut: 6000,
         onclick: () => { try { studio?.openSettings('scene', { focus: 'Объём сцены' }); } catch (error) { console.error('[Kulisy] Could not open the scene settings.', error); } },
@@ -521,6 +534,17 @@ async function initKulisy() {
     }) + (settings.sendHeadcanons !== false && sceneHeadcanons.length ? `\n${sceneHeadcanons.join('\n')}` : '');
   }
 
+  /** { entityId: 'male' | 'female' } from the cards the characters (and the persona) are tied to. */
+  function cardGenders() {
+    const library = locationLibrary.get().characters ?? [];
+    const result = {};
+    for (const [entityId, cardId] of cardOfEntity()) {
+      const gender = library.find(card => card.id === cardId)?.gender;
+      if (gender) result[entityId] = gender;
+    }
+    return result;
+  }
+
   /**
    * Who knows what, for the coming reply: on stage, plus anyone the last two
    * messages mention (they are about to come on stage, or are talked about).
@@ -530,6 +554,7 @@ async function initKulisy() {
     const castIds = [...presentIds(targetState), ...mentionedEntities(targetState, recentSceneText(chat, 2, 3000))];
     return buildKnowledgePrompt(targetState, {
       castIds,
+      genders: cardGenders(),
       maxCharacters: Math.max(300, Math.min(8000, Number(settings.knowledgePromptCharacters) || 2000)),
     });
   }
@@ -882,7 +907,7 @@ ${replyText}` });
     return id;
   }
 
-  async function addCharacter({ name, aliases = [] }) {
+  async function addCharacter({ name, aliases = [], gender = '' }) {
     const candidate = createEntity(name, { aliases });
     const existing = state.entities[candidate.id];
     const entity = createEntity(name, {
@@ -892,6 +917,7 @@ ${replyText}` });
       sourceId: existing?.sourceId,
     });
     await commit(applyOperation(state, createOperation('entity.upsert', entity, { id: uniqueId('entity-update') })), true);
+    if (gender === 'male' || gender === 'female') await callbacks.onSetGender({ entityId: entity.id, gender });
   }
 
   /** Replace a character's aliases, keeping its ID, name, avatar and source. */
@@ -1278,10 +1304,10 @@ ${replyText}` });
         if (quest.status !== 'active') throw new Error('Квест не идёт: сначала верните его в игру.');
         await saveDirection(armCue(directionState(), { ...questCue(quest), id: uniqueId('cue') }, Object.keys(state.entities)));
         refreshChatOverlay();
-        globalThis.toastr?.success?.('Шаг уйдёт со следующим ответом', 'Кулисы');
+        globalThis.toastr?.success?.('Шаг уйдёт со следующим ответом', 'Закулисье');
         return true;
       } catch (error) {
-        globalThis.toastr?.error?.(error.message, 'Кулисы');
+        globalThis.toastr?.error?.(error.message, 'Закулисье');
         return false;
       }
     },
@@ -1366,7 +1392,7 @@ ${replyText}` });
   /** The roll goes out as a stage direction for the next reply (a new one replaces the old). */
   async function diceSend({ quiet = false } = {}) {
     try {
-      if (!settings.enabled) throw new Error('Кулисы выключены.');
+      if (!settings.enabled) throw new Error('Закулисье выключено.');
       // Safety net: the persona never leads, whatever came in.
       const personaId = state.ui?.personaId ?? '';
       const safe = diceNow.picks.filter(pick => pick.id !== `npc:${personaId}`);
@@ -1380,7 +1406,7 @@ ${replyText}` });
       if (!quiet) refreshChatOverlay();
       return true;
     } catch (error) {
-      globalThis.toastr?.error?.(error.message, 'Кулисы');
+      globalThis.toastr?.error?.(error.message, 'Закулисье');
       return false;
     }
   }
@@ -1557,6 +1583,9 @@ ${replyText}` });
       cardsOn: cardsByEntity(state, locationLibrary.get()).size,
       lorebooks: (state.ui?.linkedLorebooks ?? []).length,
       hasPlace: Boolean(currentLocation(state)),
+      hasWeather: Boolean(state.world?.weather) || Object.keys(state.ui?.weatherPlan ?? {}).length > 0,
+      hasOutfits: Object.values(state.world?.wardrobe ?? {}).some(entry => entry?.outfit),
+      hasCalendar: Boolean(state.ui?.calendar && Object.keys(state.ui.calendar).length),
       auxMode: settings.aux?.mode ?? 'off',
     };
     const steps = setupSteps(facts);
@@ -1727,7 +1756,7 @@ ${replyText}` });
     const { fresh, changed } = await loreSecrets();
     if (changed.length) await importLoreSecrets().catch(error => logEvent('warn', 'Секреты из лорбука не обновились', error));
     if (fresh.length) {
-      globalThis.toastr?.info?.(`Новых секретов в лорбуках: ${fresh.length}. Кулисы → Персонажи → «Секреты из лорбука».`, 'Кулисы', { timeOut: 10000 });
+      globalThis.toastr?.info?.(`Новых секретов в лорбуках: ${fresh.length}. Закулисье → Персонажи → «Секреты из лорбука».`, 'Закулисье', { timeOut: 10000 });
     }
   }
 
@@ -1812,7 +1841,7 @@ ${replyText}` });
       }
     }
     if (!found.length && !aliasUpdates.length) {
-      globalThis.toastr?.info?.('Новые персонажи в лорбуках не найдены.', 'Кулисы');
+      globalThis.toastr?.info?.('Новые персонажи в лорбуках не найдены.', 'Закулисье');
       return { found: [], aliasUpdates: [] };
     }
     const newLines = found.map(character =>
@@ -1843,7 +1872,7 @@ ${replyText}` });
       }));
     }
     await commit(next, true);
-    globalThis.toastr?.success?.(`Добавлено персонажей: ${found.length}; обновлено псевдонимов: ${aliasUpdates.length}`, 'Кулисы');
+    globalThis.toastr?.success?.(`Добавлено персонажей: ${found.length}; обновлено псевдонимов: ${aliasUpdates.length}`, 'Закулисье');
     return { found, aliasUpdates };
   }
 
@@ -2198,11 +2227,47 @@ ${replyText}` });
     return next;
   }
 
+  let personaSyncing = false;
+  /**
+   * The persona you wear in SillyTavern IS the persona of this chat: no choosing, no «Привязать». Runs when a chat opens and when the persona
+   * is switched. Her card follows by itself (found by her avatar); a card picked by hand before is let go.
+   */
+  async function syncPersonaFromTavern() {
+    if (personaSyncing || !settings.enabled) return;
+    personaSyncing = true;
+    const epoch = chatEpoch;
+    try {
+      await personaApi.ready();
+      const avatar = personaApi.current();
+      const known = SillyTavern.getContext().powerUserSettings?.personas ?? {};
+      if (!avatar || !String(known[avatar] ?? '').trim()) return;
+      // Persons of SillyTavern worn before (their entity was made from a persona avatar) are marked once, whatever happened in older chats.
+      const marks = new Set(state.ui?.formerPersonas ?? []);
+      for (const entity of Object.values(state.entities ?? {})) {
+        if (entity.id !== state.ui?.personaId && entity.sourceId && entity.sourceId !== avatar && String(known[entity.sourceId] ?? '').trim()) marks.add(entity.id);
+      }
+      if (marks.size !== (state.ui?.formerPersonas ?? []).length) {
+        const marked = structuredClone(state);
+        marked.ui ??= {};
+        marked.ui.formerPersonas = [...marks];
+        await commit(marked, true);
+      }
+      if (boundPersonaAvatar() === avatar && !state.ui?.personaCard) return;
+      if (epoch !== chatEpoch) return;
+      await setTavernPersona({ avatarId: avatar });
+    } catch (error) {
+      logEvent('warn', 'Персона чата не подхватилась из таверны', error);
+    } finally {
+      personaSyncing = false;
+    }
+  }
+
   async function setTavernPersona({ avatarId }) {
     const context = SillyTavern.getContext();
     const personas = context.powerUserSettings?.personas ?? {};
     if (avatarId && !personas[avatarId]) throw new Error('Персона не найдена в списке персон SillyTavern.');
     let next = state;
+    const former = state.ui?.personaId || '';
     let personaName = '';
     if (avatarId) {
       personaName = String(personas[avatarId] || '').trim();
@@ -2223,12 +2288,42 @@ ${replyText}` });
         next.ui ??= {};
         next.ui.personaId = existing.id;
       }
+      if (next.ui) delete next.ui.personaCard;
     } else {
       next = structuredClone(next);
       next.ui ??= {};
       next.ui.personaId = '';
     }
+    next = retireFormerPersona(next, former);
     await commit(next, true);
+  }
+
+  /**
+   * The persona was switched: the one worn before stays in the chat as an ordinary character, which looked like a phantom hero (and kept her card).
+   * With no lines, no scenes and no events she is removed (a clean sheet); with a history she stays, marked «прежняя персона» so she can be removed by hand.
+   */
+  function retireFormerPersona(source, formerId) {
+    const nowId = source.ui?.personaId || '';
+    const marks = new Set((source.ui?.formerPersonas ?? []).filter(id => id !== nowId && source.entities?.[id]));
+    if (!formerId || formerId === nowId || !source.entities?.[formerId]) {
+      let result = source;
+      if (marks.size !== (source.ui?.formerPersonas ?? []).length) { result = structuredClone(source); result.ui ??= {}; if (marks.size) result.ui.formerPersonas = [...marks]; else delete result.ui.formerPersonas; }
+      return result;
+    }
+    const used = Object.values(source.relationships ?? {}).some(relation => relation.from === formerId || relation.to === formerId)
+      || presentIds(source).includes(formerId)
+      || (source.knowledge?.events ?? []).some(event => (event.witnessIds ?? []).includes(formerId));
+    if (!used) {
+      const removed = applyOperation(source, createOperation('entity.remove', { entityId: formerId }, { transactionId: uniqueId('persona-swap'), reason: 'Прежняя персона без истории', timestamp: new Date().toISOString() }));
+      const clean = structuredClone(removed);
+      clean.ui ??= {};
+      if (marks.size) clean.ui.formerPersonas = [...marks]; else delete clean.ui.formerPersonas;
+      return clean;
+    }
+    const marked = structuredClone(source);
+    marked.ui ??= {};
+    marked.ui.formerPersonas = [...marks, formerId];
+    return marked;
   }
 
   /** A hand edit of knowledge: journaled without a message, so swipes and re-checks leave it alone. */
@@ -2382,7 +2477,7 @@ ${replyText}` });
 
   /** «Создать секрет»: from a selected passage, from an event (its proposal or its card), or from nothing. Saved only after «Сохранить». */
   async function createSecretFlow({ text = '', messageIndex = null, eventId = null } = {}) {
-    if (!settings.enabled) throw new Error('Кулисы выключены.');
+    if (!settings.enabled) throw new Error('Закулисье выключено.');
     const ctx = SillyTavern.getContext();
     const event = eventId ? requireEvent(eventId) : null;
     const chat = ctx.chat ?? [];
@@ -2412,17 +2507,17 @@ ${replyText}` });
     }
     refreshPrompt();
     notify();
-    globalThis.toastr?.success?.(`Секрет сохранён: ${result.label}`, 'Кулисы');
+    globalThis.toastr?.success?.(`Секрет сохранён: ${result.label}`, 'Закулисье');
     return { saved: true };
   }
 
   /** Old automatic «secrets»: the model sorts real from not, the person ticks what to un-mark. */
   async function stripAutoSecrets() {
-    if (!settings.enabled) throw new Error('Кулисы выключены.');
+    if (!settings.enabled) throw new Error('Закулисье выключено.');
     const ctx = SillyTavern.getContext();
     const events = autoSecrets(state);
-    if (!events.length) { globalThis.toastr?.info?.('Автоматических секретов нет.', 'Кулисы'); return { changed: 0 }; }
-    globalThis.toastr?.info?.('Проверяю, какие секреты настоящие…', 'Кулисы', { timeOut: 2500 });
+    if (!events.length) { globalThis.toastr?.info?.('Автоматических секретов нет.', 'Закулисье'); return { changed: 0 }; }
+    globalThis.toastr?.info?.('Проверяю, какие секреты настоящие…', 'Закулисье', { timeOut: 2500 });
     let verdicts = new Map();
     let failure = '';
     try { verdicts = await classifyAutoSecrets(routedContext(ctx, settings, 'discovery'), state, events); }
@@ -2450,17 +2545,17 @@ ${replyText}` });
       changed += 1;
     }
     if (changed) { await commit(next, true); refreshPrompt(); notify(); }
-    globalThis.toastr?.success?.(changed ? `Секретность снята: ${changed}` : 'Ничего не отмечено, всё осталось как было.', 'Кулисы');
+    globalThis.toastr?.success?.(changed ? `Секретность снята: ${changed}` : 'Ничего не отмечено, всё осталось как было.', 'Закулисье');
     return { changed };
   }
 
   /** Chains of near-identical events: the model proposes one text per chain, the person ticks which to fold. */
   async function foldDuplicateEvents() {
-    if (!settings.enabled) throw new Error('Кулисы выключены.');
+    if (!settings.enabled) throw new Error('Закулисье выключено.');
     const ctx = SillyTavern.getContext();
     const buckets = duplicateBuckets(state);
-    if (!buckets.length) { globalThis.toastr?.info?.('Событий с одинаковыми свидетелями почти нет: склеивать нечего.', 'Кулисы'); return { folded: 0 }; }
-    globalThis.toastr?.info?.('Ищу дубли среди событий…', 'Кулисы', { timeOut: 2500 });
+    if (!buckets.length) { globalThis.toastr?.info?.('Событий с одинаковыми свидетелями почти нет: склеивать нечего.', 'Закулисье'); return { folded: 0 }; }
+    globalThis.toastr?.info?.('Ищу дубли среди событий…', 'Закулисье', { timeOut: 2500 });
     const { proposals, errors, checkedIds } = await foldEvents(routedContext(ctx, settings, 'discovery'), state, buckets);
     // Whatever the model looked at is not offered again: otherwise the button never runs out.
     const markChecked = async () => {
@@ -2471,8 +2566,8 @@ ${replyText}` });
       await commit(next, true);
     };
     if (!proposals.length) {
-      if (errors.length) globalThis.toastr?.warning?.(`Модель не ответила: ${errors[0]}`, 'Кулисы');
-      else { await markChecked(); globalThis.toastr?.info?.('Склеивать нечего: все события проверены, они про разное.', 'Кулисы'); }
+      if (errors.length) globalThis.toastr?.warning?.(`Модель не ответила: ${errors[0]}`, 'Закулисье');
+      else { await markChecked(); globalThis.toastr?.info?.('Склеивать нечего: все события проверены, они про разное.', 'Закулисье'); }
       return { folded: 0 };
     }
     const list = proposals.map((item, index) => `<li style="margin:8px 0"><b>Группа ${index + 1}.</b> Было:<ul style="margin:2px 0;padding-left:18px">${item.was.map(entry => `<li>${escapeHtml(entry.text)}</li>`).join('')}</ul>Станет: <i>${escapeHtml(item.text)}</i></li>`).join('');
@@ -2497,7 +2592,7 @@ ${replyText}` });
     });
     if (folded) { await commit(next, true); refreshPrompt(); notify(); }
     await markChecked();
-    globalThis.toastr?.success?.(folded ? `Склеено событий: ${folded}. Остальные проверены: повторно они не предлагаются.${errors.length ? ` Часть групп модель не обработала: ${errors.length}.` : ''}` : 'Ничего не отмечено, всё осталось как было.', 'Кулисы');
+    globalThis.toastr?.success?.(folded ? `Склеено событий: ${folded}. Остальные проверены: повторно они не предлагаются.${errors.length ? ` Часть групп модель не обработала: ${errors.length}.` : ''}` : 'Ничего не отмечено, всё осталось как было.', 'Закулисье');
     return { folded };
   }
 
@@ -2550,7 +2645,7 @@ ${replyText}` });
       const fresh = proposals.filter(item => state.entities[item.firstId] && state.entities[item.secondId]
         && !state.knowledge?.acquaintances?.[pairKey(item.firstId, item.secondId)]);
       if (!fresh.length) {
-        globalThis.toastr?.info?.('Новых знакомств в лоре не найдено.', 'Кулисы');
+        globalThis.toastr?.info?.('Новых знакомств в лоре не найдено.', 'Закулисье');
         return { applied: 0 };
       }
       const rows = fresh.map(item => `<li style="margin:4px 0"><b>${escapeHtml(state.entities[item.firstId].name)} и ${escapeHtml(state.entities[item.secondId].name)}</b> — ${item.status === 'known' ? 'знакомы' : 'встречались, имён не знают'}${item.evidence ? `<br><small>«${escapeHtml(item.evidence)}»</small>` : ''}</li>`).join('');
@@ -2782,11 +2877,13 @@ ${replyText}` });
       if (!(ctx.getWorldInfoNames?.() ?? []).includes(name)) throw new Error('Лорбук не найден. Обновите список.');
       return ctx.loadWorldInfo(name);
     },
-    notify: text => globalThis.toastr?.success?.(text, 'Кулисы'),
+    notify: text => globalThis.toastr?.success?.(text, 'Закулисье'),
     // Pictures of places and things: the same server folder rules and the same picture model as the wardrobe.
     upload: (dataUrl, name) => uploadWardrobeImage(SillyTavern.getContext(), dataUrl, name, LIBRARY_IMAGE_FOLDER, settings.imageStorage),
     removeImage: path => deleteWardrobeImage(SillyTavern.getContext(), path),
     imageForModel: path => storedImageForModel(path),
+    /** A persona card's new picture becomes the persona's avatar in SillyTavern. */
+    setPersonaAvatar: async (avatar, dataUrl) => { await personaApi.setImage(avatar, dataUrl); notify(); },
     /** The picture of a persona as SillyTavern keeps it. */
     avatarForModel: async avatar => {
       const response = await fetch(`/User Avatars/${encodeURIComponent(avatar)}`);
@@ -2904,7 +3001,7 @@ ${replyText}` });
       return (await ctx.Popup.show.confirm(title, escapeHtml(text))) === ctx.POPUP_RESULT.AFFIRMATIVE;
     },
     refresh: () => refreshPrompt(),
-    notify: text => globalThis.toastr?.info?.(text, 'Кулисы'),
+    notify: text => globalThis.toastr?.info?.(text, 'Закулисье'),
     log: (level, text, error) => logEvent(level, text, error),
   });
 
@@ -3363,6 +3460,16 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       if (['very-slow', 'slow', 'fast'].includes(tempo)) next.ui.tempo = tempo; else delete next.ui.tempo;
       await commit(next, true);
     },
+    /** The tempo of ONE line of relationships ('very-slow' | 'slow' | 'normal' | 'fast'); each pair has its own. */
+    onSetPairTempo: async ({ relationshipId, tempo }) => {
+      if (!state.relationships?.[relationshipId]) throw new Error('Линии нет.');
+      const next = structuredClone(state);
+      next.ui ??= {};
+      next.ui.pairTempo = { ...(next.ui.pairTempo ?? {}) };
+      if (['very-slow', 'slow', 'normal', 'fast'].includes(tempo)) next.ui.pairTempo[relationshipId] = tempo; else delete next.ui.pairTempo[relationshipId];
+      if (!Object.keys(next.ui.pairTempo).length) delete next.ui.pairTempo;
+      await commit(next, true);
+    },
     /** Grammatical gender for trope texts: 'male' | 'female' | '' (not set). */
     onSetGender: async ({ entityId, gender }) => {
       requireCharacter(entityId);
@@ -3384,8 +3491,8 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       (async () => {
         const { fresh } = await loreSecrets([name]);
         if (fresh.length) await importLoreSecrets({ books: [name] });
-      })().catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы'));
-      globalThis.toastr?.info?.('Книга подключена. Персонажей из неё ищите кнопкой «Найти персонажей в лорбуках».', 'Кулисы');
+      })().catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье'));
+      globalThis.toastr?.info?.('Книга подключена. Персонажей из неё ищите кнопкой «Найти персонажей в лорбуках».', 'Закулисье');
     },
     onUnlinkLorebook: async ({ name }) => {
       const next = structuredClone(state);
@@ -3539,7 +3646,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
         }, { transactionId: uniqueId('manual'), reason: 'Массовое удаление персонажей', timestamp: new Date().toISOString() }));
       }
       await commit(next, true);
-      globalThis.toastr?.success?.(`Удалено персонажей: ${ids.length}`, 'Кулисы');
+      globalThis.toastr?.success?.(`Удалено персонажей: ${ids.length}`, 'Закулисье');
     },
     onMetricChange: changeMetric,
     onAddMemory: payload => addCollection('memory', payload),
@@ -3571,7 +3678,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     },
     // «Вспомнить в следующем ответе»: a one-off stage cue with the record's text.
     onRecallRecord: async ({ text }) => {
-      if (!settings.enabled) throw new Error('Кулисы выключены.');
+      if (!settings.enabled) throw new Error('Закулисье выключено.');
       await saveDirection(armCue(directionState(), { kind: 'recall', text, id: uniqueId('cue') }, Object.keys(state.entities)));
     },
     onRemoveHeadcanon: async ({ key, id }) => {
@@ -3611,7 +3718,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       })), true);
     },
     onGetDiagnostics: () => formatLog({
-      'Кулисы': 'журнал диагностики',
+      'Закулисье': 'журнал диагностики',
       'Браузер': globalThis.navigator?.userAgent ?? '?',
       'Экран': `${globalThis.innerWidth ?? '?'}×${globalThis.innerHeight ?? '?'}`,
       'Автоанализ': settings.autoAnalyze ? 'вкл' : 'выкл',
@@ -3930,7 +4037,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       if (match && match.ids.length === 1 && !(state.ui?.distinctPairs ?? []).some(key => key.includes(match.ids[0]))) {
         const known = sourceState.entities[match.ids[0]];
         const same = await ctx.Popup.show.confirm('Это тот же персонаж?',
-          `<p>Модель называет «${escapeHtml(character.name)}». В Кулисах есть «${escapeHtml(known.name)}». Это один и тот же персонаж?</p><p>«Да» — имя станет его другим именем. «Нет» — будет новый персонаж.</p>`);
+          `<p>Модель называет «${escapeHtml(character.name)}». В Закулисье есть «${escapeHtml(known.name)}». Это один и тот же персонаж?</p><p>«Да» — имя станет его другим именем. «Нет» — будет новый персонаж.</p>`);
         if (same === ctx.POPUP_RESULT.AFFIRMATIVE) { aliasAdds.set(known.id, [...(aliasAdds.get(known.id) ?? []), character.name, ...(character.aliases ?? [])]); continue; }
       }
       fresh.push(character);
@@ -3953,7 +4060,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     if (!allowNewPair) return skip('анализ отменён');
     if (isStale()) return skip('чат или текст сообщения изменились');
     const applied = applyAnalysisResult(next, result, { transactionId, messageId: String(messageIndex), messageIndex }, acceptedNewCharacters,
-      { linkedScales: settings.linkedScales !== false, tempo: state.ui?.tempo ?? 'normal', allowNewPair, headcanonKeys, trackKnowledge: Boolean(knowledge), trackWorld, loreTitles: knowledge?.loreList?.length ? new Set(knowledge.loreList) : null, library: locationLibrary.get(), wardrobe: wardrobeFor(next) });
+      { linkedScales: settings.linkedScales !== false, tempo: state.ui?.tempo ?? 'normal', pairTempo: state.ui?.pairTempo ?? {}, allowNewPair, headcanonKeys, trackKnowledge: Boolean(knowledge), trackWorld, loreTitles: knowledge?.loreList?.length ? new Set(knowledge.loreList) : null, library: locationLibrary.get(), wardrobe: wardrobeFor(next) });
     next = applied.state;
     const operations = applied.operations;
     const leaks = applied.leaks ?? [];
@@ -4080,14 +4187,14 @@ ${card.personality ?? card.data?.personality ?? ''}`;
   async function runManualCheck(index) {
     const toast = globalThis.toastr;
     if (!Number.isInteger(index) || index < 0) {
-      toast?.warning?.('В чате нет ответа бота для проверки.', 'Кулисы');
+      toast?.warning?.('В чате нет ответа бота для проверки.', 'Закулисье');
       return null;
     }
-    toast?.info?.(`Проверяю ответ #${index}…`, 'Кулисы', { timeOut: 2500 });
+    toast?.info?.(`Проверяю ответ #${index}…`, 'Закулисье', { timeOut: 2500 });
     const result = await enqueueAnalysis(index, true);
     if (!result) return null; // the failure toast is shown by enqueueAnalysis
-    if (result.applied) toast?.success?.(`Применено изменений: ${result.applied}. Подробности — во вкладке «История».`, 'Кулисы');
-    else toast?.info?.(`Без изменений: ${result.skipped}.`, 'Кулисы');
+    if (result.applied) toast?.success?.(`Применено изменений: ${result.applied}. Подробности — во вкладке «История».`, 'Закулисье');
+    else toast?.info?.(`Без изменений: ${result.skipped}.`, 'Закулисье');
     return result;
   }
 
@@ -4097,7 +4204,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     const expectedEpoch = chatEpoch;
     analysisQueue = analysisQueue.then(() => processMessage(Number(messageIndex), force, expectedChatId, expectedEpoch)).catch(error => {
       logEvent('error', `Сообщение #${messageIndex}: анализ не удался`, error);
-      globalThis.toastr?.error?.(error.message, 'Кулисы');
+      globalThis.toastr?.error?.(error.message, 'Закулисье');
       noteChronicler(false, error?.message);
     });
     return analysisQueue;
@@ -4119,7 +4226,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     chroniclerHealth.lastError = String(reason || '').slice(0, 200);
     if (chroniclerHealth.silent >= 2 && !chroniclerHealth.warned) {
       chroniclerHealth.warned = true;
-      globalThis.toastr?.warning?.('Летописец молчит уже несколько ответов подряд: время, одежда и знания не обновляются. Подробности — в «Настройки → Диагностика».', 'Кулисы', { timeOut: 12000 });
+      globalThis.toastr?.warning?.('Летописец молчит уже несколько ответов подряд: время, одежда и знания не обновляются. Подробности — в «Настройки → Диагностика».', 'Закулисье', { timeOut: 12000 });
     }
     notify();
   }
@@ -4161,7 +4268,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     chatEpoch += 1;
     state = storage.load();
     resetDice();
-    autoBindPersona(state).catch(error => console.error('[Kulisy] Persona auto-bind failed.', error));
+    autoBindPersona(state).catch(error => console.error('[Kulisy] Persona auto-bind failed.', error)).then(() => syncPersonaFromTavern());
     // Library places edited while this chat was closed: bring its cards up to date.
     // Cards that left the library meanwhile are let go of their characters, in the same save.
     try {
@@ -4237,6 +4344,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       console.error('[Kulisy] Суфлёр лорбуков не сработал, записи оставлены как есть.', error);
     }
   });
+  listen(events.PERSONA_CHANGED, () => { syncPersonaFromTavern(); });
   listen(events.MESSAGE_RECEIVED, messageIndex => {
     // The corrections were for this reply: they are done.
     if (reminders.list().length) { reminders.clear(); refreshPrompt(); }
@@ -4357,7 +4465,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     return eventsOn(calendar, today).map(event => [event.time, event.title].filter(Boolean).join(' ')).filter(Boolean).slice(0, 6);
   }
 
-  const reportSecretError = error => globalThis.toastr?.error?.(error?.message ?? String(error), 'Кулисы');
+  const reportSecretError = error => globalThis.toastr?.error?.(error?.message ?? String(error), 'Закулисье');
   const selectionChip = mountSelectionChip({ onCreate: selection => createSecretFlow(selection).catch(reportSecretError) });
   const messageButtons = mountMessageButtons(index => { runManualCheck(index); }, index => {
     // The «…» menu steals the selection on phones: use the one remembered a moment ago, else start from this post.
@@ -4380,6 +4488,47 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     };
   }
 
+  /**
+   * «АУ не выбрана»: cards in play (the persona's and the characters') hold sections or records written for an AU, but this chat plays none,
+   * so none of them reaches the narrator. Null when there is nothing to warn about.
+   */
+  function auWarningNow() {
+    try {
+      const lib = normalizePersonaCards(settings.personaCards);
+      if (!lib.au.length || (state.ui?.au ?? []).length) return null;
+      const ids = new Set(cardOfEntity().values());
+      const names = [];
+      let hidden = 0;
+      for (const card of locationLibrary.get().characters ?? []) {
+        if (!ids.has(card.id)) continue;
+        const count = (card.sections ?? []).filter(section => section.au?.length).length + (card.records ?? []).filter(record => record.au?.length).length;
+        if (!count) continue;
+        names.push(card.name);
+        hidden += count;
+      }
+      return hidden ? { names, hidden, chat: String(SillyTavern.getContext().chatId ?? ''), avatar: personaCardNow()?.avatar ?? '' } : null;
+    } catch (error) {
+      logEvent('warn', 'Проверка АУ не удалась', error);
+      return null;
+    }
+  }
+
+  /** The calendar for the drawer: the month around the story's date and the next events (deadlines of the quests too); null without a date. */
+  function calendarGlance() {
+    try {
+      const calendar = calendarOf();
+      const today = dateOfDay(calendar, state.world?.clock?.day ?? 0);
+      if (!today) return null;
+      const clock = clockOf(calendar);
+      const quests = questsOf(state);
+      const next = comingEvents(calendar, today, quests).slice(0, 8).map(({ event, date, inDays }) => ({ when: inDays === 0 ? 'сегодня' : inDays === 1 ? 'завтра' : clock.shortDate(date), title: event.title, kind: event.kind ? EVENT_KINDS[event.kind] ?? '' : '' }));
+      return { today: clock.shortDate(today), month: monthView(calendar, today, { today, quests }), next };
+    } catch (error) {
+      logEvent('warn', 'Календарь для шторки не собрался', error);
+      return null;
+    }
+  }
+
   /** Chips: everyone on stage, plus whoever the last messages mention (likely to come on). */
   function overlayView() {
     const enabled = settings.enabled && settings.trackKnowledge !== false;
@@ -4398,7 +4547,8 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     const nameOf = id => state.entities[id]?.name ?? id;
     const director = settings.director ?? {};
     return {
-      setup: (() => { const setup = setupSnapshot(); return { due: setupReminderDue({ enabled: setup.enabled, remind: setup.remind, off: setup.off }, setup.progress), done: setup.progress.done, total: setup.progress.total, chat: String(SillyTavern.getContext().chatId ?? '') }; })(),
+      auWarning: enabled ? auWarningNow() : null,
+      setup: (() => { const setup = setupSnapshot(); return { due: setupReminderDue({ enabled: setup.enabled, remind: setup.remind, off: setup.off }, setup.progress), done: setup.progress.done, total: setup.progress.total, steps: setup.steps.map(step => ({ id: step.id, title: step.title, tab: step.tab, required: step.required, done: step.done })), chat: String(SillyTavern.getContext().chatId ?? '') }; })(),
       chips: settings.enabled && settings.sceneChips !== false,
       railSide: settings.railSide === 'right' ? 'right' : 'left',
       cast: ids.map(id => ({ id, name: state.entities[id].name, present: here.has(id), persona: id === personaId, silent: silent.get(id) ?? 0 })),
@@ -4422,6 +4572,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       clock: { time: state.world?.clock?.time ?? '', day: state.world?.clock?.day ?? 0, label: state.world?.clock?.label ?? '' },
       dice: diceView(),
       songs: songsView(),
+      calendar: enabled ? calendarGlance() : null,
       quests: enabled ? questsOf(state).filter(quest => quest.status === 'active').slice(0, 6).map(quest => {
         const step = currentStep(quest);
         const progress = progressOf(quest);
@@ -4449,11 +4600,13 @@ ${card.personality ?? card.data?.personality ?? ''}`;
 
   const LEAK_ACTIONS = { swipe: 'onLeakSwipe', knows: 'onLeakKnows', dismiss: 'onLeakDismiss' };
   const chatOverlay = mountChatOverlay({
-    onStage: payload => Promise.resolve(worldCallbacks.onSetStage(payload)).then(() => diceResend()).catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+    onStage: payload => Promise.resolve(worldCallbacks.onSetStage(payload)).then(() => diceResend()).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onDiceRelease: ({ group, option }) => diceRelease(group, option),
-    onHeat: payload => Promise.resolve(worldCallbacks.onSetHeat(payload)).catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
-    onQuestStep: payload => Promise.resolve(worldCallbacks.onQuestStep(payload)).catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
-    onSong: payload => Promise.resolve(songsCallbacks.onSongChat(payload)).catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+    onHeat: payload => Promise.resolve(worldCallbacks.onSetHeat(payload)).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
+    onCalendarSave: event => calendarCallbacks.onCalendarSaveEvent({ event }),
+    onCalendarRemove: ({ id }) => calendarCallbacks.onCalendarRemoveEvent({ id }),
+    onQuestStep: payload => Promise.resolve(worldCallbacks.onQuestStep(payload)).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
+    onSong: payload => Promise.resolve(songsCallbacks.onSongChat(payload)).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onQuestPush: payload => questCallbacks.onQuestPush(payload),
     onDiceRoll: ({ only }) => diceRoll(only || ''),
     onDiceToggle: ({ group, option }) => diceToggle(group, option),
@@ -4462,51 +4615,52 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     onDiceSend: () => diceSend(),
     onDiceClear: () => diceClear(),
     onSetTime: async payload => {
-      try { await worldCallbacks.onSetClock(payload); return true; } catch (error) { globalThis.toastr?.error?.(error.message, 'Кулисы'); return false; }
+      try { await worldCallbacks.onSetClock(payload); return true; } catch (error) { globalThis.toastr?.error?.(error.message, 'Закулисье'); return false; }
     },
     onWeather: ({ kind, temp, lock }) => Promise.resolve(worldCallbacks.onSetWeather({ kind, temp: temp ?? '', text: '', lock }))
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onSceneMode: mode => Promise.resolve(worldCallbacks.onSetClock({ mode }))
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onTogglePresent: (id, present) => knowledgeCallbacks.onTogglePresent({ characterId: id, present })
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onLeak: (action, payload) => knowledgeCallbacks[LEAK_ACTIONS[action]]?.(payload)
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onReveal: (action, payload) => knowledgeCallbacks[action === 'confirm' ? 'onRevealConfirm' : 'onRevealDismiss'](payload)
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onQuestHint: (action, payload) => knowledgeCallbacks[action === 'confirm' ? 'onQuestHintConfirm' : 'onQuestHintDismiss'](payload)
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onDeath: (action, payload) => knowledgeCallbacks[action === 'confirm' ? 'onDeathConfirm' : 'onDeathDismiss'](payload)
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onSecretHint: (action, payload) => Promise.resolve()
       .then(() => (action === 'open' ? createSecretFlow({ messageIndex: payload.messageIndex, eventId: payload.eventId }) : forgetSecretHint(payload.messageIndex, payload.eventId).then(notify)))
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onSlip: (action, payload) => {
       const handler = { swipe: 'onSlipSwipe', edit: 'onSlipEdit', accept: 'onSlipAccept', dismiss: 'onSlipDismiss', remind: 'onSlipRemind' }[action];
       Promise.resolve().then(() => worldCallbacks[handler]?.(payload))
-        .then(() => { if (action === 'remind') globalThis.toastr?.info?.('Поправка уйдёт со следующим ответом', 'Кулисы'); })
-        .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы'));
+        .then(() => { if (action === 'remind') globalThis.toastr?.info?.('Поправка уйдёт со следующим ответом', 'Закулисье'); })
+        .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье'));
     },
     onOpenStudio: tab => (tab && settings.studioMulti === true && tab !== 'personas' ? pressWindowButton(windowOf(tab).id, tab, { toggle: false }) : tab ? studio.show(tab) : studio.open()),
-    onSetupOff: () => setupCallbacks.onSetupOff({ off: true }).catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+    onOpenPersonas: avatar => controller?.personaBridge?.personaWindow?.open?.(avatar),
+    onSetupOff: () => setupCallbacks.onSetupOff({ off: true }).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onCue: async cue => {
       try {
-        if (!settings.enabled) throw new Error('Кулисы выключены.');
+        if (!settings.enabled) throw new Error('Закулисье выключено.');
         await saveDirection(armCue(directionState(), { ...cue, id: uniqueId('cue') }, Object.keys(state.entities)));
         return true;
       } catch (error) {
-        globalThis.toastr?.error?.(error.message, 'Кулисы');
+        globalThis.toastr?.error?.(error.message, 'Закулисье');
         return false;
       }
     },
     onRemoveCue: cueId => saveDirection(removeCue(directionState(), cueId))
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы')),
+      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onKickNow: () => {
-      if (isGenerationActive()) { globalThis.toastr?.info?.('Сейчас идёт генерация — пинок уйдёт со следующей.', 'Кулисы'); return; }
+      if (isGenerationActive()) { globalThis.toastr?.info?.('Сейчас идёт генерация — пинок уйдёт со следующей.', 'Закулисье'); return; }
       // Exactly like the send button: her text goes too, an empty field means a reply without a post.
       const send = document.getElementById('send_but');
       if (send) send.click();
-      else Promise.resolve(SillyTavern.getContext().generate?.('normal')).catch(error => globalThis.toastr?.error?.(error.message, 'Кулисы'));
+      else Promise.resolve(SillyTavern.getContext().generate?.('normal')).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье'));
     },
     onToggleOpen: open => {
       settings.director ??= {};
@@ -4518,7 +4672,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       const current = normalizeFavorites(settings.directionFavorites);
       settings.directionFavorites = normalizeFavorites(add ? [text, ...current] : current.filter(item => item !== text));
       context.saveSettingsDebounced();
-      if (add) globalThis.toastr?.success?.('Сохранено в избранные пинки', 'Кулисы');
+      if (add) globalThis.toastr?.success?.('Сохранено в избранные пинки', 'Закулисье');
       refreshChatOverlay();
     },
     describe: describeForDirector,
@@ -4617,11 +4771,27 @@ ${card.personality ?? card.data?.personality ?? ''}`;
   globalThis.Kulisy = controller;
   // What the persona window (the former Pudrenitsa) needs from Kulisy: the card of a persona, made on demand, and its editor to embed.
   controller.personaBridge = {
+    /** The books the Kulisy itself reads (analysis, secrets, heroes): the window «Лорбуки чата» of the paw switches them next to the tavern's ones. */
+    lore: {
+      linked: () => [...(state.ui?.linkedLorebooks ?? [])],
+      link: name => callbacks.onLinkLorebook({ name }),
+      unlink: name => callbacks.onUnlinkLorebook({ name }),
+    },
     cardIdFor: avatar => (locationLibrary.get().characters ?? []).find(card => card.persona && card.avatar === avatar)?.id ?? '',
     /** The persona window asks to be told when the library changes. Returns the way to stop. */
     subscribe(listener) { libraryListeners.add(listener); return () => libraryListeners.delete(listener); },
     /** The address of the picture of the persona's card (its own portrait), or '' when the card has none. */
     cardImageFor: avatar => { const image = (locationLibrary.get().characters ?? []).find(card => card.persona && card.avatar === avatar)?.image; return image ? imageUrl(image) : ''; },
+    /** The card's picture becomes the persona's avatar in SillyTavern (for a card whose picture was set before they were tied together). */
+    async pushCardImage(avatar) {
+      const image = (locationLibrary.get().characters ?? []).find(card => card.persona && card.avatar === avatar)?.image;
+      if (!image) throw new Error('У карточки персоны нет своей картинки.');
+      const response = await fetch(imageUrl(image));
+      if (!response.ok) throw new Error('Картинка карточки не читается.');
+      const blob = await response.blob();
+      await personaApi.setImage(avatar, await fileToDataUrl(new File([blob], 'persona', { type: blob.type || 'image/png' })));
+      notify();
+    },
     ensureCard({ avatar, name }) {
       const have = (locationLibrary.get().characters ?? []).find(card => card.persona && card.avatar === avatar);
       if (have) return have.id;

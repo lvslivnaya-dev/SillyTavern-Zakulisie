@@ -192,7 +192,9 @@ export function applyAnalysisResult(state, result, metadata = {}, acceptedNewCha
   }
   for (const change of resolved) {
     const pace = next.relationships[change.id].pace ?? {};
-    const tempo = TEMPOS[options.tempo] && options.tempo !== 'normal' ? options.tempo : '';
+    // The tempo is the line's own (set in the card of the relationship); a line without one follows the chat's.
+    const wanted = options.pairTempo?.[change.id] ?? options.tempo;
+    const tempo = TEMPOS[wanted] && wanted !== 'normal' ? wanted : '';
     const delta = pacedDelta(tempoDelta(change.delta, tempo), pace[change.metric]);
     if (!delta) continue;
     const reasons = [tempo ? `темп чата: ${TEMPO_LABELS[tempo]}` : '', pace[change.metric] ? `темп шкалы: ${pace[change.metric] === 'slow' ? 'медленно' : 'быстро'}` : ''].filter(Boolean);

@@ -48,7 +48,7 @@ export function startHome(doc, { context, settings, save, api = tavernApi, stora
 
   try {
     if (importLegacy(settings, key => storage?.getItem(key) ?? null)) {
-      globalThis.toastr?.info?.('Закреплённые и архив из Character Chat Pills перенесены в библиотеку.', 'Пудреница');
+      globalThis.toastr?.info?.('Закреплённые и архив из Character Chat Pills перенесены в библиотеку.', 'Закулисье');
     }
     save();
   } catch (error) { report('перенос из Character Chat Pills', error); }
@@ -284,7 +284,7 @@ export function startHome(doc, { context, settings, save, api = tavernApi, stora
     home.classList.add('pud-busy');
     try { await task(); } catch (error) {
       report(what, error);
-      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Пудреница');
+      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Закулисье');
     } finally {
       state.busy = false;
       home.classList.remove('pud-busy');

@@ -281,7 +281,7 @@ export function startCharacters(doc, { context, settings, save, api = characterA
     win.element.classList.add('pud-busy');
     try { await Promise.all([api.ready(), lore.ready()]); await task(); } catch (error) {
       report(what, error);
-      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Пудреница');
+      globalThis.toastr?.error?.(`${what}: не получилось. Подробности в консоли (F12).`, 'Закулисье');
     } finally {
       busy = false;
       win.element.classList.remove('pud-busy');
@@ -332,7 +332,7 @@ export function startCharacters(doc, { context, settings, save, api = characterA
         save();
         state.picked = copy;
         state.forceSide = true;
-        globalThis.toastr?.success?.(`Копия «${character.name}» готова.`, 'Пудреница');
+        globalThis.toastr?.success?.(`Копия «${character.name}» готова.`, 'Закулисье');
       });
     } else if (act === 'png' || act === 'json') run('Экспорт', () => api.exportCard(doc, avatar, act));
     else if (act === 'delete') run('Удалить персонажа', () => askDelete([avatar]));
@@ -449,7 +449,7 @@ export function startCharacters(doc, { context, settings, save, api = characterA
     if (!avatar || fieldValue(raw(avatar), field) === textarea.value) return;
     api.setField(doc, avatar, field, textarea.value).catch(error => {
       report('расширенное описание', error);
-      globalThis.toastr?.error?.('Не сохранилось. Подробности в консоли (F12).', 'Пудреница');
+      globalThis.toastr?.error?.('Не сохранилось. Подробности в консоли (F12).', 'Закулисье');
     });
   };
   extWin.body.addEventListener('input', event => {

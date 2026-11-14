@@ -98,7 +98,7 @@ export function startPalette(doc, { settings, save, shared = {}, generate }) {
       const mine = editing();
       tab.pane.innerHTML = `
         <h3>Палитра</h3>
-        <p class="pud-hint">Цвета всей Пудреницы: окна, кнопки, чат. Нажми на палитру, и она сразу включится.</p>
+        <p class="pud-hint">Цвета всего Закулисья: окна, кнопки, чат. Нажми на палитру, и она сразу включится.</p>
         <div class="pud-palettes" role="radiogroup" aria-label="Палитра">
           ${PALETTES.map(p => cardHtml(p, settings.palette)).join('')}
         </div>

@@ -86,7 +86,7 @@ export function startIconStudio(doc, { settings, save, hub }) {
       </div>
       <h4 class="pud-icohead">Панели и окна Закулисья</h4>
       <div class="pud-icogrid">${Object.keys(ICONS).map(name => tile('pud', name)).join('')}</div>
-      <h4 class="pud-icohead">Окно Кулис (отношения, мир, библиотеки)</h4>
+      <h4 class="pud-icohead">Окна отношений, мира и библиотек</h4>
       <p class="pud-hint">Эти иконки меняются при следующем открытии окна.</p>
       <div class="pud-icogrid">${ICON_NAMES.map(name => tile('studio', name)).join('')}</div>`;
   };

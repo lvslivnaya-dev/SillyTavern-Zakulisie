@@ -86,7 +86,7 @@ export function startChips(doc, { context, settings, save, hub }) {
   bar.addEventListener('click', event => {
     const chip = event.target.closest('.pud-chip');
     if (chip) {
-      if (!togglePrompt(doc, chip.dataset.id)) globalThis.toastr?.warning?.('Этого тоггла нет в открытом пресете.', 'Пудреница');
+      if (!togglePrompt(doc, chip.dataset.id)) globalThis.toastr?.warning?.('Этого тоггла нет в открытом пресете.', 'Закулисье');
       schedule();
       return;
     }

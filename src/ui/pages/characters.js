@@ -81,22 +81,7 @@ export function createCharactersPage(ctx) {
     bulkRemoveButton.style.cssText = 'min-height:30px;padding:4px 10px;font-size:12px';
     if (removableCharacters.length) bulkBar.append(selectAllButton, bulkRemoveButton);
     else bulkBar.append(element('p', { className: 'muted', style: { fontSize: '11px', margin: '0' }, text: 'Нет персонажей для удаления.' }));
-    const addForm = element('form', { className: 'field', style: { marginTop: '12px' } });
-    const addInput = element('input', { type: 'text', placeholder: 'Имя персонажа', 'aria-label': 'Имя нового персонажа', required: true });
-    const aliasInput = element('input', { type: 'text', placeholder: 'Псевдонимы через запятую', 'aria-label': 'Псевдонимы персонажа' });
-    const addButton = button('Добавить персонажа', 'btn', () => {});
-    addButton.type = 'submit';
-    addForm.append(addInput, aliasInput, addButton);
-    addForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const name = addInput.value.trim();
-      if (!name) return;
-      const aliases = aliasInput.value.split(',').map(value => value.trim()).filter(Boolean);
-      await act('onAddCharacter', { name, aliases }, 'character-add');
-      addInput.value = '';
-      aliasInput.value = '';
-    });
-    box.append(bulkBar, list, addForm);
+    box.append(bulkBar, list);
     return box;
   }
 

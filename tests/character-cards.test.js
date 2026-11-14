@@ -529,12 +529,12 @@ test('callbacks: a card is made, switched on by folder, follows the library, goe
 
   assert.equal(await callbacks.onLibraryLink({ libraryIds: [mikey.id], on: false, kind: 'characters' }), 1);
   assert.deepEqual(callbacks.onLibraryGet().linkedCharacterIds, []);
-  assert.ok(state.entities.mikey, 'the character stays');
+  assert.ok(!state.entities.mikey, 'a hero with nothing behind him leaves with his card');
 
   await callbacks.onLibraryLink({ libraryIds: [mikey.id], on: true, kind: 'characters' });
   assert.equal(await callbacks.onLibraryRemoveCharacter({ cardId: mikey.id }), true);
   assert.deepEqual(state.ui.cards, {}, 'a deleted card is let go of its character');
-  assert.ok(state.entities.mikey);
+  assert.ok(Object.values(state.entities).some(entity => entity.name === mikey.name), 'the hero stays when the card is deleted');
   assert.equal(await callbacks.onLibraryRemoveFolder({ folderId: folder.id }), true);
   assert.deepEqual(store.get().characters, []);
   assert.deepEqual(asked, ['Удалить карточку', 'Удалить папку']);
@@ -601,7 +601,8 @@ test('«Мир → Карточки»: a gallery with a switch per card; the she
     // The sheet: a list of sections on the left, one section on the right.
     const navs = () => [...shadow.querySelectorAll('.ku-cnav')];
     const nav = title => navs().find(node => node.querySelector('.ku-cnav-title').textContent === title);
-    assert.equal(navs().length, 11); // nine sections, the closet and the names
+    assert.equal(navs().length, 9); // nine sections; the names and the closet are small buttons in the footer
+    assert.equal(shadow.querySelectorAll('.ku-cfoot-tool').length, 4, 'names, the closet, the sizes and the AU: buttons beside the switch');
     assert.equal(shadow.querySelector('.ku-cnav.on .ku-cnav-title').textContent, 'Basic Info', 'the first section is open');
     assert.match(shadow.querySelector('.ku-ctitlerow').textContent, /Basic Info[\s\S]*сейчас уходит в запрос/);
     nav('Skills').click();
@@ -630,7 +631,7 @@ test('«Мир → Карточки»: a gallery with a switch per card; the she
     assert.equal(shadow.querySelector('textarea[aria-label="Ключевые слова раздела"]').disabled, false);
     // A section of one's own.
     byText('+ Свой раздел').click();
-    assert.equal(navs().length, 12);
+    assert.equal(navs().length, 10);
     byText('Сохранить').click();
     await flush();
     const saved = calls.find(([name]) => name === 'onLibraryUpdateCharacter')[1];
@@ -933,8 +934,8 @@ test('the closet of a card: sets and things of the wardrobe are ticked, saved wi
   const flush = () => new Promise(resolve => setTimeout(resolve, 0));
   try {
     shadow.querySelector('.ku-place-open').click();
-    assert.ok([...shadow.querySelectorAll('.ku-cnav')].slice(0, 2).some(node => node.textContent.startsWith('Шкаф')), 'the closet is among the first rows of the list: it must not hide below the sections');
-    [...shadow.querySelectorAll('.ku-cnav')].find(node => node.textContent.startsWith('Шкаф')).click();
+    assert.ok(shadow.querySelector('.ku-cfoot-tool[aria-label^="Шкаф"]'), 'the closet is an icon beside the switch: it never hides below the sections');
+    shadow.querySelector('.ku-cfoot-tool[aria-label^="Шкаф"]').click();
     assert.match(shadow.querySelector('.ku-cpane').textContent, /Комплекты[\s\S]*Форма[\s\S]*Вещи/);
     shadow.querySelector('input[aria-label="Комплект «Форма» у героя"]').click();
     assert.ok(byText('Надеть'), 'a tied set can be put on at once');

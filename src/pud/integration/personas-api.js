@@ -29,6 +29,9 @@ async function readBlob(url) {
   return response.blob();
 }
 
+/** Когда картинки персон менялись в последний раз: по этой метке окно персон обходит кэш браузера. */
+let imageChangedAt = 0;
+
 export const personaApi = {
   async ready() {
     if (mods) return;
@@ -45,7 +48,9 @@ export const personaApi = {
   allowMulti: () => Boolean(power().persona_allow_multi_connections),
   worldNames: () => [...(mods?.world.world_names ?? [])],
   connection: () => mods?.personas.getCurrentConnectionObj() ?? null,
-  imageUrl: avatar => `User Avatars/${encodeURIComponent(avatar)}`,
+  imageUrl: avatar => `User Avatars/${encodeURIComponent(avatar)}${imageChangedAt ? `?t=${imageChangedAt}` : ''}`,
+  /** Метка последней смены картинки (0 — с запуска страницы не менялись). */
+  imageStamp: () => imageChangedAt,
   thumbUrl: avatar => `/thumbnail?type=persona&file=${encodeURIComponent(avatar)}`,
   isLocked: type => { try { return Boolean(mods?.personas.isPersonaLocked(type)); } catch { return false; } },
 
@@ -126,6 +131,17 @@ export const personaApi = {
     if (!response.ok) throw new Error(`/api/avatars/upload: ${response.status}`);
     await fetch(personaApi.imageUrl(avatar), { cache: 'reload' }).catch(() => {});
     await fetch(personaApi.thumbUrl(avatar), { cache: 'reload' }).catch(() => {});
+  },
+
+  /**
+   * Поставить персоне таверны картинку из данных (data:-ссылка): тот же путь, что у родной формы, только без окна обрезки.
+   * Так фото из карточки персоны становится и её аватаром в таверне: в чате и в родных списках.
+   */
+  async setImage(avatar, dataUrl) {
+    await personaApi.ready();
+    await personaApi.upload(avatar, dataUrl);
+    imageChangedAt = Date.now();
+    await mods.personas.getUserAvatars(true, avatar);
   },
 
   async duplicate(avatar) { return String(await runSlash(`/persona-duplicate persona="${safeId(avatar)}"`) ?? ''); },

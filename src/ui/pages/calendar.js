@@ -1,5 +1,5 @@
 import { button, characterId, characterName, element } from '../helpers.js';
-import { MONTHS, clockOf, eventsOn, upcoming } from '../../core/calendar.js';
+import { EVENT_KINDS, INTENSITIES, MONTHS, clockOf, comingEvents, eventsWithQuests, upcoming } from '../../core/calendar.js';
 import { createCalendarBuilder } from './calendar-builder.js';
 
 /**
@@ -68,7 +68,7 @@ export function createCalendarPages(ctx) {
   }
 
   function blankEvent(date) {
-    return { title: '', note: '', date, endDate: '', time: '', repeat: 'none', weekdays: [weekdayOf(date) || 1], until: '', who: [], must: false, ahead: 0 };
+    return { title: '', note: '', date, endDate: '', time: '', repeat: 'none', weekdays: [weekdayOf(date) || 1], until: '', who: [], kind: '', intensity: 2, ahead: 0 };
   }
 
   // ---- «Сегодня в истории» --------------------------------------------------
@@ -114,17 +114,20 @@ export function createCalendarPages(ctx) {
     const start = clock.addDays(first, -offset);
     const length = clock.daysInMonth(year, monthNumber);
     const rows = clock.custom ? Math.ceil((offset + length) / W) : 6;
-    const shift = delta => {
-      const total = Math.max(0, year * N + (monthNumber - 1) + delta);
-      month = pad(Math.max(1, Math.floor(total / N)), (total % N) + 1);
-      render();
-    };
+    // The month and the year are turned apart: the month arrows go round the months of the same year, the year has its own arrows and a list.
+    const goMonth = number => { month = pad(year, ((number - 1 + N) % N) + 1); render(); };
+    const goYear = value => { month = pad(Math.max(1, Math.min(9999, Math.round(Number(value)) || year)), monthNumber); render(); };
+    const monthPick = element('select', { 'aria-label': 'Месяц', className: 'ku-cal-pick' }, Array.from({ length: N }, (_, index) => element('option', { value: String(index + 1), text: clock.monthNames[index] ?? String(index + 1), selected: index + 1 === monthNumber })));
+    monthPick.addEventListener('change', () => goMonth(Number(monthPick.value)));
+    const from = Math.max(1, year - 30);
+    const yearPick = element('select', { 'aria-label': 'Год', className: 'ku-cal-pick' }, Array.from({ length: Math.min(9999, year + 30) - from + 1 }, (_, index) => from + index).map(value => element('option', { value: String(value), text: String(value), selected: value === year })));
+    yearPick.addEventListener('change', () => goYear(yearPick.value));
     const grid = element('div', { className: 'ku-cal-grid', role: 'grid', style: { gridTemplateColumns: `repeat(${W}, minmax(0, 1fr))` } });
     for (const label of clock.weekdayShort) grid.append(element('span', { className: 'ku-cal-head', text: label }));
     for (let index = 0; index < rows * W; index += 1) {
       const iso = start ? clock.addDays(start, index) : '';
       if (!iso) { grid.append(element('span', { className: 'ku-cal-cell other', 'aria-hidden': 'true' })); continue; }
-      const items = eventsOn(calendar(), iso);
+      const items = eventsWithQuests(calendar(), iso, snapshot().quests);
       const cell = element('button', {
         type: 'button',
         className: ['ku-cal-cell', iso.slice(0, 7) !== base ? 'other' : '', iso === today() ? 'today' : '', iso === selected ? 'on' : '', items.some(item => item.must) ? 'must' : ''].filter(Boolean).join(' '),
@@ -141,9 +144,14 @@ export function createCalendarPages(ctx) {
     const season = clock.custom ? clock.seasonOf(monthNumber) : null;
     return element('div', { className: 'card' }, [
       element('div', { className: 'ku-row' }, [
-        button('‹', 'btn small', () => shift(-1), 'Предыдущий месяц'),
-        element('strong', { className: 'ku-cal-title', text: `${clock.monthNames[monthNumber - 1] ?? ''} ${year}${clock.custom && clock.system.era ? ` ${clock.system.era}` : ''}` }),
-        button('›', 'btn small', () => shift(1), 'Следующий месяц'),
+        button('‹', 'btn small', () => goMonth(monthNumber - 1), 'Предыдущий месяц (год не меняется)'),
+        monthPick,
+        button('›', 'btn small', () => goMonth(monthNumber + 1), 'Следующий месяц (год не меняется)'),
+        element('span', { className: 'ku-cal-sep', 'aria-hidden': 'true' }),
+        button('‹', 'btn small', () => goYear(year - 1), 'Предыдущий год'),
+        yearPick,
+        button('›', 'btn small', () => goYear(year + 1), 'Следующий год'),
+        ...(clock.custom && clock.system.era ? [element('span', { className: 'muted ku-small', text: clock.system.era })] : []),
         ...(season ? [element('span', { className: 'muted ku-small', text: season.name })] : []),
         element('span', { className: 'ku-push' }),
         ...(today() ? [button('К сегодняшнему', 'btn small', () => { month = today().slice(0, 7); selected = today(); render(); })] : []),
@@ -169,18 +177,22 @@ export function createCalendarPages(ctx) {
     return element('div', { className: `ku-cal-event${event.must ? ' must' : ''}` }, [
       element('div', { className: 'ku-cal-event-text' }, [
         element('strong', { text: `${event.time ? `${event.time} · ` : ''}${event.title}` }),
-        element('span', { className: `ku-tag${event.must ? ' on' : ''}`, text: event.must ? 'случится' : 'фон' }),
+        element('span', { className: `ku-tag${event.must ? ' on' : ''}`, text: `${event.kind ? EVENT_KINDS[event.kind] : 'Событие'} · ${INTENSITIES[event.intensity ?? 1]}`, title: 'Что за день и какой у него вес: историю он трогает всегда, вес говорит, насколько громко' }),
         ...(describe(event) ? [element('span', { className: 'muted ku-small', text: describe(event) })] : []),
         ...(event.note ? [element('span', { className: 'ku-small', text: event.note })] : []),
       ]),
-      button('Изменить', 'btn small', () => { draft = { ...blankEvent(event.date), ...event }; render(); }),
-      button('×', 'btn icon small', () => attempt(() => act('onCalendarRemoveEvent', { id: event.id }, 'calendar-remove'), 'Событие удалено'), 'Удалить событие'),
+      ...(event.fromQuest
+        ? [button('К квестам', 'btn small', () => ctx.setTab?.('quests'), 'Срок записан у квеста: менять его нужно там')]
+        : [
+          button('Изменить', 'btn small', () => { draft = { ...blankEvent(event.date), ...event }; render(); }),
+          button('×', 'btn icon small', () => attempt(() => act('onCalendarRemoveEvent', { id: event.id }, 'calendar-remove'), 'Событие удалено'), 'Удалить событие'),
+        ]),
     ]);
   }
 
   function renderDay() {
     if (!selected) return element('p', { className: 'muted', text: 'Выберите день в календаре, чтобы увидеть и добавить его события.' });
-    const items = eventsOn(calendar(), selected);
+    const items = eventsWithQuests(calendar(), selected, snapshot().quests);
     const card = element('div', { className: 'card' }, [
       element('div', { className: 'ku-row' }, [
         element('h3', { text: humanDate(selected), style: { margin: '0' } }),
@@ -226,8 +238,10 @@ export function createCalendarPages(ctx) {
       chip.setAttribute('aria-pressed', String(on));
       return chip;
     }));
-    const must = element('input', { type: 'checkbox', checked: Boolean(event.must) });
-    must.addEventListener('change', () => { event.must = must.checked; });
+    const kind = element('select', { 'aria-label': 'Вид события' }, [['', 'Обычное событие'], ...Object.entries(EVENT_KINDS)].map(([value, text]) => element('option', { value, text, selected: (event.kind ?? '') === value })));
+    kind.addEventListener('change', () => { event.kind = kind.value; });
+    const intensity = element('select', { 'aria-label': 'Вес события' }, Object.entries(INTENSITIES).map(([value, text]) => element('option', { value, text: `${value} · ${text}`, selected: Number(event.intensity ?? 2) === Number(value) })));
+    intensity.addEventListener('change', () => { event.intensity = Number(intensity.value); });
     const ahead = element('input', { type: 'number', min: 0, max: 14, value: event.ahead ?? 0, className: 'ku-short' });
     ahead.addEventListener('input', () => { event.ahead = Number(ahead.value) || 0; });
     return element('div', { className: 'ku-cal-editor' }, [
@@ -244,7 +258,10 @@ export function createCalendarPages(ctx) {
       ]),
       ...(event.repeat === 'weekly' ? [weekdays] : []),
       field('Кого касается', who, 'никто не выбран — события мира, для всех'),
-      element('label', { className: 'strangers-toggle' }, [must, 'Обязательно случится: модель сама введёт его в сюжет в этот день']),
+      element('div', { className: 'ku-cal-fields' }, [
+        field('Вид', kind, 'Праздник, день рождения, квест (обязательное дело) или сентиментальный день (важный для кого-то из героев)'),
+        field('Вес', intensity, 'Модель реагирует на событие всегда; вес говорит, насколько громко: слабо — мимоходом, сильно — вокруг этого строится день'),
+      ]),
       field('За сколько дней персонажи уже знают о нём', ahead, '0 — узнают в сам день; 7 — неделю готовятся к экзамену'),
       element('div', { className: 'row' }, [
         button('Сохранить', 'btn primary', () => attempt(async () => {
@@ -261,14 +278,7 @@ export function createCalendarPages(ctx) {
   // ---- What is coming ----------------------------------------------------------
   function renderSoon() {
     if (!today()) return null;
-    const list = [];
-    for (let inDays = 0; inDays <= 14; inDays += 1) {
-      const date = addDays(today(), inDays);
-      for (const event of eventsOn(calendar(), date)) {
-        if (event.repeat !== 'none' && inDays > 0) continue; // classes are not «coming»
-        list.push({ event, date, inDays });
-      }
-    }
+    const list = comingEvents(calendar(), today(), snapshot().quests);
     const known = new Set(upcoming(calendar(), today()).map(item => item.event.id));
     return element('div', { className: 'card' }, [
       element('h3', { text: 'Ближайшие две недели' }),
@@ -356,7 +366,7 @@ export function createCalendarPages(ctx) {
       card.append(element('div', { className: 'ku-fact' }, [
         element('span', { className: 'ku-fact-text' }, [element('strong', { text: template.name }), element('span', { className: 'muted', text: ` · ${template.events.length} событий · с ${MONTHS[(template.startMonth || 1) - 1].toLocaleLowerCase('ru-RU')}` })]),
         year,
-        button('В календарь', 'btn small primary', () => attempt(() => act('onCalendarApplyTemplate', { templateId: template.id, year: year.value }, 'calendar-apply'), count => `Добавлено событий: ${count}`)),
+        button('В календарь', 'btn small primary', () => attempt(() => { month = `${String(Number(year.value) || thisYear()).padStart(4, '0')}-${String(template.startMonth || 1).padStart(2, '0')}`; return act('onCalendarApplyTemplate', { templateId: template.id, year: year.value }, 'calendar-apply'); }, count => `Добавлено событий: ${count}`)),
         button('×', 'btn icon small', () => attempt(() => act('onCalendarRemoveTemplate', { id: template.id }, 'calendar-template-remove'), 'Шаблон удалён'), `Удалить шаблон ${template.name}`),
       ]));
     }
@@ -365,7 +375,7 @@ export function createCalendarPages(ctx) {
     const startMonth = element('select', { 'aria-label': 'С какого месяца начинается год' }, MONTHS.map((label, index) => element('option', { value: index + 1, text: `год с: ${label.toLocaleLowerCase('ru-RU')}` })));
     card.append(element('div', { className: 'row', style: { marginTop: '10px' } }, [
       own, startMonth,
-      button('Сохранить этот календарь шаблоном', 'btn', () => attempt(() => act('onCalendarSaveTemplate', { name: own.value, startMonth: Number(startMonth.value), year: thisYear() }, 'calendar-template'), 'Шаблон сохранён: он есть во всех чатах')),
+      button('Сохранить этот календарь шаблоном', 'btn', () => attempt(() => act('onCalendarSaveTemplate', { name: own.value, startMonth: Number(startMonth.value), year: Number(String(month || '').slice(0, 4)) || thisYear() }, 'calendar-template'), 'Шаблон сохранён: он есть во всех чатах')),
     ]));
     if (calendar().events.length) {
       card.append(element('div', { className: 'row', style: { marginTop: '6px' } }, [
@@ -408,7 +418,7 @@ export function createCalendarPages(ctx) {
     if (!selected && today()) selected = today();
     if (draft && !parseDate(draft.date)) draft.date = selected;
     const view = element('div', { className: 'records-view ku-calendar' });
-    view.append(renderToday(), renderTools(), renderMonth(), renderDay(), ...[renderSoon()].filter(Boolean), ...[renderModal()].filter(Boolean));
+    view.append(renderToday(), renderTools(), element('div', { className: 'ku-cal-split' }, [renderMonth(), renderDay()]), ...[renderSoon()].filter(Boolean), ...[renderModal()].filter(Boolean));
     return view;
   }
 
@@ -418,6 +428,11 @@ export function createCalendarPages(ctx) {
 export const CALENDAR_STYLE = `
 .ku-calendar{container-type:inline-size}
 .ku-cal-title{min-width:130px;text-align:center}
+.ku-cal-pick{width:auto;min-width:112px}
+.ku-cal-split{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);gap:14px;align-items:start}
+.ku-cal-split>.card{min-width:0}
+@container (max-width:860px){.ku-cal-split{grid-template-columns:minmax(0,1fr)}}
+.ku-cal-sep{width:1px;height:20px;margin:0 6px;background:var(--k-line)}
 .ku-cal-tools{gap:8px;flex-wrap:wrap}
 .ku-cal-layer{position:fixed;inset:0;z-index:30;background:color-mix(in srgb,var(--k-shadow) 80%,transparent);display:grid;place-items:center;padding:16px}
 .ku-cal-sheet{width:min(760px,100%);max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--k-line);border-radius:16px;background:var(--k-panel);box-shadow:0 20px 60px var(--k-shadow)}

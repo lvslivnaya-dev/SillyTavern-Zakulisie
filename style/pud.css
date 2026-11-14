@@ -64,7 +64,8 @@ body.pud-on {
   --pud-shadow: 0 18px 40px -14px rgb(var(--pud-shade-rgb) / 0.35), 0 2px 6px rgb(var(--pud-shade-rgb) / 0.1);
   --pud-puff: 0 3px 0 var(--pud-puffline), 0 6px 12px -6px rgb(var(--pud-shade-rgb) / 0.45);
   --pud-puff-hover: 0 4px 0 var(--pud-puffline), 0 10px 16px -8px rgb(var(--pud-shade-rgb) / 0.5);
-  --pud-blur: blur(18px) saturate(1.5);
+  /* Дешевле для видеокарты: чат под верхней и нижней панелями меняется на каждый токен, и размытие пересчитывается каждый раз. Радиус меньше, saturate убран: он добавляет второй проход. */
+  --pud-blur: blur(9px);
   --pud-radius: 22px;
 
   --pud-f-head: 'PudHead', Georgia, serif;
@@ -1004,6 +1005,280 @@ body.pud-on .pud-hub .pud-tabs-sub {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--pud-tech);
+}
+/* предупреждение над родными настройками во вкладке «Пользователь» */
+body.pud-on .pud-hub .pud-warnbox {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--pud-butter);
+  border-radius: 14px;
+  background: var(--pud-butter-soft);
+  color: var(--pud-butter-ink);
+  font-size: 0.92em;
+  line-height: 1.4;
+}
+/* «Соединение»: профили плашками (src/pud/ui/connection.js) */
+body.pud-on .pud-conn-native-off {
+  display: none;
+}
+body.pud-on .pud-conn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 6px 0 12px;
+}
+body.pud-on .pud-conn-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+body.pud-on .pud-conn-cap {
+  font-size: 0.7em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pud-tech);
+}
+body.pud-on .pud-conn-tools {
+  display: inline-flex;
+  gap: 6px;
+}
+body.pud-on .pud-conn-tool {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--pud-line);
+  border-radius: 50%;
+  background: rgb(var(--pud-card-rgb) / 0.6);
+  color: var(--pud-rose2);
+  font-size: 0.85em;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+body.pud-on .pud-conn-tool:hover {
+  background: var(--pud-card);
+  transform: translateY(-1px);
+}
+body.pud-on .pud-conn-tool.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+body.pud-on .pud-conn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 118px);
+  gap: 12px;
+}
+body.pud-on .pud-conn-tile {
+  position: relative;
+  width: 118px;
+  height: 118px;
+  border: 1px solid var(--pud-line);
+  border-radius: 22px;
+  background: rgb(var(--pud-card-rgb) / 0.6);
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+body.pud-on .pud-conn-tile:hover,
+body.pud-on .pud-conn-tile:focus-within {
+  background: var(--pud-card);
+  transform: translateY(-2px);
+}
+body.pud-on .pud-conn-tile.on {
+  border-color: var(--pud-rose);
+  background: var(--pud-card);
+  box-shadow: 0 6px 16px -8px rgb(var(--pud-shade-rgb) / 0.6);
+}
+body.pud-on .pud-conn-pick {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 8px 10px;
+  border: none;
+  border-radius: inherit;
+  background: none;
+  color: var(--pud-ink);
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+body.pud-on .pud-conn-ico {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 13px;
+  background: var(--pud-tint);
+  color: var(--pud-rose2);
+  font-weight: 700;
+  font-size: 1.1em;
+}
+body.pud-on .pud-conn-tile.on .pud-conn-ico {
+  background: var(--pud-rose);
+  color: var(--pud-on-accent);
+}
+body.pud-on .pud-conn-none .pud-conn-ico {
+  background: none;
+  border: 1px dashed var(--pud-line);
+  color: var(--pud-tech);
+}
+body.pud-on .pud-conn-name {
+  max-width: 100%;
+  font-size: 0.88em;
+  line-height: 1.15;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+body.pud-on .pud-conn-tile.on .pud-conn-name {
+  color: var(--pud-rose2);
+  font-weight: 600;
+}
+body.pud-on .pud-conn-sub {
+  max-width: 100%;
+  font-size: 0.7em;
+  color: var(--pud-tech);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.pud-on .pud-conn-mini {
+  position: absolute;
+  top: 5px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgb(var(--pud-card-rgb) / 0.85);
+  color: var(--pud-tech);
+  font-size: 0.72em;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+body.pud-on .pud-conn-edit-btn {
+  left: 5px;
+}
+body.pud-on .pud-conn-del {
+  right: 5px;
+}
+body.pud-on .pud-conn-tile:hover .pud-conn-mini,
+body.pud-on .pud-conn-tile:focus-within .pud-conn-mini {
+  opacity: 1;
+}
+body.pud-on .pud-conn-mini:hover {
+  background: var(--pud-tint);
+  color: var(--pud-rose2);
+}
+body.pud-on .pud-conn-del:hover {
+  color: var(--pud-danger);
+}
+body.pud-on .pud-conn-editbox {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+body.pud-on .pud-conn-editbox h3 {
+  margin: 0;
+  text-align: center;
+}
+body.pud-on .pud-conn-editbox .pud-conn-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+body.pud-on .pud-conn-editbox .pud-conn-flabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.85em;
+  color: var(--pud-ink2);
+}
+body.pud-on .pud-conn-editbox .pud-conn-drop {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.9em;
+  color: var(--pud-tech);
+  cursor: pointer;
+}
+body.pud-on .pud-conn-editbox .pud-conn-urlrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+body.pud-on .pud-conn-editbox .pud-conn-urlrow > input,
+body.pud-on .pud-conn-editbox .pud-conn-urlrow > select {
+  flex: 1;
+  min-width: 0;
+}
+body.pud-on .pud-conn-editbox .pud-conn-mini2 {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--pud-line);
+  border-radius: 50%;
+  background: rgb(var(--pud-card-rgb) / 0.6);
+  color: var(--pud-tech);
+  cursor: pointer;
+}
+body.pud-on .pud-conn-editbox .pud-conn-mini2:hover {
+  color: var(--pud-danger);
+  background: var(--pud-card);
+}
+body.pud-on .pud-conn-editbox .pud-conn-testrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 0;
+}
+body.pud-on .pud-conn-editbox .pud-conn-testrow .menu_button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+body.pud-on .pud-conn-editbox .pud-conn-testout {
+  flex: 1;
+  min-width: 160px;
+  font-size: 0.88em;
+  line-height: 1.35;
+  color: var(--pud-ink2);
+}
+body.pud-on .pud-conn-editbox .pud-conn-testout.ok {
+  color: var(--pud-mint-ink);
+}
+body.pud-on .pud-conn-editbox .pud-conn-testout.bad {
+  color: var(--pud-danger);
+}
+body.pud-on .pud-conn-editbox .pud-conn-testout.warn {
+  color: var(--pud-butter-ink);
+}
+body.pud-on .pud-conn-editbox .pud-conn-newkey {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+body.pud-on .pud-conn-editbox .pud-conn-newkey[hidden] {
+  display: none;
 }
 body.pud-on .pud-hub .pud-links {
   display: flex;
@@ -3236,6 +3511,23 @@ body.pud-on .pud-exlist {
   gap: 10px;
   padding: 14px 14px 12px;
 }
+body.pud-on .pud-exlist-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+body.pud-on .pud-exlist-head .pud-search {
+  flex: 1;
+}
+body.pud-on .pud-exlist-head .pud-exsort {
+  flex: none;
+  width: auto;
+  max-width: 48%;
+  margin: 0;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.9em;
+}
 body.pud-on .pud-exrows {
   flex: 1;
   min-height: 0;
@@ -5148,10 +5440,10 @@ body.pud-on #pud-home .pud-pola { container-type: inline-size; }
 
 /* окно персон: полоска «Надеть / настройки таверны» над карточкой, панель настроек выпадает между ними */
 body.pud-on .pud-personas.pud-cardmode .pud-pleft { display: flex; flex-direction: column; }
-body.pud-on .pud-tavbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px 0; }
-body.pud-on .pud-tavbar .pud-tavtoggle { flex: 1 1 180px; width: auto; margin: 0; }
+body.pud-on .pud-tavbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 0 0 auto; padding: 8px 12px; }
+body.pud-on .pud-tavbar .pud-tavtoggle { flex: 1 1 130px; width: auto; margin: 0; }
 body.pud-on .pud-tavbar .pud-tavtoggle.on { border-color: var(--pud-rose); }
-body.pud-on .pud-tavpane { display: grid; gap: 10px; padding: 10px 12px; max-height: 55%; overflow: auto; border-bottom: 1px solid var(--pud-line); }
+body.pud-on .pud-tavpane { display: grid; gap: 10px; flex: 0 1 auto; padding: 10px 12px; max-height: 46%; overflow: auto; border-bottom: 1px solid var(--pud-line); }
 body.pud-on .pud-tavpane[hidden] { display: none; }
 body.pud-on .pud-tavpane .pud-pleft-ph { max-width: 150px; }
 body.pud-on .pud-personas.pud-cardmode .pud-cardhost { height: auto; flex: 1 1 0; }
@@ -5399,3 +5691,44 @@ body.pud-on .pud-icon-note { color: var(--pud-rose2); }
 /* карточка вкладки со многими блоками: всё друг под другом, а не в одну строку */
 body.pud-on .pud-hub .pud-card.pud-card-col { flex-direction: column; align-items: stretch; gap: 10px; }
 body.pud-on .pud-hub .pud-card.pud-card-col .pud-hint { margin: 4px 0 0; }
+
+/* «Лорбуки чата»: книги, которые читает само Закулисье */
+body.pud-on .pud-clore-zak {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 0.85em;
+  color: var(--pud-ink2);
+  cursor: pointer;
+}
+body.pud-on .pud-clore-tag.warn {
+  border-color: var(--pud-danger);
+  color: var(--pud-danger);
+}
+
+/* плашки над полем ввода («чат не настроен», «АУ не выбрана»): надутые кнопки, как остальные */
+body.pud-on .ku-setup-banner .ku-dir-btn,
+body.pud-on #ku-au-banner .ku-dir-btn {
+  color: var(--pud-rose2);
+  background: linear-gradient(180deg, var(--pud-card) 0%, var(--pud-tint) 100%);
+  border: 1px solid var(--pud-rim);
+  border-radius: 12px;
+  box-shadow: 0 2px 0 var(--pud-puffline), 0 5px 10px -6px rgb(var(--pud-shade-rgb) / 0.45);
+}
+body.pud-on .ku-setup-banner .ku-dir-btn:hover,
+body.pud-on #ku-au-banner .ku-dir-btn:hover {
+  background: linear-gradient(180deg, var(--pud-card) 0%, var(--pud-tint) 100%);
+  box-shadow: 0 2px 0 var(--pud-puffline), 0 0 0 3px rgb(var(--pud-rose3-rgb) / 0.7);
+}
+body.pud-on .ku-setup-banner .ku-dir-btn:active,
+body.pud-on #ku-au-banner .ku-dir-btn:active {
+  box-shadow: inset 0 2px 4px rgb(var(--pud-shade-rgb) / 0.25);
+}
+body.pud-on .ku-setup-banner .ku-sb-go,
+body.pud-on #ku-au-banner .ku-sb-go {
+  color: var(--pud-on-accent);
+  background: linear-gradient(180deg, var(--pud-rose), var(--pud-rose2));
+  box-shadow: 0 3px 0 var(--pud-rose2), 0 8px 16px -8px var(--pud-rose2);
+}
+body.pud-on .ku-setup-banner .ku-sb-step svg { color: var(--pud-rose2); }

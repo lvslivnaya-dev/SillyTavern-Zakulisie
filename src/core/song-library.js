@@ -213,7 +213,7 @@ export function exportSongs(library, folderId = '') {
 
 /** Import a file from exportSongs: songs already there (same title and artist) stay as they are. → { library, added, skipped }. */
 export function importSongs(library, data) {
-  if (!data || data.kind !== SONG_EXPORT_KIND || !Array.isArray(data.songs)) throw new Error('Это не файл песен Кулис');
+  if (!data || data.kind !== SONG_EXPORT_KIND || !Array.isArray(data.songs)) throw new Error('Это не файл песен Закулисья');
   let next = normalizeSongs(library);
   const folderNames = new Map((Array.isArray(data.folders) ? data.folders : []).map(folder => [folder?.id, folder?.name]));
   let added = 0;
@@ -484,7 +484,7 @@ export function planSongs({ library, text = '', songState, nameOf = () => '', ma
 
 /** The songs of an exported file to pick from: [{ id, name, folder }]. */
 export function listSongExport(data) {
-  if (!data || data.kind !== SONG_EXPORT_KIND || !Array.isArray(data.songs)) throw new Error('Это не файл песен Кулис');
+  if (!data || data.kind !== SONG_EXPORT_KIND || !Array.isArray(data.songs)) throw new Error('Это не файл песен Закулисья');
   const folders = new Map((Array.isArray(data.folders) ? data.folders : []).map(folder => [folder?.id, folder?.name]));
   return data.songs.map((song, at) => ({ id: String(song?.id ?? at), name: `${song?.title ?? ''}${song?.artist ? ` — ${song.artist}` : ''}`.trim() || 'Без названия', folder: folders.get(song?.folderId) ?? '' }));
 }

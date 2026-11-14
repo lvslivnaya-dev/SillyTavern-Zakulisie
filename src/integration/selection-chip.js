@@ -30,7 +30,7 @@ export function mountSelectionChip({ onCreate }) {
   chip.type = 'button';
   chip.hidden = true;
   chip.textContent = 'Создать секрет';
-  chip.title = 'Кулисы: составить секрет из выделенного текста';
+  chip.title = 'Закулисье: составить секрет из выделенного текста';
   document.body.append(chip);
 
   let last = null;
@@ -56,6 +56,8 @@ export function mountSelectionChip({ onCreate }) {
     }
   };
   const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
+  // Scrolling the chat fires a lot: with no chip on the screen there is nothing to move.
+  const reposition = () => { if (!chip.hidden) schedule(); };
 
   const onClick = event => {
     event.preventDefault();
@@ -72,8 +74,8 @@ export function mountSelectionChip({ onCreate }) {
   const keep = event => event.preventDefault();
 
   document.addEventListener('selectionchange', schedule);
-  document.addEventListener('scroll', schedule, true);
-  window.addEventListener('resize', schedule, { passive: true });
+  document.addEventListener('scroll', reposition, { capture: true, passive: true });
+  window.addEventListener('resize', reposition, { passive: true });
   chip.addEventListener('mousedown', keep);
   chip.addEventListener('click', onClick);
 
@@ -82,8 +84,8 @@ export function mountSelectionChip({ onCreate }) {
     recent(maxAge = 90000) { return last && Date.now() - last.at <= maxAge ? { text: last.text, messageIndex: last.messageIndex } : null; },
     unmount() {
       document.removeEventListener('selectionchange', schedule);
-      document.removeEventListener('scroll', schedule, true);
-      window.removeEventListener('resize', schedule);
+      document.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
       chip.remove();
     },
   };

@@ -1,5 +1,6 @@
 import { button, characterId, characterName, element } from '../helpers.js';
 import { acquaintanceOf } from '../../core/index.js';
+import { imageUrl } from '../../integration/wardrobe-images.js';
 
 /**
  * Kulisy's own pages: who is on stage, character dossiers (what they know, whom
@@ -15,6 +16,9 @@ export function createKnowledgePages(ctx) {
   let dossierTab = 'knows'; // knows | met | looks | wardrobe | items
   let editingEventId = null;
   let deathDraftId = null; // dossier where the «Умер(ла)» form is open
+  let pop = ''; // the little window over the cast: '' | 'add' | 'cards'
+  let cardQuery = '';
+  let pickScroll = 0; // where the list of cards is scrolled to, kept through redraws
   const newEvent = { text: '', witnessIds: new Set(), secret: false };
 
   const snapshot = () => ctx.snapshot;
@@ -71,7 +75,7 @@ export function createKnowledgePages(ctx) {
           avatar(character),
           element('span', { className: 'ku-person-name' }, [
             element('strong', { text: characterName(character) }),
-            element('span', { className: 'muted', text: id === persona ? 'персона' : (character.aliases ?? []).slice(0, 2).join(', ') }),
+            element('span', { className: 'muted', text: id === persona ? 'персона' : (snapshot().ui?.formerPersonas ?? []).includes(id) ? 'прежняя персона' : (character.aliases ?? []).slice(0, 2).join(', ') }),
           ]),
           deathOf(id)
             ? element('span', { className: 'ku-tag ku-dead', text: 'умер(ла)' })
@@ -86,7 +90,7 @@ export function createKnowledgePages(ctx) {
       card.addEventListener('click', () => { selectedId = selectedId === id ? null : id; render(); });
       grid.append(card);
     }
-    const scan = button('Скан лорбука на знакомства', 'btn', async () => {
+    const scan = button('Знакомства', 'btn small', async () => {
       scan.disabled = true;
       setStatus('Ищу в лорбуке, кто с кем знаком…');
       try {
@@ -95,13 +99,13 @@ export function createKnowledgePages(ctx) {
       } catch (error) { setStatus(error?.message || 'Не удалось просканировать знакомства', true); }
       finally { scan.disabled = false; }
     }, 'ИИ читает лор персонажей и персоны и предлагает, кто с кем уже знаком. Вы подтверждаете список; отмеченное вручную не меняется.');
-    const loreNames = button('Другие имена из лорбука', 'btn', async () => {
+    const loreNames = button('Другие имена', 'btn small', async () => {
       loreNames.disabled = true;
       try { const count = await ctx.facade.invoke('onAliasesFromLore', {}); setStatus(count ? `Добавлены другие имена у персонажей: ${count}` : 'Новых имён в лорбуке не нашлось'); }
       catch (error) { setStatus(error?.message || 'Лорбук не прочитан', true); }
       finally { loreNames.disabled = false; }
-    }, 'Берёт написания из ключей записи персонажа в лорбуке («Ран», «Ran», «Хайтани Ран»), чтобы Кулисы узнавали его под любым. Делается само при открытии чата.');
-    const secrets = button('Секреты из лорбука', 'btn', async () => {
+    }, 'Берёт написания из ключей записи персонажа в лорбуке («Ран», «Ran», «Хайтани Ран»), чтобы Закулисье узнавало его под любым. Делается само при открытии чата.');
+    const secrets = button('Секреты', 'btn small', async () => {
       secrets.disabled = true;
       setStatus('Читаю секреты в лорбуках…');
       try {
@@ -112,15 +116,24 @@ export function createKnowledgePages(ctx) {
         setStatus(parts.length ? parts.join(', ').replace(/^./, letter => letter.toUpperCase()) : result?.found ? 'Секреты не записаны' : 'Новых секретов нет. Секрет — запись лорбука с названием «[Секрет] …» или «[Секрет: Имя, Имя] …».');
       } catch (error) { setStatus(error?.message || 'Не удалось прочитать секреты', true); }
       finally { secrets.disabled = false; }
-    }, 'Записи лорбука с названием «[Секрет] …» или «[Секрет: Риндо, Санзу] …». Кулисы убирают их из лорбука таверны и отдают только тем, кто знает. Если знающие не вписаны в название, ИИ найдёт их по тексту, а вы подтвердите.');
-    view.append(element('div', { className: 'row' }, [scan, secrets, loreNames, element('span', { className: 'muted', style: { fontSize: '12px' }, text: 'Персону по умолчанию не знает никто. Скан найдёт тех, с кем знакомство прописано в лоре.' })]));
+    }, 'Записи лорбука с названием «[Секрет] …» или «[Секрет: Риндо, Санзу] …». Закулисье убирает их из лорбука таверны и отдаёт только тем, кто знает. Если знающие не вписаны в название, ИИ найдёт их по тексту, а вы подтвердите.');
+    const findHeroes = button('Герои из лорбуков', 'btn small', () => act('onAnalyzeLorebooks', {}, 'lorebooks-analyze'), 'ИИ найдёт в подключённых лорбуках именованных героев и предложит добавить их в чат.');
+    if (snapshot().modelBusy) findHeroes.disabled = true;
+    const sep = () => element('span', { className: 'ku-castbar-sep', 'aria-hidden': 'true' });
+    view.append(element('div', { className: 'ku-castbar' }, [
+      button('+ Персонаж', `btn small${pop === 'add' ? ' primary' : ''}`, () => { pop = pop === 'add' ? '' : 'add'; render(); }, 'Добавить персонажа вручную'),
+      button('Из карточек', `btn small${pop === 'cards' ? ' primary' : ''}`, () => { pop = pop === 'cards' ? '' : 'cards'; render(); }, 'Выбрать героев из библиотеки карточек: пара кликов'),
+      sep(), findHeroes, scan, secrets, loreNames,
+    ]));
+    if (pop === 'add') view.append(renderAddPopup());
+    if (pop === 'cards') view.append(renderCardsPopup());
     const all = snapshot().duplicates ?? [];
     const twins = all.filter(pair => pair.sure !== false);
     const maybe = all.filter(pair => pair.sure === false);
     if (maybe.length) {
       view.append(element('div', { className: 'card ku-twins maybe' }, [
         element('strong', { text: `Возможно, это один персонаж · ${maybe.length}` }),
-        element('p', { className: 'muted ku-small', text: 'Имена отличаются на букву — Кулисы не склеивают их сами. Скажите, как есть: ответ запомнится.' }),
+        element('p', { className: 'muted ku-small', text: 'Имена отличаются на букву — Закулисье не склеивает их само. Скажите, как есть: ответ запомнится.' }),
         ...maybe.map(pair => element('div', { className: 'ku-fact' }, [
           element('span', { className: 'ku-fact-text' }, [element('strong', { text: pair.fromName }), element('span', { className: 'muted', text: ' и ' }), element('strong', { text: pair.intoName })]),
           button('Это один', 'btn small', async () => {
@@ -154,14 +167,90 @@ export function createKnowledgePages(ctx) {
         ])),
       ]));
     }
-    view.append(characters().length ? grid : empty('Персонажей пока нет. Добавьте их ниже, из лорбука или поиском по чату.'));
+    view.append(characters().length ? grid : empty('Персонажей пока нет. Добавьте их кнопками выше: вручную, из карточек или из лорбуков.'));
     if (selectedId) view.append(renderDossier(selectedId));
     if (typeof ctx.renderCharacterManager === 'function') {
       const manage = element('details', { className: 'fold' });
-      manage.append(element('summary', { text: 'Список персонажей: добавить, псевдонимы, удалить' }), ctx.renderCharacterManager());
+      manage.append(element('summary', { text: 'Список персонажей: псевдонимы, удаление' }), ctx.renderCharacterManager());
       view.append(manage);
     }
     return view;
+  }
+
+  /** «+ Персонаж»: a little window with the name, other names and gender. */
+  function renderAddPopup() {
+    const name = element('input', { type: 'text', placeholder: 'Имя персонажа', 'aria-label': 'Имя нового персонажа', required: true });
+    const aliases = element('input', { type: 'text', placeholder: 'Другие имена через запятую', 'aria-label': 'Другие имена' });
+    const gender = element('select', { 'aria-label': 'Пол', title: 'Пол читает и модель' },
+      [['', 'Пол: не указан'], ['female', 'Женский'], ['male', 'Мужской']].map(([value, text]) => element('option', { value, text })));
+    const submit = button('Добавить', 'btn primary small', () => {});
+    submit.type = 'submit';
+    const form = element('form', { className: 'card ku-pop' }, [
+      element('div', { className: 'ku-row' }, [element('strong', { text: 'Новый персонаж' }), element('span', { className: 'ku-push' }), button('×', 'btn icon small', () => { pop = ''; render(); }, 'Закрыть')]),
+      name, aliases, gender,
+      element('div', { className: 'ku-row' }, [submit]),
+    ]);
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const value = name.value.trim();
+      if (!value) return;
+      try {
+        await ctx.act('onAddCharacter', { name: value, aliases: aliases.value.split(',').map(item => item.trim()).filter(Boolean), gender: gender.value }, 'character-add');
+        pop = '';
+        render();
+      } catch (error) { setStatus(error?.message || 'Не удалось добавить', true); }
+    });
+    requestAnimationFrame(() => name.focus({ preventScroll: true }));
+    return form;
+  }
+
+  /**
+   * «Из карточек»: the library cards by folders (the same tree as the library), with a search. A click puts a card into the chat (a character of that name
+   * appears if there is none), another takes it off. The order never changes with the ticks, and the list keeps its place when it is redrawn.
+   */
+  function renderCardsPopup() {
+    const lib = snapshot().locationLibrary ?? { folders: [], characters: [] };
+    const on = new Set(snapshot().linkedCharacterIds ?? []);
+    const folders = new Map((lib.folders ?? []).map(folder => [folder.id, folder]));
+    const pathOf = id => {
+      const names = [];
+      for (let folder = folders.get(id), guard = 0; folder && guard < 12; folder = folders.get(folder.parentId), guard += 1) names.unshift(folder.name);
+      return names.join(' › ') || 'Без папки';
+    };
+    const cards = (lib.characters ?? []).filter(card => !card.persona).map(card => ({ card, path: pathOf(card.folderId) }))
+      .sort((left, right) => left.path.localeCompare(right.path, 'ru-RU') || left.card.name.localeCompare(right.card.name, 'ru-RU'));
+    const search = element('input', { type: 'search', value: cardQuery, placeholder: 'Поиск по имени', 'aria-label': 'Поиск карточки' });
+    const list = element('div', { className: 'ku-pickfolders' });
+    list.addEventListener('scroll', () => { pickScroll = list.scrollTop; });
+    const fill = () => {
+      const q = cardQuery.trim().toLocaleLowerCase('ru-RU');
+      const shown = cards.filter(({ card }) => !q || [card.name, ...(card.aliases ?? [])].some(name => String(name).toLocaleLowerCase('ru-RU').includes(q)));
+      const groups = new Map();
+      for (const item of shown) groups.set(item.path, [...(groups.get(item.path) ?? []), item.card]);
+      list.replaceChildren(...[...groups].flatMap(([path, group]) => [
+        element('div', { className: 'ku-pickfolder', text: `${path} · ${group.length}` }),
+        element('div', { className: 'ku-pickgrid' }, group.map(card => {
+          const picked = on.has(card.id);
+          const tile = element('button', { type: 'button', className: `ku-pick${picked ? ' on' : ''}`, 'aria-pressed': String(picked), title: picked ? 'Убрать со сцены чата' : 'Добавить в чат' }, [
+            card.image ? element('img', { src: imageUrl(card.image), alt: '', loading: 'lazy' }) : element('span', { className: 'ku-pick-letter', text: card.name.slice(0, 1).toUpperCase() }),
+            element('span', { className: 'ku-pick-name', text: card.name }),
+          ]);
+          tile.addEventListener('click', async () => {
+            try { await ctx.act('onLibraryLink', { libraryIds: [card.id], on: !picked, kind: 'characters' }, 'library-link'); }
+            catch (error) { setStatus(error?.message || 'Не удалось', true); }
+          });
+          return tile;
+        })),
+      ]));
+      if (!shown.length) list.append(element('p', { className: 'muted', text: lib.characters?.length ? 'Ничего не нашлось.' : 'В библиотеке пока нет карточек героев.' }));
+    };
+    search.addEventListener('input', () => { cardQuery = search.value; pickScroll = 0; fill(); });
+    fill();
+    requestAnimationFrame(() => { list.scrollTop = pickScroll; });
+    return element('div', { className: 'card ku-pop ku-pop-wide' }, [
+      element('div', { className: 'ku-row' }, [element('strong', { text: 'Герои из карточек' }), element('span', { className: 'muted ku-small', text: `в чате: ${on.size}` }), element('span', { className: 'ku-push' }), button('Готово', 'btn small', () => { pop = ''; cardQuery = ''; pickScroll = 0; render(); })]),
+      search, list,
+    ]);
   }
 
   function renderDossier(id) {
@@ -229,9 +318,9 @@ export function createKnowledgePages(ctx) {
 
   /** Grammatical gender: only for the wording of trope factors («пришёл»/«пришла»). */
   function genderSelect(id) {
-    const current = snapshot().ui?.genders?.[id] ?? '';
-    const select = element('select', { 'aria-label': 'Пол', title: 'Для текстов тропов: «пришёл» или «пришла», «его» или «её». Не указан — обе формы через косую черту.' },
-      [['', 'Пол: не указан'], ['male', 'Мужской'], ['female', 'Женский']].map(([value, text]) => element('option', { value, text, selected: value === current })));
+    const current = snapshot().ui?.genders?.[id] ?? snapshot().cardGenders?.[id] ?? '';
+    const select = element('select', { 'aria-label': 'Пол', title: 'Пол читает и модель (вместе с остальным о персонаже), по нему пишутся тексты тропов: «пришёл» или «пришла». Не указан — обе формы через косую черту.' },
+      [['', 'Пол: не указан'], ['female', 'Женский'], ['male', 'Мужской']].map(([value, text]) => element('option', { value, text, selected: value === current })));
     select.addEventListener('change', async () => {
       try { await ctx.facade.invoke('onSetGender', { entityId: id, gender: select.value }); setStatus('Пол сохранён'); }
       catch (error) { setStatus(error?.message || 'Не удалось сохранить', true); }
@@ -585,6 +674,26 @@ export function createKnowledgePages(ctx) {
 
 /** Styles of the knowledge pages; colours only from the theme tokens. */
 export const KNOWLEDGE_STYLE = `
+.ku-info-dot{width:20px;height:20px;min-height:20px;padding:0;margin-left:8px;border-radius:50%;border:1px solid var(--k-line);background:transparent;color:var(--k-muted);font:inherit;font-size:11px;font-weight:700;line-height:1;cursor:pointer;flex:0 0 auto;vertical-align:middle}
+.ku-info-dot:hover,.ku-info-dot[aria-expanded=true]{border-color:var(--k-accent);color:var(--k-accent)}
+.ku-inforow{display:flex;align-items:center;gap:0}
+.ku-inforow-title{font-weight:700}
+.ku-inforow.alone{margin:0 0 4px}
+.ku-info-note{margin:4px 0 10px}
+.ku-info-note[hidden]{display:none}
+.ku-castbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}
+.ku-castbar-sep{width:1px;height:20px;background:var(--k-line);margin:0 4px}
+.ku-pop{display:flex;flex-direction:column;gap:8px;max-width:520px;margin:0 0 14px;padding:12px 14px}
+.ku-pop input,.ku-pop select{width:100%}
+.ku-pickgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;padding:2px}
+.ku-pickfolders{display:flex;flex-direction:column;gap:6px;max-height:380px;overflow:auto;padding:2px}
+.ku-pickfolder{position:sticky;top:0;z-index:1;padding:4px 2px;font-size:12.5px;font-weight:700;color:var(--k-muted);background:var(--k-panel);border-bottom:1px solid var(--k-line)}
+.ku-pop-wide{max-width:760px}
+.ku-pick{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 6px;border:1px solid var(--k-line);border-radius:12px;background:var(--k-inset);color:var(--k-text);font:inherit;cursor:pointer}
+.ku-pick img,.ku-pick-letter{width:56px;height:56px;border-radius:50%;object-fit:cover;background:var(--k-panel);display:grid;place-items:center;font-weight:800;color:var(--k-muted)}
+.ku-pick-name{font-size:12px;line-height:1.25;text-align:center;overflow-wrap:anywhere}
+.ku-pick:hover{border-color:var(--k-accent-line)}
+.ku-pick.on{border-color:var(--k-accent);background:var(--k-accent-soft);box-shadow:0 0 0 2px var(--k-accent-soft)}
 .ku-cast{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:12px}
 .ku-person{display:flex;flex-direction:column;gap:10px;text-align:left;padding:13px 14px;border:1px solid var(--k-line);border-radius:14px;background:var(--k-panel);color:var(--k-text);cursor:pointer;font:inherit}
 .ku-person:hover{border-color:var(--k-accent-line)}

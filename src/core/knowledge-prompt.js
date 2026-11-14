@@ -59,6 +59,10 @@ export function selectKnowledgeLines(state, options = {}) {
   if (present.length || scene?.location) {
     ranked.push({ rank: 0, line: `scene: present=${present.map(name).join(', ') || '—'}${scene?.location ? `; place=${clip(scene.location, 120)}` : ''}` });
   }
+  // Gender: set by hand, or taken from the character's card; the narrator reads it like the rest of what is known about them.
+  const genders = { ...(options.genders ?? {}), ...(state.ui?.genders ?? {}) };
+  const known = cast.filter(id => genders[id] === 'female' || genders[id] === 'male');
+  if (known.length) ranked.push({ rank: 0, line: `gender: ${known.map(id => `${name(id)}=${genders[id]}`).join(', ')}` });
   // Every dead character, not only the mentioned: the narrator must not bring anyone back unasked.
   const dead = Object.keys(state.knowledge?.deaths ?? {}).filter(id => state.entities?.[id])
     .sort((left, right) => Number(mentioned.includes(right)) - Number(mentioned.includes(left)))

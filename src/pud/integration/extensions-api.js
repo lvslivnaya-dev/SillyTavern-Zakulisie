@@ -7,6 +7,7 @@ import { PREFIX, externalId, folderName } from '../core/extensions.js';
 let mods = null;
 let loading = null;
 const live = () => globalThis.SillyTavern?.getContext?.();
+const REMOVE_ATTEMPTS = 4;
 
 async function post(url, body) {
   return fetch(url, { method: 'POST', headers: live().getRequestHeaders(), body: JSON.stringify(body), cache: 'no-cache' });
@@ -29,8 +30,42 @@ export const extensionApi = {
     else await mods.ext.disableExtension(id, false);
   },
 
-  /** Удаление: родная функция, после неё таверна перезагружается сама. */
-  async remove(id) { await mods.ext.deleteExtension(externalId(id)); },
+  /**
+   * Удаление. Родная deleteExtension не смотрит на ответ сервера: если Windows не отдала папку (её держит
+   * проводник, редактор кода, антивирус), она всё равно пишет «удалено» и перезагружает страницу, а папка остаётся.
+   * Поэтому папку удаляем сами, проверяем ответ и пробуем ещё (сервер стирает по кусочкам, второй заход добивает остаток).
+   * Когда папки нет, зовём родную функцию: она вызовет хуки расширения, сохранит настройки и перезагрузит страницу.
+   */
+  async remove(id) {
+    const extensionName = externalId(id);
+    const global = extensionApi.isGlobal(id);
+    let failure = '';
+    for (let attempt = 1; attempt <= REMOVE_ATTEMPTS; attempt += 1) {
+      const response = await post('/api/extensions/delete', { extensionName, global });
+      // 404: папки уже нет (предыдущий заход успел) — это то, что нужно
+      if (response.ok || response.status === 404) { failure = ''; break; }
+      failure = `${response.status} ${(await response.text().catch(() => '')).slice(0, 200)}`.trim();
+      console.warn(`[Закулисье] Удаление «${extensionName}», попытка ${attempt}/${REMOVE_ATTEMPTS}: ${failure}`);
+      if (attempt < REMOVE_ATTEMPTS) await new Promise(resolve => setTimeout(resolve, 700 * attempt));
+    }
+    if (failure) throw new Error(`Папка «${folderName(id)}» не удалилась (${failure}). Скорее всего, её держит другая программа: закрой проводник и редактор кода в этой папке и повтори. Что осталось на диске, видно в окне расширений после перезагрузки.`);
+    await mods.ext.deleteExtension(extensionName);
+  },
+
+  /**
+   * Когда папка расширения появилась: время изменения его manifest.json (так отдаёт сервер, Last-Modified).
+   * Клон из git ставит одно время на все файлы, так что это день установки; обновление, которое правит манифест, сдвигает его.
+   * 0 — не узнать (встроенные, нет манифеста).
+   */
+  async installedAt(id) {
+    if (!id.startsWith(`${PREFIX}/`)) return 0;
+    try {
+      const response = await fetch(`/scripts/extensions/${id}/manifest.json`, { method: 'HEAD', cache: 'no-cache' });
+      if (!response.ok) return 0;
+      const stamp = Date.parse(response.headers.get('Last-Modified') ?? '');
+      return Number.isFinite(stamp) ? stamp : 0;
+    } catch { return 0; }
+  },
 
   /** true — есть обновление, false — свежее, null — не git или ошибка. */
   async hasUpdate(id) {

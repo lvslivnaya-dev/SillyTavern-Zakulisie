@@ -116,16 +116,14 @@ export function createSystemPages(ctx) {
 
   function renderLorebooks() {
     const lorebooks = ctx.snapshot.lorebooks || {};
-    const card = element('div', { className: 'card' }, [element('h3', { text: 'Лорбуки текущего чата' }), element('p', { text: lorebooks.status || '' })]);
+    const card = element('div', { className: 'card' }, [element('h3', { text: 'Лорбуки текущего чата' }), element('p', { className: 'ku-hint', text: lorebooks.status || '' })]);
     const select = element('select', { 'aria-label': 'Доступные лорбуки', style: { flex: '1', minWidth: '160px' } });
     select.append(element('option', { value: '', text: 'Выберите книгу' }));
     for (const name of lorebooks.available || []) if (!(lorebooks.selected || []).includes(name)) select.append(element('option', { value: name, text: name }));
-    const lorebookSearchButton = button('Найти персонажей в лорбуках', 'btn', () => act('onAnalyzeLorebooks', {}, 'lorebooks-analyze'));
-    if (ctx.snapshot.modelBusy) lorebookSearchButton.disabled = true;
     const actions = element('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', margin: '12px 0' } }, [
       button('Подключить', 'btn primary', () => { if (select.value) act('onLinkLorebook', { name: select.value }); }),
-      button('Обновить список', 'btn', () => act('onRefreshLorebooks', {})),
-      lorebookSearchButton,
+      // The one window for all the books of the chat: the tavern's and the ones Kulisy reads (the paw menu → «Лорбуки чата»).
+      button('Все лорбуки чата…', 'btn', () => { const open = document.getElementById('pud-opt-chatlore'); if (open) open.click(); else setStatus('Окно «Лорбуки чата» — в меню лапки у поля ввода.'); }, 'Окно, где видно все книги чата, через кого они подключены, и какие из них читает Закулисье'),
     ]);
     card.append(element('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' } }, [select]), actions);
     const cardWorlds = (lorebooks.cardWorlds || []).filter(name => !(lorebooks.selected || []).includes(name));
@@ -141,7 +139,7 @@ export function createSystemPages(ctx) {
     if (silent.length) {
       card.append(element('div', { className: 'item', role: 'alert', style: { margin: '8px 0', borderColor: 'var(--rs-danger)' } }, [
         element('strong', { text: `Таверна не отправляет модели: ${silent.map(name => `«${name}»`).join(', ')}.` }),
-        element('p', { style: { margin: '6px 0 0' }, text: 'Кулисы эти книги читают, но в самой таверне они не подключены, поэтому в ответ модели из них не попадает ничего и суфлёру нечего отбирать. Подключи их в таверне: основной лорбук в карточке персонажа (глобус), дополнительные там же, либо лорбук чата.' }),
+        element('p', { style: { margin: '6px 0 0' }, text: 'Закулисье эти книги читает, но в самой таверне они не подключены, поэтому в ответ модели из них не попадает ничего и суфлёру нечего отбирать. Подключи их в таверне: основной лорбук в карточке персонажа (глобус), дополнительные там же, либо лорбук чата.' }),
       ]));
     } else if (!tavern && (lorebooks.selected || []).length) {
       card.append(element('p', { className: 'muted', text: 'Какие из этих книг таверна отправляет модели, станет видно после первого ответа в этом чате.' }));
@@ -149,7 +147,7 @@ export function createSystemPages(ctx) {
     for (const name of lorebooks.selected || []) {
       const row = element('div', { className: 'item', style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', margin: '8px 0' } }, [
         element('strong', { style: { flex: '1 1 auto' }, text: name }),
-        ...(tavern ? [element('span', { className: 'muted', style: { flex: '0 0 auto', fontSize: '12px' }, text: tavern.has(name) ? 'таверна отправляет модели' : '⚠ только Кулисы, модель не получает' })] : []),
+        ...(tavern ? [element('span', { className: 'muted', style: { flex: '0 0 auto', fontSize: '12px' }, text: tavern.has(name) ? 'таверна отправляет модели' : '⚠ только Закулисье, модель не получает' })] : []),
       ]);
       const unlink = button('×', 'btn icon', () => act('onUnlinkLorebook', { name }), `Отвязать ${name}`);
       unlink.style.cssText = 'flex:0 0 auto;width:26px;height:26px;min-height:26px;padding:0;font-size:13px;line-height:1;border-radius:6px';
@@ -302,7 +300,7 @@ export function createSystemPages(ctx) {
       list(
         switchRow('Проверять ответы сами', 'autoTrack', 'После каждого ответа бота анализатор сам записывает отношения, знания и сцену.', current),
         switchRow('Летописец отдельным запросом', 'knowledgeSeparateRequest', 'Знания и сцена уйдут вторым запросом. Дороже, но слабые модели реже путаются в большом ответе.', current),
-        switchRow('Спрашивать о крупных скачках', 'confirmLargeChanges', 'Если шкала меняется сильнее порога, Кулисы спросят, применять ли.', current),
+        switchRow('Спрашивать о крупных скачках', 'confirmLargeChanges', 'Если шкала меняется сильнее порога, Закулисье спросит, применять ли.', current),
         settingRow('Порог скачка', threshold),
         switchRow('Напоминание о настройке чата', 'setupReminder', 'Над полем ввода в чате, где ещё не выбрана персона или нет героев, появляется плашка со ссылкой на пошаговую инструкцию («Система → Настройка чата»). Пропадает сама, когда обязательные шаги сделаны.', current),
         settingRow('Сторона рейки сцены', railSideSelect(current), 'Рейка с плитками сцены стоит у левого или у правого края окна браузера. Панели окон обходят её.'),
@@ -325,20 +323,10 @@ export function createSystemPages(ctx) {
     return select;
   }
 
-  function tempoSelect() {
-    const current = ctx.snapshot.ui?.tempo ?? 'normal';
-    const select = element('select', { 'aria-label': 'Темп отношений в этом чате' },
-      [['very-slow', 'Очень медленно'], ['slow', 'Медленно'], ['normal', 'Обычно'], ['fast', 'Быстро']]
-        .map(([value, text]) => element('option', { value, text, selected: value === current })));
-    select.addEventListener('change', () => act('onSetTempo', { tempo: select.value }, 'tempo'));
-    return select;
-  }
-
   function sectionRelations(current) {
     return [
       heading('Отношения'),
       list(
-        settingRow('Темп отношений в этом чате', tempoSelect(), 'Насколько сильно каждый ответ двигает шкалы. Очень медленно — ×0,4 и не больше ±3 за ответ, медленно — ×0,65 и не больше ±6, быстро — ×1,5. Изменение не пропадает совсем: минимум ±1. Темп шкалы в «Факторах роста» линии действует поверх этого.'),
         switchRow('Связанные шкалы', 'linkedScales', 'Доверие тянет за собой дружбу и т. п. Выключите, если хотите менять каждую шкалу только по прямым уликам.', current),
         switchRow('Новые линии между персонажами', 'autoCharacterLines', 'Анализатор сам заводит линию, когда двое впервые взаимодействуют.', current),
         switchRow('Спрашивать перед линией к персоне', 'confirmPersonaLines', '', current),
@@ -417,7 +405,7 @@ export function createSystemPages(ctx) {
     const gateSilent = sent ? (ctx.snapshot.lorebooks?.selected || []).filter(name => !sent.has(name)) : [];
     const reportBody = !gate.enabled ? element('p', { className: 'muted', text: 'Суфлёр выключен: записи отбирает только таверна, по ключам.' })
       : !report ? element('p', { className: 'muted', text: 'Пока не было ни одного ответа с включённым суфлёром.' })
-        : !report.people.length && !report.world ? element('p', { className: 'muted', text: `В последний раз суфлёр ничего не тронул: никого из известных Кулисам персонажей нет на сцене или в лорбуках, которые отправляет таверна, нет записей вида «[ Имя ] - Раздел».${gateSilent.length ? ` Таверна сейчас не отправляет: ${gateSilent.map(name => `«${name}»`).join(', ')} — см. «Система → Лорбуки».` : ''}` })
+        : !report.people.length && !report.world ? element('p', { className: 'muted', text: `В последний раз суфлёр ничего не тронул: никого из известных Закулисью персонажей нет на сцене или в лорбуках, которые отправляет таверна, нет записей вида «[ Имя ] - Раздел».${gateSilent.length ? ` Таверна сейчас не отправляет: ${gateSilent.map(name => `«${name}»`).join(', ')} — см. «Система → Лорбуки».` : ''}` })
           : element('div', { className: 'set-list' }, [
             element('p', { className: 'set-hint', text: `Сцена: ${SCENE_MODE_LABELS[report.mode] ?? report.mode}. Отправлено по правилам: ${report.forced}, придержано: ${report.dropped} (${report.savedCharacters.toLocaleString('ru-RU')} зн.), оставлено ключам: ${report.kept}.` }),
             ...(report.world ? [element('p', { className: 'set-hint', text: `Записи мира: летописец выбрал ${report.world.picked.length ? report.world.picked.map(title => `«${title}»`).join(', ') : 'ничего'}. Отправлено ${report.world.forced}, придержано ${report.world.dropped} (${report.world.savedCharacters.toLocaleString('ru-RU')} зн.), по ключам из твоего поста оставлено ${report.world.kept}.` })]
@@ -437,7 +425,7 @@ export function createSystemPages(ctx) {
       heading('Суфлёр лорбуков', 'Какие разделы анкеты персонажа уходят модели, решают не ключевые слова, а сцена: кто в ней и что происходит. Те же правила (таблица ниже) действуют и для разделов карточек из «Мир → Карточки», даже когда суфлёр для лорбуков выключен.'),
       list(
         settingRow('Суфлёр включён', toggle('Суфлёр включён', gate.enabled, value => patch({ enabled: value })),
-          'Работает с записями, названными «[ Имя ] - Раздел», о персонажах, которых знают Кулисы. Остальные записи, константы и лорбук персоны не трогает. Если Кулисы не знают, кто на сцене, не трогает ничего.'),
+          'Работает с записями, названными «[ Имя ] - Раздел», о персонажах, которых знает Закулисье. Остальные записи, константы и лорбук персоны не трогает. Если Закулисье не знают, кто на сцене, не трогает ничего.'),
         settingRow('Сцена сейчас', modes, 'Летописец сцены ставит тип сам после каждого ответа. Здесь можно поправить вручную: от него зависят правила «только в бою» и «только в близости».'),
         settingRow('«Раз в N ходов»: N', numberInput('Раз в N ходов', gate.visualEvery ?? 6, 1, 50, value => patch({ visualEvery: value })), 'Для правила «при выходе на сцену и раз в N ходов». Ход — один твой пост.'),
         settingRow('Записи мира и места', select('Записи мира и места', GATE_WORLD, gate.world ?? 'chronicler', value => patch({ world: value })),
@@ -613,13 +601,13 @@ export function createSystemPages(ctx) {
     const gate = ctx.snapshot.settings?.loreGate ?? {};
     const report = ctx.snapshot.loreGateReport;
     const text = !gate.enabled
-      ? 'Суфлёр выключен: записи лорбуков отбирает только таверна, по ключевым словам. Это обычно самая тяжёлая часть запроса, и в неё Кулисы не вмешиваются.'
+      ? 'Суфлёр выключен: записи лорбуков отбирает только таверна, по ключевым словам. Это обычно самая тяжёлая часть запроса, и в неё Закулисье не вмешиваются.'
       : !report ? 'Суфлёр включён, но ответов с ним ещё не было.'
         : `Суфлёр в последний раз: отправлено по правилам ${report.forced} записей, придержано ${report.dropped} (${(report.savedCharacters ?? 0).toLocaleString('ru-RU')} знаков не ушло), остальное оставлено ключам таверны (${report.kept}).`;
     return element('section', { className: 'pm-block pm-lore' }, [
       element('header', { className: 'pm-head' }, [element('h4', { className: 'pm-title', text: 'Лорбуки: анкеты персонажей и мир' }), element('span', { className: `pm-pill ${gate.enabled ? 'on' : 'empty'}`, text: gate.enabled ? 'суфлёр работает' : 'суфлёр выключен' })]),
       element('p', { className: 'pm-text', text }),
-      element('p', { className: 'muted', text: 'Сами записи в запрос кладёт таверна, а не Кулисы. Какие книги она отправляет, видно в «Подключённые лорбуки», а что сработало в каждом ответе, в окне «Что сработало из лорбуков» Пудреницы.' }),
+      element('p', { className: 'muted', text: 'Сами записи в запрос кладёт таверна, а не Закулисье. Какие книги она отправляет, видно в «Подключённые лорбуки», а что сработало в каждом ответе, в окне «Что сработало из лорбуков» Закулисья.' }),
       element('div', { className: 'pm-links' }, [button('Настройки суфлёра', 'set-link', () => { settingsSection = 'loregate'; ctx.render(); })]),
     ]);
   }
@@ -640,13 +628,13 @@ export function createSystemPages(ctx) {
       return element('span', {}, [dot, `${block.title.split(':')[0]} ${tokens(block.tokens)}`]);
     }));
     return [
-      heading('Что получает модель', 'Всё, что Кулисы добавят к следующему ответу. Блоки идут в том порядке, в каком модель их читает; у каждого написано, что это и откуда. Раскрой «Что именно уйдёт», чтобы увидеть содержимое словами.'),
-      element('div', { className: 'set-total' }, [element('strong', { text: `${tokens(total)} токенов` }), element('span', { className: 'muted', text: `в ${sent.length} блоках от Кулис` })]),
+      heading('Что получает модель', 'Всё, что Закулисье добавит к следующему ответу. Блоки идут в том порядке, в каком модель их читает; у каждого написано, что это и откуда. Раскрой «Что именно уйдёт», чтобы увидеть содержимое словами.'),
+      element('div', { className: 'set-total' }, [element('strong', { text: `${tokens(total)} токенов` }), element('span', { className: 'muted', text: `в ${sent.length} блоках от Закулисья` })]),
       bar,
       legend,
       ...blocks.map((block, index) => promptBlock(block, index, blocks.length)),
       promptLoreNote(),
-      element('p', { className: 'muted pm-foot', text: 'Не входят сюда: описание персонажа, твой пресет, история чата и сама таверна. Их Кулисы не меняют.' }),
+      element('p', { className: 'muted pm-foot', text: 'Не входят сюда: описание персонажа, твой пресет, история чата и сама таверна. Их Закулисье не меняет.' }),
     ];
   }
 
@@ -901,7 +889,7 @@ export function createSystemPages(ctx) {
       if (!plugin.installed) {
         body.append(element('p', { className: 'muted', style: { fontSize: '11px' }, text: 'Папка на компьютере работает через серверный плагин «kulisy-images». Чтобы его поставить: скопируйте папку server-plugin/kulisy-images из расширения в SillyTavern/plugins/, в config.yaml поставьте enableServerPlugins: true и перезапустите таверну. Подробно — в РУКОВОДСТВЕ, раздел «Картинки в папке на компьютере».' }));
       } else {
-        const path = element('input', { type: 'text', value: plugin.folder ?? '', placeholder: 'D:\\Картинки\\Кулисы', 'aria-label': 'Папка для картинок', disabled: !plugin.admin });
+        const path = element('input', { type: 'text', value: plugin.folder ?? '', placeholder: 'D:\\Картинки\\Закулисье', 'aria-label': 'Папка для картинок', disabled: !plugin.admin });
         const state = element('p', { className: 'muted', style: { fontSize: '11px', margin: '4px 0 0' }, text: plugin.ready
           ? `Плагин${plugin.version ? ` ${plugin.version}` : ''} работает, папка доступна. Внутри неё лежат подпапки kulisy-wardrobe и kulisy-library.`
           : `Плагин работает, но: ${plugin.error || 'папка не выбрана.'}` });
@@ -1057,14 +1045,14 @@ export function createSystemPages(ctx) {
       return card;
     }
     const choices = [
-      ['chronicle', `Хроника Хорае → сводки Хроники Кулис: ${[horaeScan.summaries ? `сводок ${horaeScan.summaries}` : '', horaeScan.events ? `событий сюжета ${horaeScan.events}` : ''].filter(Boolean).join(', ') || 'нет'}. События собираются в сцены; последние ${horaeScan.recent ?? 20} сообщений остаются как есть${(horaeScan.messages ?? 0) <= (horaeScan.recent ?? 20) ? ' — в этом чате пока только они, так что сводок не будет, модель видит его целиком' : ''}`, (horaeScan.summaries + (horaeScan.events ?? 0)) > 0 && (horaeScan.summaries > 0 || (horaeScan.messages ?? 0) > (horaeScan.recent ?? 20))],
+      ['chronicle', `Хроника Хорае → сводки Хроники Закулисья: ${[horaeScan.summaries ? `сводок ${horaeScan.summaries}` : '', horaeScan.events ? `событий сюжета ${horaeScan.events}` : ''].filter(Boolean).join(', ') || 'нет'}. События собираются в сцены; последние ${horaeScan.recent ?? 20} сообщений остаются как есть${(horaeScan.messages ?? 0) <= (horaeScan.recent ?? 20) ? ' — в этом чате пока только они, так что сводок не будет, модель видит его целиком' : ''}`, (horaeScan.summaries + (horaeScan.events ?? 0)) > 0 && (horaeScan.summaries > 0 || (horaeScan.messages ?? 0) > (horaeScan.recent ?? 20))],
       ['events', `События сюжета → «События» (кто был в сцене, тот видел): ${horaeScan.events ?? 0}`, (horaeScan.events ?? 0) > 0],
-      ['unhide', `Вернуть сообщения, которые Хорае скрыл от модели: ${horaeScan.hidden ?? 0}. Сжатые сводками Кулисы прячут сами, если в «Хронике» включено «прятать сжатые»`, (horaeScan.hidden ?? 0) > 0],
+      ['unhide', `Вернуть сообщения, которые Хорае скрыл от модели: ${horaeScan.hidden ?? 0}. Сжатые сводками Закулисье прячет само, если в «Хронике» включено «прятать сжатые»`, (horaeScan.hidden ?? 0) > 0],
       ['scene', `Время и место: ${[horaeScan.clock, horaeScan.day ? `день ${horaeScan.day}` : '', horaeScan.location].filter(Boolean).join(' · ') || '—'}${horaeScan.present.length ? `; на сцене: ${horaeScan.present.join(', ')}` : ''}`, Boolean(horaeScan.clock || horaeScan.location || horaeScan.present.length)],
       ['outfits', `Одежда: ${horaeScan.outfits}`, horaeScan.outfits > 0],
       ['items', `Вещи: ${horaeScan.items}`, horaeScan.items > 0],
       ['places', `Места → библиотека, папка «Из Хорае», и включить в этом чате: ${horaeScan.places}`, horaeScan.places > 0],
-      ['createCharacters', horaeScan.unknown.length ? `Создать персонажей, которых нет в Кулисах: ${horaeScan.unknown.join(', ')}` : 'Все персонажи Хорае уже есть в Кулисах', horaeScan.unknown.length > 0],
+      ['createCharacters', horaeScan.unknown.length ? `Создать персонажей, которых нет в Закулисье: ${horaeScan.unknown.join(', ')}` : 'Все персонажи Хорае уже есть в Закулисье', horaeScan.unknown.length > 0],
     ];
     const boxes = {};
     const list = element('div', { className: 'stack', style: { margin: '10px 0' } });

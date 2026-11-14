@@ -10,16 +10,14 @@ const states = steps => Object.fromEntries(steps.map(step => [step.id, step.done
 test('the steps follow the facts of the chat: two are required, the rest are for the better', () => {
   const fresh = setupSteps({ enabled: true, personaId: '', characters: 0, libraryCards: 0, cardsOn: 0, lorebooks: 0, hasPlace: false, auxMode: 'off' });
   assert.deepEqual(SETUP_STEPS.filter(step => step.required).map(step => step.id), ['persona', 'characters']);
-  assert.deepEqual(states(fresh), { persona: false, characters: false, cards: false, lorebooks: false, place: false, analysis: false, prompt: null });
+  assert.deepEqual(states(fresh), { persona: false, characters: false, lorebooks: false, place: false, weather: false, calendar: false, wardrobe: false, analysis: false, prompt: null });
   const progress = setupProgress(fresh);
   assert.deepEqual([progress.done, progress.total, progress.missing], [0, 2, ['persona', 'characters']]);
-  assert.equal(progress.optionalTotal, 4, 'the last step has nothing to tick, so it is not counted');
+  assert.equal(progress.optionalTotal, 6, 'the last step has nothing to tick, so it is not counted');
 
-  const set = setupSteps({ enabled: true, personaId: 'me', characters: 3, libraryCards: 12, cardsOn: 2, lorebooks: 1, hasPlace: true, auxMode: 'profile' });
-  assert.deepEqual(states(set), { persona: true, characters: true, cards: true, lorebooks: true, place: true, analysis: true, prompt: null });
+  const set = setupSteps({ enabled: true, personaId: 'me', characters: 3, libraryCards: 12, cardsOn: 2, lorebooks: 1, hasPlace: true, hasWeather: true, hasCalendar: true, hasOutfits: true, auxMode: 'profile' });
+  assert.deepEqual(states(set), { persona: true, characters: true, lorebooks: true, place: true, weather: true, calendar: true, wardrobe: true, analysis: true, prompt: null });
   assert.deepEqual(setupProgress(set).missing, []);
-  assert.match(set.find(step => step.id === 'cards').note, /В библиотеке карточек: 12, подключено здесь: 2/);
-  assert.match(fresh.find(step => step.id === 'cards').note, /пока нет карточек/);
   for (const step of set) assert.ok(step.how.length >= 2 && step.what && step.title && step.tab, `${step.id} tells what to do`);
   assert.ok(set.every(step => step.tab === 'personas' || NAV_TABS.some(([id]) => id === step.tab)), 'every «Открыть» leads to a page of the menu or to the persona window');
 });
@@ -28,7 +26,7 @@ test('the reminder is due only while Kulisy is on, the setting is on, this chat 
   const open = setupProgress(setupSteps({ personaId: '', characters: 0 }));
   const closed = setupProgress(setupSteps({ personaId: 'me', characters: 1 }));
   assert.equal(setupReminderDue({ enabled: true, remind: true, off: false }, open), true);
-  assert.equal(setupReminderDue({ enabled: true, remind: true, off: false }, closed), false, 'all required steps are done');
+  assert.equal(setupReminderDue({ enabled: true, remind: true, off: false }, closed), true, 'it stays after the required steps: only the cross closes it');
   assert.equal(setupReminderDue({ enabled: false, remind: true, off: false }, open), false, 'Kulisy is switched off');
   assert.equal(setupReminderDue({ enabled: true, remind: false, off: false }, open), false, 'the setting');
   assert.equal(setupReminderDue({ enabled: true, remind: true, off: true }, open), false, 'switched off in this chat');
@@ -54,15 +52,18 @@ test('the banner above the message box: a link to the guide, «Позже» hide
   try {
     overlay.render(view({ due: false, done: 2, total: 2, chat: 'a' }));
     assert.equal(document.getElementById('ku-setup-banner'), null, 'a chat that is set up gets nothing');
-    overlay.render(view({ due: true, done: 1, total: 2, chat: 'a' }));
+    overlay.render(view({ due: true, done: 1, total: 2, chat: 'a', steps: [{ id: 'persona', title: 'Выберите свою персону', tab: 'personas', required: true, done: true }, { id: 'characters', title: 'Соберите персонажей', tab: 'characters', required: true, done: false }] }));
     const banner = document.getElementById('ku-setup-banner');
     assert.ok(banner, 'it shows even when nobody is on the stage yet');
     assert.equal(banner.nextElementSibling.id, 'send_form', 'right above the message box');
     assert.match(banner.textContent, /ещё не настроен \(обязательных шагов 1 из 2\)/);
     const press = text => [...banner.querySelectorAll('button')].find(node => node.textContent === text).click();
-    press('Пошаговая инструкция');
+    press('Подробно');
     assert.deepEqual(calls, [['studio', 'setup']]);
-    press('Не напоминать здесь');
+    [...banner.querySelectorAll('button')].find(node => node.title === 'Соберите персонажей').click(); // an icon button: the name is its hint
+    assert.deepEqual(calls.at(-1), ['studio', 'characters'], 'a step opens its own page');
+    calls.length = 0;
+    press('×');
     assert.deepEqual(calls.at(-1), ['off']);
     press('Позже');
     assert.equal(document.getElementById('ku-setup-banner'), null, 'put off');
@@ -87,7 +88,7 @@ test('the page «Настройка чата»: progress, every step with what t
   const flush = () => new Promise(resolve => setTimeout(resolve, 0));
   try {
     const main = shadow.querySelector('main');
-    assert.match(main.textContent, /Настроим Кулисы для этого чата/);
+    assert.match(main.textContent, /Настроим Закулисье для этого чата/);
     assert.match(main.textContent, /Обязательные шаги: 1 из 2/);
     assert.equal(main.querySelectorAll('.ku-setup-step').length, steps.length);
     assert.match(main.textContent, /Выберите свою персону/);
