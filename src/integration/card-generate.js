@@ -117,6 +117,8 @@ export function cleanGenerated(raw, title = '') {
   const head = /^(?:#{1,6}\s*|\*\*)?([^\n]{1,80}?)(?:\*\*)?:?\s*\n/.exec(text);
   if (head && title && head[1].trim().toLowerCase().replace(/[*#:]/g, '') === title.trim().toLowerCase()) text = text.slice(head[0].length).trim();
   text = text.replace(/^["«](.*)["»]$/s, '$1').trim();
+  // a line the model broke in the middle of a sentence: the next one goes on in lower case (a list item or a new paragraph does not)
+  text = text.replace(/([^\n])[ \t]*\n[ \t]*(?=[a-zа-яё])/g, '$1 ');
   return { text: text.slice(0, CARD_LIMITS.text), note, skip: '' };
 }
 

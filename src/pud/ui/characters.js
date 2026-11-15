@@ -481,12 +481,9 @@ export function startCharacters(doc, { context, settings, save, api = characterA
     if (!name) return;
     const promptId = box.querySelector('[data-new="prompt"]')?.value ?? '';
     const promptText = promptId ? (promptList.find(item => item.id === promptId)?.text ?? '') : '';
-    const avatar = await api.create(name, promptText);
-    // a card that came back without the text (an older tavern) gets it by the second way
-    if (promptText) {
-      const made = await api.full?.(avatar);
-      if (!made || fieldValue(made, 'description') !== promptText) await api.setField(doc, avatar, 'description', promptText);
-    }
+    const avatar = await api.create(name);
+    // the text is written as JSON after the card is made: the form of the creation turns every line break into CRLF
+    if (promptText) await api.setField(doc, avatar, 'description', promptText);
     moveToFolder(settings, avatar, box.querySelector('[data-new="folder"]').value, KIND);
     save();
     state.view = 'all';

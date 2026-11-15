@@ -78,6 +78,8 @@ export function cleanModelText(raw) {
     .replace(/^```\w*\s*|\s*```$/g, '')
     .trim();
   text = text.replace(/^(?:вот|here(?:'s| is)|description|описание|translation|перевод)[^\n:]{0,60}:\s*\n+/i, '').trim();
+  // the model wraps lines where it likes: a lone line break inside a paragraph is a space, a blank line stays
+  text = text.replace(/\r\n?/g, '\n').replace(/([^\n])[ \t]*\n[ \t]*(?=[^\n])/g, '$1 ');
   text = text.replace(/^["«»“”]+|["«»“”]+$/g, '').trim();
   return text.slice(0, LOOK_LIMITS.text);
 }

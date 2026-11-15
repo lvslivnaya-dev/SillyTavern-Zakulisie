@@ -116,7 +116,8 @@ export function personaLookPrompt({ wishes = '', voice = false, voiceWishes = ''
  */
 export function parsePersonaLook(raw, { voice = false } = {}) {
   const text = String(raw ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/^```\w*\s*|\s*```$/g, '').trim();
-  const clean = value => String(value ?? '').replace(/^(?:вот|here(?:'s| is)|description|описание)[^\n:]{0,60}:\s*\n+/i, '').replace(/^["«»“”]+|["«»“”]+$/g, '').trim().slice(0, 3000);
+  // the model wraps lines where it likes: a lone line break inside a paragraph is a space, a blank line stays
+  const clean = value => String(value ?? '').replace(/^(?:вот|here(?:'s| is)|description|описание)[^\n:]{0,60}:\s*\n+/i, '').replace(/([^\n])[ \t]*\n[ \t]*(?=[^\n])/g, '$1 ').replace(/^["«»“”]+|["«»“”]+$/g, '').trim().slice(0, 3000);
   const heading = /\n[ \t]*(?:={2,}[ \t]*)?(?:#{1,4}[ \t]*)?(?:\*{1,2})?[ \t]*(?:VOICE|Voice|ГОЛОС|Голос)[ \t]*(?:={2,}|\*{1,2})?[ \t]*:?(?:\*{1,2})?[ \t]*(?:\n|$)/;
   const cut = text.match(heading);
   if (cut) return { looks: clean(text.slice(0, cut.index)), voice: voice ? clean(text.slice(cut.index + cut[0].length)) : '' };

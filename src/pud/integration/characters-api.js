@@ -96,11 +96,10 @@ export const characterApi = {
     await tavernApi.openChat({ kind: 'char', avatar, chats: [] }, `${character.chat}.jsonl`);
   },
 
-  async create(name, description = '') {
+  async create(name) {
     const form = new FormData();
     form.append('ch_name', name);
-    // the text goes in with the card itself: no second write that could lose it
-    if (description) form.append('description', description);
+    // the text is not sent in the form: FormData turns every line break into CRLF. It is written after, as JSON (setField).
     const response = await fetch('/api/characters/create', { method: 'POST', headers: live().getRequestHeaders({ omitContentType: true }), body: form, cache: 'no-cache' });
     if (!response.ok) throw new Error(`/api/characters/create: ${response.status}`);
     const avatar = (await response.text()).trim();
