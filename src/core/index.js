@@ -59,6 +59,8 @@ export {
   addSong, addSongFolder, emptySongs, exportSongs, listSongExport, selectSongExport, findSongs, importSongs, lyricsHit, muteSong, normalizeSongState, normalizeSongs, pinSong, planSongs,
   recentText, removeSongFolder, removeSongs, searchSongs, songLabel, songSends, songWords, textGrams, unmuteSong, unpinSong, updateSong, updateSongFolder,
 } from './song-library.js';
+export { MOOD_WORDS, sceneMoods, suggestMedia } from './media-suggest.js';
+export { MEDIA_LIMITS, MEDIA_SERVICES, addMediaItem, emptyMedia, normalizeMedia, parseMediaLink, removeMediaItem, searchMedia, updateMediaItem } from './media-library.js';
 export { DICE_GROUPS, DICE_LIMITS, describeGroups, diceCue, normalizeDice, optionsOf, recordDice, rollDice, togglePick, updateDice, viewGroups } from './intimacy-dice.js';
 export {
   BUILTIN_CLIMATES, BUILTIN_SCENARIOS, MONTH_NAMES, WEATHER_KINDS, WEATHER_KIND_IDS, WEATHER_LIMITS,
@@ -73,3 +75,7 @@ export {
 } from './quests.js';
 export { privateText } from './character-cards.js';
 export { BOND_LIMITS, BOND_TAG, BOND_TYPES, addBond, buildBondsPrompt, cleanBonds, pruneBonds, removeBond, selectBonds, updateBond } from './bond-records.js';
+
+export { AU_FIELDS, AU_LIMIT, auIsEmpty, auParsePrompt, auPrompt, auSummary, folderAu, normalizeAu, parseAuAnswer, sameAu } from './au-notes.js';
+
+export { CLEANER_KIND, PROTECTED_KEYS, buildCleanerBackup, cleanerFilename, formatBytes, hasFolderFor, parseCleanerBackup, removeSettings, restoreSettings, scanSettings } from './settings-cleaner.js';

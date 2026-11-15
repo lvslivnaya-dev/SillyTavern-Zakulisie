@@ -175,7 +175,8 @@ test('persona cards need no folder: they sit in a hidden one; a plain folder tha
   const home = made.library.folders.find(folder => folder.id === made.character.folderId);
   assert.deepEqual([home.persona, home.hidden], [true, true], 'no folder of their own is shown');
   assert.equal(ensurePersonaHome(structuredClone(made.library)), home.id, 'the same place every time');
-  assert.throws(() => addLibraryCharacter(emptyLibrary(), { name: 'Ран' }), /папк/, 'a hero still needs a folder');
+  const plain = addLibraryCharacter(emptyLibrary(), { name: 'Ран' });
+  assert.equal(plain.library.folders.find(folder => folder.id === plain.character.folderId).name, 'Без папки', 'a hero with no folder goes to «Без папки», not to the personas');
   const own = addFolder(made.library, { name: 'Мои', persona: true });
   assert.equal(own.folder.persona, true);
   // an old library: persona cards in a plain «Персоны» folder

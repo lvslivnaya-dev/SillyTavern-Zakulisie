@@ -122,6 +122,8 @@ export function normalizeGmSettings(raw) {
     profileId: text(source.profileId, 80),
     // кто автор: от этого зависят обращения («дорогая» / «дорогой») и род в ответах
     userGender: ['f', 'm', 'n'].includes(source.userGender) ? source.userGender : 'f',
+    // may the assistant read the journal of browser errors (what F12 would show) when the author talks about something broken
+    seeConsole: source.seeConsole !== false,
     prompt: String(source.prompt ?? '').slice(0, GM_LIMITS.prompt),
   };
 }
@@ -263,7 +265,7 @@ const USER_GENDER = {
   m: 'Автор — мужчина: обращайся к нему в мужском роде.',
   n: 'Пол автора неизвестен: не используй род в обращениях к нему, строй фразы нейтрально.',
 };
-export function buildGmRequest({ prompt, name = DEFAULT_GM_NAME, assistant = null, userGender = 'f', gm, chat = [] }) {
+export function buildGmRequest({ prompt, name = DEFAULT_GM_NAME, assistant = null, userGender = 'f', gm, chat = [], consoleReport = '' }) {
   const state = normalizeGm(gm);
   const posts = [];
   let used = 0;
@@ -282,6 +284,7 @@ export function buildGmRequest({ prompt, name = DEFAULT_GM_NAME, assistant = nul
     assistant?.addresses?.length ? `Как ты обращаешься к автору (чередуй, не вставляй в каждую фразу): ${assistant.addresses.join(', ')}.` : '',
     posts.length ? `Последние сообщения игры (только для твоего понимания, где вы находитесь):\n${posts.join('\n')}` : 'Игровой чат пока пуст.',
     notes ? `Уже согласованные и действующие указания рассказчику:\n${notes}` : '',
+    consoleReport ? `Автор говорит о поломке, поэтому тебе показан журнал ошибок браузера (то, что показала бы консоль F12). Объясни простыми словами, что случилось и что можно сделать, опираясь только на этот журнал. Ничего не выдумывай: если причины в журнале не видно, так и скажи и предложи, что проверить. Ключи и секреты в журнале скрыты, не проси их присылать.\n${consoleReport}` : '',
   ].filter(Boolean).join('\n\n');
   const talk = state.messages.slice(-GM_LIMITS.historyForModel).map(item => ({ role: item.role, content: item.text }));
   return [{ role: 'system', content: system }, ...talk];

@@ -13,6 +13,17 @@ async function post(url, body) {
   return fetch(url, { method: 'POST', headers: live().getRequestHeaders(), body: JSON.stringify(body), cache: 'no-cache' });
 }
 
+/** Адрес репозитория из git («git@github.com:a/b.git», «https://github.com/a/b.git») как адрес страницы; не http(s) — ''. */
+export function repoPage(remote) {
+  let text = String(remote ?? '').trim();
+  const ssh = /^git@([^:]+):(.+)$/.exec(text);
+  if (ssh) text = `https://${ssh[1]}/${ssh[2]}`;
+  text = text.replace(/\.git$/i, '').replace(/\/+$/, '');
+  return /^https?:\/\/[^\s]+$/i.test(text) ? text : '';
+}
+
+const origins = new Map();
+
 export const extensionApi = {
   async ready() {
     if (mods) return;
@@ -74,8 +85,17 @@ export const extensionApi = {
       const response = await post('/api/extensions/version', { extensionName: folderName(id), global: extensionApi.isGlobal(id) });
       if (!response.ok) return null;
       const data = await response.json();
+      const page = repoPage(data?.remoteUrl);
+      if (page) origins.set(id, page);
       return typeof data?.isUpToDate === 'boolean' ? !data.isUpToDate : null;
     } catch { return null; }
+  },
+
+  /** Страница расширения на GitHub (адрес репозитория, из которого оно поставлено); '' — не git или не узнать. */
+  async origin(id) {
+    if (origins.has(id)) return origins.get(id);
+    await extensionApi.hasUpdate(id);
+    return origins.get(id) ?? '';
   },
 
   /** Обновить из git. Возвращает короткий хеш нового коммита или '' если уже свежее. */

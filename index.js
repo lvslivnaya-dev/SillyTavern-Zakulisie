@@ -99,6 +99,11 @@ import {
   normalizeChronicle,
   eventsOn,
 } from './src/core/index.js';
+import { addMediaItem, normalizeMedia, removeMediaItem, updateMediaItem, sceneMoods, suggestMedia } from './src/core/index.js';
+import { moodList, normalizeMoods } from './src/pud/core/moods.js';
+import { createMediaDock } from './src/ui/media-dock.js';
+import { renderMediaPane } from './src/ui/media-pane.js';
+import { lookupMediaTitle } from './src/integration/media-title.js';
 import {
   armCue, buildDirectionPrompt, cueBadge, cueLabel, normalizeDirection, normalizeFavorites,
   presenceAfterReply, removeCue, silenceCounts, startGeneration,
@@ -106,6 +111,12 @@ import {
 import { analyzeHistoryBatch, analyzeKnowledge, analyzeMessage, discoverHistoryCharacters } from './src/integration/analyzer.js';
 import { selectKnowledgeCandidates } from './src/integration/knowledge-analysis.js';
 import { detectConflicts } from './src/integration/conflicts.js';
+import { applyBackup, backupFilename, buildBackup, parseBackup, summarizeBackup } from './src/integration/backup.js';
+import { extensionApi } from './src/pud/integration/extensions-api.js';
+import { folderName } from './src/pud/core/extensions.js';
+import { createConsoleLog, formatConsoleReport, looksLikeProblem } from './src/core/console-log.js';
+import { startConsoleWatch } from './src/integration/console-watch.js';
+import { buildCleanerBackup, cleanerFilename, formatBytes, parseCleanerBackup, removeSettings, restoreSettings, scanSettings } from './src/core/settings-cleaner.js';
 import { clearRelationshipPrompt, updateGmPrompt, updateCalendarPrompt, updateCardsPrompt, updateDirectionPrompt, updateChroniclePrompt, updateKnowledgePrompt, updateNamesPrompt, updatePersonaPrompt, updateBondsPrompt, updateQuestsPrompt, updateRelationshipPrompt, updateScenePrompt, updateSongsPrompt } from './src/integration/prompt.js';
 import { fillNameForms } from './src/integration/name-forms.js';
 import { generateClimate } from './src/integration/weather-generation.js';
@@ -117,6 +128,8 @@ import { linkedItems } from './src/integration/item-links.js';
 import { cardLinks, cardNameForms, cardsByEntity, closetsByEntity } from './src/integration/card-links.js';
 import { cardedSheetTest, digestFor, planCards, planSheetDrops } from './src/integration/card-prompt.js';
 import { translateSections } from './src/integration/card-translate.js';
+import { generateCardSections } from './src/integration/card-generate.js';
+import { auParsePrompt, parseAuAnswer } from './src/core/au-notes.js';
 import { dormantItemIds } from './src/integration/item-tidy.js';
 import { aliasOperations, aliasesFromBooks } from './src/integration/name-sources.js';
 import { createWardrobeCallbacks, createWardrobeStore } from './src/integration/wardrobe-actions.js';
@@ -125,7 +138,8 @@ import {
   LIBRARY_IMAGE_FOLDER, browseImageFolder, copyImageTo, deleteWardrobeImage, folderStorageStatus, isTreeImage, listInbox, moveTreeImage, prepareInbox,
   setImageFolder, storedImageForModel, fileToDataUrl, shrinkDataUrl, VISION_MAX_SIDE, treeDirOf, uploadToTree, uploadWardrobeImage, imageUrl,
 } from './src/integration/wardrobe-images.js';
-import { inboxDirectories, newTreeFiles, treeDirFor } from './src/integration/wardrobe-inbox.js';
+import { inboxDirectories, newThingFiles, newTreeFiles, placeFromPath, THINGS_DIR, treeDirFor } from './src/integration/wardrobe-inbox.js';
+import { libraryDirectories, newLibraryFiles } from './src/integration/library-inbox.js';
 import { countImages, moveImages } from './src/integration/image-move.js';
 import { TEST_IMAGE, TEST_PROMPT, askAboutImage, listVisionChoices, visionSettings } from './src/integration/vision.js';
 import { hideSummarized } from './src/integration/chronicle-run.js';
@@ -145,7 +159,7 @@ import { collectRecords, triangleEdges } from './src/core/records.js';
 import { mountExtensionShell, mountWindowButtons } from './src/integration/shell.js';
 import { WINDOWS, normalizeLayout, reopenOnLoad, windowOf } from './src/ui/layout.js';
 import { mountMessageButtons } from './src/integration/message-buttons.js';
-import { mountChatOverlay } from './src/integration/chat-overlay.js';
+import { mountChatOverlay, extraPanes, extraPaneHooks, mediaSection } from './src/integration/chat-overlay.js';
 import { scanAcquaintances } from './src/integration/acquaintance-scan.js';
 import { scanLoreSecrets } from './src/integration/secret-scan.js';
 import { guessGenders } from './src/integration/genders.js';
@@ -162,6 +176,8 @@ import { createLibraryCallbacks, createLocationLibraryStore, syncChat, syncChatC
 import { personaApi } from './src/pud/integration/personas-api.js';
 import { createRelationshipStudio } from './src/ui/studio.js';
 import { createRelationshipWidget } from './src/ui/widget.js';
+import { relationLines, scaleList, scaleSeries, recentShifts, relationOverview } from './src/pud/core/relgraph.js';
+import { icon as studioIcon, ICON_NAMES as STUDIO_ICON_NAMES } from './src/ui/icons.js';
 
 const MESSAGE_EXTRA_KEY = 'kulisyV1';
 // Chats analysed by Relationship Engine keep its markers; the migrated state's
@@ -214,8 +230,10 @@ async function initKulisy() {
   const context = SillyTavern.getContext();
   const settings = getSettings(context);
   // State of the folder «Гардероб» (see refreshInbox); declared early: the snapshot reads it.
-  let inboxInfo = { available: false, count: 0, reason: '' };
+  let inboxInfo = { available: false, count: 0, places: [], things: 0, reason: '' };
   let inboxPrepared = false;
+  // The same for the folder «Библиотека» (library-inbox.js): its folders follow the library's, so they are laid out again on every check.
+  let libraryInboxInfo = { available: false, count: 0, reason: '' };
   let inboxChecking = null;
   // Places kept across chats (folders like a gallery); see location-library-actions.js.
   // A change to the library or the wardrobe redraws the Studio once (after the current step),
@@ -230,6 +248,9 @@ async function initKulisy() {
   let promptSoon = false;
   // the persona window redraws its list when the library changes (a new portrait of a card, a renamed card)
   const libraryListeners = new Set();
+  const sceneListeners = new Set();
+  // The little player of «Медиа → Плеер» hangs on the page itself, so the music goes on while windows come and go.
+  const mediaDock = createMediaDock(document);
   const locationLibrary = createLocationLibraryStore({
     settings: () => settings,
     save: () => context.saveSettingsDebounced(),
@@ -338,6 +359,8 @@ async function initKulisy() {
       calendarTemplates: normalizeTemplates(settings.calendarTemplates),
       names: normalizeNames(settings.nameLibrary),
       songs: normalizeSongs(settings.songLibrary),
+      media: normalizeMedia(settings.mediaLibrary),
+      mediaNow: mediaDock.current()?.id ?? '',
       songsChat: normalizeSongState(state.ui?.songs, { songIds: normalizeSongs(settings.songLibrary).songs.map(song => song.id) }),
       songsReport,
       songsTokens,
@@ -392,6 +415,7 @@ async function initKulisy() {
       chatKey: String(SillyTavern.getContext().getCurrentChatId?.() ?? ''),
       wardrobe: wardrobeStore.get(),
       inbox: { ...inboxInfo },
+      libraryInbox: { ...libraryInboxInfo },
       looksFit: looksStatus(state),
       dormantItemIds: shadeItems(state),
       duplicates: cachedDuplicates(state).map(pair => ({ ...pair, fromName: state.entities[pair.fromId]?.name ?? '', intoName: state.entities[pair.intoId]?.name ?? '' })),
@@ -443,6 +467,7 @@ async function initKulisy() {
     refreshChatOverlay();
     scheduleLooksRoom();
     emitAssistant();
+    for (const listener of sceneListeners) { try { listener(); } catch (error) { console.error('[Kulisy] A scene listener failed.', error); } }
   }
 
   /** The check of the clothes' room builds the scene text: once for a burst of changes, not on each of them. */
@@ -1040,6 +1065,9 @@ ${replyText}` });
     const run = () => routedContext(ctx, settings, 'generation').generateRaw({ prompt: request, trimNames: false });
     return quiet ? run() : withBusy('ассистент отвечает…', run);
   }
+  // What the console (F12) would show, for the assistant: errors, failed requests, stops of a generation. Secrets are cut out before they get here.
+  const consoleLog = createConsoleLog();
+  const stopConsoleWatch = startConsoleWatch(consoleLog);
   /** The assistant answers the last message of the author (a new one or a retry). */
   async function answerGm() {
     gmBusy = true;
@@ -1049,7 +1077,10 @@ ${replyText}` });
       const chat = (ctx.chat ?? []).filter(item => item && !item.is_system && String(item.mes ?? '').trim())
         .slice(-GM_LIMITS.contextMessages).map(item => ({ name: item.name, text: item.mes, isUser: Boolean(item.is_user) }));
       const gmSettings = normalizeGmSettings(settings.gm);
-      const request = buildGmRequest({ prompt: gmSettings.prompt, assistant: resolveAssistant(gmSettings), userGender: gmSettings.userGender, gm: readGm(), chat });
+      const talk = readGm();
+      const lastAsk = [...talk.messages].reverse().find(item => item.role === 'user')?.text ?? '';
+      const consoleReport = gmSettings.seeConsole && looksLikeProblem(lastAsk) ? formatConsoleReport(consoleLog.list()) : '';
+      const request = buildGmRequest({ prompt: gmSettings.prompt, assistant: resolveAssistant(gmSettings), userGender: gmSettings.userGender, gm: talk, chat, consoleReport });
       const raw = await generateForAssistant(ctx, gmSettings, request);
       const reply = splitReply(raw);
       let gm = addMessage(readGm(), 'assistant', reply.text || (reply.proposal ? 'Вот что получилось.' : '…'));
@@ -1601,6 +1632,72 @@ ${replyText}` });
       return commit(next, true);
     },
   };
+
+  /** The media library («Медиа → Плеер»): links to music and videos, kept in the settings; the player is media-dock.js. */
+  function saveMedia(change) {
+    settings.mediaLibrary = change(normalizeMedia(settings.mediaLibrary));
+    context.saveSettingsDebounced();
+    notify();
+  }
+  const mediaCallbacks = {
+    /** The name of a pasted link as its service tells it ('' when it does not). */
+    onMediaLookup: ({ url }) => lookupMediaTitle(url),
+    onMediaAdd: ({ url, title, note, mood, pinned }) => {
+      let made = null;
+      saveMedia(library => { made = addMediaItem(library, { url, title, note, mood, pinned }); return made.library; });
+      return { ...made.item, existed: made.existed };
+    },
+    onMediaUpdate: ({ id, patch }) => {
+      saveMedia(library => updateMediaItem(library, id, patch ?? {}));
+      if (mediaDock.current()?.id === id) { const fresh = normalizeMedia(settings.mediaLibrary).items.find(item => item.id === id); if (fresh && fresh.url !== mediaDock.current().url) mediaDock.play(fresh); }
+    },
+    onMediaRemove: ({ id }) => {
+      if (mediaDock.current()?.id === id) mediaDock.stop();
+      saveMedia(library => removeMediaItem(library, id));
+    },
+    onMediaPlay: ({ id }) => {
+      const item = normalizeMedia(settings.mediaLibrary).items.find(entry => entry.id === id);
+      if (!item) throw new Error('Такой ссылки уже нет.');
+      const started = mediaDock.play(item);
+      notify();
+      return started;
+    },
+    onMediaStop: () => { mediaDock.stop(); notify(); },
+  };
+
+  // The tab «Плеер» of the scene drawer: the list to pick from (the page «Медиа → Плеер» adds and edits).
+  let mediaQuery = '';
+  mediaSection.now = () => mediaDock.current()?.id ?? '';
+  // What suits the scene now (core/media-suggest.js): the mood of the heroes on stage, the weather and the time against the words of the links.
+  let mediaDismissed = new Set();
+  let mediaMoodKey = '';
+  function mediaSuggestion(view) {
+    try {
+      const live = SillyTavern.getContext();
+      const list = moodList(live.extensionSettings?.pudrenitsa?.moods);
+      const present = (view?.cast ?? []).filter(hero => hero.present && !hero.persona).map(hero => hero.name);
+      const scene = sceneMoods({ moods: normalizeMoods(live.chatMetadata?.zakulisie_pud?.moods, list), present, list, weather: view?.weather?.kind ?? '', time: view?.time ?? '' });
+      // a new mood of the scene: what was waved away before may be right now
+      const key = scene.map(item => item.id).sort().join(',');
+      if (key !== mediaMoodKey) { mediaMoodKey = key; mediaDismissed = new Set(); }
+      const best = suggestMedia(normalizeMedia(settings.mediaLibrary), scene, { dismissed: [...mediaDismissed], playing: mediaDock.current()?.id ?? '' });
+      return best ? { id: best.item.id, title: best.item.title, reason: best.mood.label } : null;
+    } catch (error) { console.warn('[Kulisy] Media suggestion failed.', error); return null; }
+  }
+  mediaSection.suggest = mediaSuggestion;
+  mediaSection.render = (container, view) => renderMediaPane(container, {
+    suggestion: mediaSuggestion(view),
+    onDismiss: id => { mediaDismissed.add(id); notify(); },
+      library: normalizeMedia(settings.mediaLibrary),
+      nowId: mediaDock.current()?.id ?? '',
+      nowTitle: mediaDock.current()?.title ?? '',
+      query: mediaQuery,
+      onQuery: value => { mediaQuery = value; notify(); },
+      onPlay: id => { try { mediaCallbacks.onMediaPlay({ id }); } catch (error) { globalThis.toastr?.error?.(error.message, 'Закулисье'); } },
+      onStop: () => mediaCallbacks.onMediaStop(),
+      onPin: id => { const item = normalizeMedia(settings.mediaLibrary).items.find(entry => entry.id === id); if (item) mediaCallbacks.onMediaUpdate({ id, patch: { pinned: !item.pinned } }); },
+      onOpenPage: () => studio.show('player'),
+    });
 
   const songsCallbacks = {
     onSongAdd: ({ title, artist, folderId }) => {
@@ -2879,9 +2976,13 @@ ${replyText}` });
     },
     notify: text => globalThis.toastr?.success?.(text, 'Закулисье'),
     // Pictures of places and things: the same server folder rules and the same picture model as the wardrobe.
-    upload: (dataUrl, name) => uploadWardrobeImage(SillyTavern.getContext(), dataUrl, name, LIBRARY_IMAGE_FOLDER, settings.imageStorage),
+    // In the folder, a thing's picture goes to «Гардероб/Вещи»; places and the rest stay in the library folder.
+    upload: (dataUrl, name, kind) => (settings.imageStorage === 'folder' && kind === 'items'
+      ? uploadToTree(SillyTavern.getContext(), dataUrl, THINGS_DIR, name)
+      : uploadWardrobeImage(SillyTavern.getContext(), dataUrl, name, LIBRARY_IMAGE_FOLDER, settings.imageStorage)),
     removeImage: path => deleteWardrobeImage(SillyTavern.getContext(), path),
     imageForModel: path => storedImageForModel(path),
+    inbox: { list: () => listInbox('library') },
     /** A persona card's new picture becomes the persona's avatar in SillyTavern. */
     setPersonaAvatar: async (avatar, dataUrl) => { await personaApi.setImage(avatar, dataUrl); notify(); },
     /** The picture of a persona as SillyTavern keeps it. */
@@ -2923,22 +3024,43 @@ ${replyText}` });
   function refreshInbox() {
     if (inboxChecking) return inboxChecking;
     inboxChecking = (async () => {
-      let next = { available: false, count: 0, reason: '' };
+      let next = { available: false, count: 0, places: [], things: 0, reason: '' };
+      let library = { available: false, count: 0, reason: '' };
       try {
         const plugin = await folderStorageStatus();
-        if (!plugin.installed) next.reason = 'no-plugin';
-        else if (!plugin.ready) next.reason = 'no-folder';
+        if (!plugin.installed) { next.reason = 'no-plugin'; library.reason = 'no-plugin'; }
+        else if (!plugin.ready) { next.reason = 'no-folder'; library.reason = 'no-folder'; }
         else {
           if (!inboxPrepared) { await prepareInbox(SillyTavern.getContext(), inboxDirectories()); inboxPrepared = true; }
-          next = { available: true, count: newTreeFiles(await listInbox(), wardrobeStore.get().cards).length, reason: '' };
+          const listed = await listInbox();
+          const clothes = newTreeFiles(listed, wardrobeStore.get().cards);
+          const things = newThingFiles(listed, locationLibrary.get().items);
+          // where the new pictures lie: the wardrobe page tells the sections and badges them
+          const places = clothes.map(file => { const { shelf, gender, category } = placeFromPath(file.path); return { shelf, gender, category }; });
+          next = { available: true, count: clothes.length + things.length, places, things: things.length, reason: '' };
+          // The library tree needs the plugin 0.4.0: an older one would lay the library's folders out inside «Гардероб».
+          const [major, minor] = String(plugin.version ?? '').split('.').map(Number);
+          if (!(major > 0 || minor >= 4)) library.reason = 'old-plugin';
+          else {
+            try {
+              await prepareInbox(SillyTavern.getContext(), libraryDirectories(locationLibrary.get()), 'library');
+              library = { available: true, count: newLibraryFiles(await listInbox('library'), locationLibrary.get()).length, reason: '' };
+            } catch (error) {
+              library.reason = 'error';
+              logEvent('warn', 'Папку «Библиотека» не удалось проверить', error);
+            }
+          }
         }
       } catch (error) {
         // A plugin older than 0.3.0 has no tree: the rest of the folder storage still works.
         next = { available: false, count: 0, reason: 'error' };
+        library = { available: false, count: 0, reason: 'error' };
         logEvent('warn', 'Папку «Гардероб» не удалось проверить', error);
       }
-      const changed = next.available !== inboxInfo.available || next.count !== inboxInfo.count || next.reason !== inboxInfo.reason;
+      const same = (a, b) => a.available === b.available && a.count === b.count && a.reason === b.reason && JSON.stringify(a.places ?? []) === JSON.stringify(b.places ?? []) && (a.things ?? 0) === (b.things ?? 0);
+      const changed = !same(next, inboxInfo) || !same(library, libraryInboxInfo);
       inboxInfo = next;
+      libraryInboxInfo = library;
       if (changed) notify();
       return inboxInfo;
     })().finally(() => { inboxChecking = null; });
@@ -2963,6 +3085,11 @@ ${replyText}` });
     isTreeImage,
     treeDirOf,
     inbox: { list: () => listInbox() },
+    // Pictures of «Гардероб/Вещи» become things of the library.
+    things: {
+      pending: files => newThingFiles(files, locationLibrary.get().items),
+      import: (files, options) => libraryCallbacks.onLibraryImportThings({ files, ...options }),
+    },
     removeImage: path => deleteWardrobeImage(SillyTavern.getContext(), path),
     imageForModel: path => storedImageForModel(path),
     ask: (dataUrl, prompt) => askPicture(dataUrl, prompt),
@@ -3114,6 +3241,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     ...calendarCallbacks,
     ...namesCallbacks,
     ...songsCallbacks,
+    ...mediaCallbacks,
     ...setupCallbacks,
     ...weatherCallbacks,
     ...diceCallbacks,
@@ -3124,6 +3252,10 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     ...wardrobeCallbacks,
     onWardrobeImportInbox: async payload => {
       try { return await wardrobeCallbacks.onWardrobeImportInbox(payload); }
+      finally { refreshInbox().catch(() => {}); }
+    },
+    onLibraryImportInbox: async payload => {
+      try { return await libraryCallbacks.onLibraryImportInbox(payload); }
       finally { refreshInbox().catch(() => {}); }
     },
     ...horaeCallbacks,
@@ -3367,7 +3499,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       for (const [id, value] of Object.entries(patch.avatars ?? {})) { if (value) avatars[id] = value; else delete avatars[id]; }
       const { customs, added } = patchCustoms(now.customs, patch);
       settings.gm = normalizeGmSettings({
-        ...now, ...Object.fromEntries(['assistant', 'profileId', 'prompt', 'userGender'].filter(key => key in patch).map(key => [key, patch[key]])),
+        ...now, ...Object.fromEntries(['assistant', 'profileId', 'prompt', 'userGender', 'seeConsole'].filter(key => key in patch).map(key => [key, patch[key]])),
         customs, avatars,
       });
       context.saveSettingsDebounced();
@@ -3729,6 +3861,83 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       'Персонажей / линий': `${Object.keys(state.entities).length} / ${Object.keys(state.relationships).length}`,
     }),
     onClearDiagnostics: () => { clearLog(); notify(); },
+    /** Написать разделы карточки по пожеланиям (в черновик карточки; сохраняет сам пользователь). payload: { card, sections, others, origin, wishes, onProgress } */
+    /** The loose notes about an AU → the four fields of a folder's AU (a draft for the user to check). */
+    onFolderAuParse: async ({ text, folderName = '' }) => {
+      const raw = await withBusy('разбираю АУ…', () => routedContext(SillyTavern.getContext(), settings, 'cardgen').generateRaw({ prompt: auParsePrompt(text, folderName), trimNames: false }));
+      return parseAuAnswer(raw);
+    },
+    onCardGenerate: ({ onProgress, onSection, ...request }) => generateCardSections(routedContext(SillyTavern.getContext(), settings, 'cardgen'), request, onProgress, onSection),
+    /** Переезд со старых Кулис и Пудреницы: что стоит рядом и есть ли данные (у Закулисья те же ключи настроек и чата, так что данные подхватываются сами). */
+    onMoveStatus: async () => {
+      const root = SillyTavern.getContext().extensionSettings;
+      let old = [];
+      try {
+        await extensionApi.ready();
+        const off = new Set(extensionApi.disabled());
+        old = extensionApi.names()
+          .filter(id => /kulisy|pudrenitsa/i.test(folderName(id)))
+          .map(id => ({ id, folder: folderName(id), title: /pudrenitsa/i.test(folderName(id)) ? 'Пудреница' : 'Кулисы', enabled: !off.has(id) }));
+      } catch (error) { console.warn('[Закулисье] Список расширений недоступен.', error); }
+      return { old, hasKulisy: Boolean(root.kulisy), hasPudrenitsa: Boolean(root.pudrenitsa) };
+    },
+    onMoveDisableOld: async () => {
+      await extensionApi.ready();
+      const off = new Set(extensionApi.disabled());
+      const targets = extensionApi.names().filter(id => /kulisy|pudrenitsa/i.test(folderName(id)) && !off.has(id));
+      for (const id of targets) await extensionApi.setEnabled(id, false);
+      return { disabled: targets.map(folderName) };
+    },
+    onBackupExport: () => {
+      const backup = buildBackup(SillyTavern.getContext().extensionSettings);
+      return { data: backup, filename: backupFilename() };
+    },
+    /** text — файл копии. Заменяет настройки и библиотеки; свои ключи доступа остаются. Потом страница перезагружается. */
+    onBackupImport: async ({ text }) => {
+      const backup = parseBackup(text);
+      const info = summarizeBackup(backup);
+      const lines = [
+        info.exportedAt ? `Копия от ${new Date(info.exportedAt).toLocaleString('ru-RU')}.` : '',
+        `Внутри: карточек ${info.cards}, локаций ${info.places}, вещей ${info.items}${info.hasPudrenitsa ? ', настройки Пудреницы' : ''}.`,
+        'Всё, что сейчас есть в Закулисье на этом компьютере (карточки, локации, гардероб, настройки), будет ЗАМЕНЕНО содержимым файла. Свои ключи доступа к моделям останутся. Чаты не меняются.',
+      ].filter(Boolean).map(escapePopupText).join('<br><br>');
+      const accepted = await SillyTavern.getContext().Popup.show.confirm('Загрузить копию Закулисья?', lines, { okButton: 'Заменить и перезагрузить', cancelButton: 'Отмена', allowVerticalScrolling: true });
+      if (accepted !== SillyTavern.getContext().POPUP_RESULT.AFFIRMATIVE) return false;
+      const context = SillyTavern.getContext();
+      const replaced = applyBackup(context.extensionSettings, backup);
+      context.saveSettingsDebounced();
+      globalThis.toastr?.success?.('Копия загружена. Страница перезагрузится.', 'Закулисье', { timeOut: 4000 });
+      setTimeout(() => globalThis.location?.reload?.(), 2500);
+      return { replaced };
+    },
+    /** «Чистилка»: разделы настроек, которые остались от удалённых расширений. Сначала показ, потом файл-копия, потом удаление. */
+    onCleanerScan: async () => {
+      const settingsRoot = SillyTavern.getContext().extensionSettings;
+      try {
+        await extensionApi.ready();
+        return { ...scanSettings(settingsRoot, extensionApi.names().map(folderName)), unknown: false };
+      } catch (error) {
+        console.warn('[Закулисье] Список расширений недоступен: «папки нет» определено не будет.', error);
+        return { ...scanSettings(settingsRoot, []), unknown: true };
+      }
+    },
+    onCleanerPrepare: ({ keys }) => ({ data: buildCleanerBackup(SillyTavern.getContext().extensionSettings, keys), filename: cleanerFilename() }),
+    onCleanerRemove: async ({ keys }) => {
+      const context = SillyTavern.getContext();
+      const chosen = buildCleanerBackup(context.extensionSettings, keys);
+      const names = Object.keys(chosen.removed);
+      const accepted = await context.Popup.show.confirm('Убрать настройки расширений?', `${names.map(escapePopupText).join(', ')}<br><br>Файл-копия этих настроек уже скачана: из неё их можно вернуть. Расширения, которые ещё стоят и работают, начнут с пустых настроек. Продолжить?`, { okButton: 'Убрать', cancelButton: 'Отмена', allowVerticalScrolling: true });
+      if (accepted !== context.POPUP_RESULT.AFFIRMATIVE) return false;
+      const result = removeSettings(context.extensionSettings, names);
+      context.saveSettingsDebounced();
+      return { ...result, size: formatBytes(result.bytes) };
+    },
+    onCleanerRestore: async ({ text }) => {
+      const context = SillyTavern.getContext();
+      const result = restoreSettings(context.extensionSettings, parseCleanerBackup(text));
+      if (result.restored.length) context.saveSettingsDebounced();
+      return result;
+    },
     onRefreshScene: async () => { await prepareHeadcanons(); refreshPrompt(); },
     onAuxProfiles: () => listAuxProfiles(SillyTavern.getContext()),
     onLocalEmbeddingModels: () => Object.entries(LOCAL_MODELS).map(([id, model]) => ({ id, label: model.label })),
@@ -4345,6 +4554,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     }
   });
   listen(events.PERSONA_CHANGED, () => { syncPersonaFromTavern(); });
+  listen(events.GENERATION_STOPPED, () => consoleLog.add('event', 'Генерацию остановили: кнопкой «стоп», сменой чата или обрывом связи'));
   listen(events.MESSAGE_RECEIVED, messageIndex => {
     // The corrections were for this reply: they are done.
     if (reminders.list().length) { reminders.clear(); refreshPrompt(); }
@@ -4541,7 +4751,8 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     const chat = SillyTavern.getContext().chat ?? [];
     let silent = new Map();
     try {
-      silent = silenceCounts(chat.map(message => ({ isUser: Boolean(message?.is_user), text: message?.is_system ? '' : message?.mes })),
+      // Only the tail of the chat: the count looks back at most 30 replies, and mapping a chat of thousands of messages on each redraw is waste.
+      silent = silenceCounts(chat.slice(-300).map(message => ({ isUser: Boolean(message?.is_user), text: message?.is_system ? '' : message?.mes })),
         [...here].filter(id => id !== personaId), text => mentionedEntities(state, text));
     } catch (error) { console.error('[Kulisy] Silence count failed.', error); }
     const nameOf = id => state.entities[id]?.name ?? id;
@@ -4627,6 +4838,9 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onReveal: (action, payload) => knowledgeCallbacks[action === 'confirm' ? 'onRevealConfirm' : 'onRevealDismiss'](payload)
       .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
+    onMediaOffer: (action, { id }) => {
+      if (action === 'play') { try { mediaCallbacks.onMediaPlay({ id }); } catch (error) { globalThis.toastr?.error?.(error.message, 'Закулисье'); } } else { mediaDismissed.add(id); notify(); }
+    },
     onQuestHint: (action, payload) => knowledgeCallbacks[action === 'confirm' ? 'onQuestHintConfirm' : 'onQuestHintDismiss'](payload)
       .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onDeath: (action, payload) => knowledgeCallbacks[action === 'confirm' ? 'onDeathConfirm' : 'onDeathDismiss'](payload)
@@ -4753,6 +4967,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     getState: () => structuredClone(state),
     destroy() {
       listeners.splice(0).forEach(remove => remove());
+      stopConsoleWatch();
       messageButtons.unmount();
       selectionChip.unmount();
       clearTimeout(overlayTimer);
@@ -4761,6 +4976,9 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       topBar.unmount();
       for (const item of panels) item.studio.destroy();
       studio.destroy();
+      mediaDock.destroy();
+      mediaSection.render = null;
+      mediaSection.suggest = null;
       widget.destroy();
       clearRelationshipPrompt(SillyTavern.getContext());
       delete globalThis.kulisyInterceptor;
@@ -4771,6 +4989,9 @@ ${card.personality ?? card.data?.personality ?? ''}`;
   globalThis.Kulisy = controller;
   // What the persona window (the former Pudrenitsa) needs from Kulisy: the card of a persona, made on demand, and its editor to embed.
   controller.personaBridge = {
+    // страницы шторки от Закулисья («Повторы», «Нити», «Эмоции», «График»)
+    panes: extraPanes,
+    paneHooks: extraPaneHooks,
     /** The books the Kulisy itself reads (analysis, secrets, heroes): the window «Лорбуки чата» of the paw switches them next to the tavern's ones. */
     lore: {
       linked: () => [...(state.ui?.linkedLorebooks ?? [])],
@@ -4812,6 +5033,26 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       conclusion: payload => callbacks.onGmConclusion(payload),
       clear: () => callbacks.onGmClear(),
       saveSettings: patch => callbacks.onGmSettings(patch),
+    },
+    /** What the mood, sound and graph modules read (src/pud/ui/mood.js, weather-sound.js, relgraph.js): the scene as plain numbers and names. */
+    scene: {
+      read() {
+        const weather = currentWeather();
+        return {
+          heat: state.world?.heat?.value ?? 0,
+          mode: state.world?.clock?.mode ?? 'calm',
+          time: state.world?.clock?.time ?? '',
+          location: state.knowledge?.scene?.location ?? '',
+          weather: weather ? { kind: weather.kind, temp: weather.temp } : null,
+          cast: presentIds(state).filter(id => id !== state.ui?.personaId).map(id => state.entities?.[id]?.name).filter(Boolean),
+        };
+      },
+      subscribe(listener) { sceneListeners.add(listener); return () => sceneListeners.delete(listener); },
+      lines: () => relationLines(state),
+      scales: () => scaleList(state).map(item => ({ ...item, icon: studioIcon(STUDIO_ICON_NAMES.includes(`m-${item.id}`) ? `m-${item.id}` : 'letter').outerHTML })),
+      series: (lineId, scaleId) => scaleSeries(state, lineId, scaleId),
+      overview: (scaleIds, window) => relationOverview(state, scaleIds, window),
+      shifts: limit => recentShifts(state, limit),
     },
     createEditor: (container, { onGear } = {}) => createRelationshipStudio({ store, callbacks, open: false, container, embedCard: true, onGear, directionPresets, layout: settings.studio }),
   };

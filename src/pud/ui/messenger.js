@@ -65,7 +65,8 @@ export function startMessenger(doc, { bridge, shared = {}, settings = null, save
     <footer class="pud-msgr-foot">
       <textarea rows="1" class="pud-msgr-input" placeholder="Сообщение"></textarea>
       <button type="button" class="pud-msgr-send" data-act="send">Отпр.</button>
-    </footer>`;
+    </footer>
+    <div class="pud-msgr-grip" data-grip title="Потяните, чтобы изменить размер окна. Двойной щелчок возвращает прежний размер." aria-label="Изменить размер окна" role="separator"></div>`;
   doc.body.append(win);
   undo.push(() => win.remove());
   const thread = win.querySelector('.pud-msgr-thread');
@@ -89,7 +90,11 @@ export function startMessenger(doc, { bridge, shared = {}, settings = null, save
     // окно встаёт над кнопкой
     const left = Number.parseFloat(button.style.left) || 0;
     const top = Number.parseFloat(button.style.top) || 0;
-    const width = Math.min(340, view.innerWidth - 16);
+    // the size the user chose stays (clamped to the screen of now)
+    const size2 = sizeKept();
+    win.style.width = size2 ? `${size2.width}px` : '';
+    win.style.height = size2 ? `${size2.height}px` : '';
+    const width = size2 ? size2.width : Math.min(340, view.innerWidth - 16);
     // the window was carried somewhere: it stays there
     const kept = settings?.messengerPos;
     if (kept && Number.isFinite(kept.left) && Number.isFinite(kept.top)) {
@@ -101,6 +106,11 @@ export function startMessenger(doc, { bridge, shared = {}, settings = null, save
     win.style.top = '';
     win.style.left = `${Math.max(8, Math.min(view.innerWidth - width - 8, left + size - width))}px`;
     win.style.bottom = `${Math.max(8, Math.round(view.innerHeight - top + 10))}px`;
+  };
+  const sizeKept = () => {
+    const kept = settings?.messengerSize;
+    if (!kept || !Number.isFinite(kept.width) || !Number.isFinite(kept.height)) return null;
+    return { width: Math.max(280, Math.min(view.innerWidth - 16, Math.round(kept.width))), height: Math.max(300, Math.min(view.innerHeight - 16, Math.round(kept.height))) };
   };
   const resizeObserver = typeof view.ResizeObserver === 'function' ? new view.ResizeObserver(() => place()) : null;
   resizeObserver?.observe(form);
@@ -174,6 +184,47 @@ export function startMessenger(doc, { bridge, shared = {}, settings = null, save
   };
   head.addEventListener('pointerup', letGo);
   head.addEventListener('pointercancel', letGo);
+
+  // ── размер: за уголок внизу справа; запоминается; двойной щелчок по уголку возвращает прежний ──
+  let stretch = null;
+  const grip = win.querySelector('[data-grip]');
+  grip.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const rect = win.getBoundingClientRect();
+    // from now the window hangs by its top-left corner, so it grows to the right and down under the pointer
+    win.style.left = `${Math.round(rect.left)}px`;
+    win.style.top = `${Math.round(rect.top)}px`;
+    win.style.bottom = 'auto';
+    stretch = { x: event.clientX, y: event.clientY, width: rect.width, height: rect.height, left: rect.left, top: rect.top };
+    grip.setPointerCapture?.(event.pointerId);
+    win.classList.add('pud-msgr-carried');
+  });
+  grip.addEventListener('pointermove', event => {
+    if (!stretch) return;
+    const width = Math.max(280, Math.min(view.innerWidth - Math.max(0, stretch.left) - 8, stretch.width + event.clientX - stretch.x));
+    const height = Math.max(300, Math.min(view.innerHeight - Math.max(0, stretch.top) - 8, stretch.height + event.clientY - stretch.y));
+    win.style.width = `${Math.round(width)}px`;
+    win.style.height = `${Math.round(height)}px`;
+  });
+  const stretchDone = () => {
+    if (!stretch) return;
+    stretch = null;
+    win.classList.remove('pud-msgr-carried');
+    if (!settings) return;
+    settings.messengerSize = { width: Math.round(win.getBoundingClientRect().width), height: Math.round(win.getBoundingClientRect().height) };
+    settings.messengerPos = { left: Number.parseFloat(win.style.left) || 0, top: Number.parseFloat(win.style.top) || 0 };
+    try { save(); } catch (error) { report('мессенджер: сохранение размера', error); }
+    thread.scrollTop = thread.scrollHeight;
+  };
+  grip.addEventListener('pointerup', stretchDone);
+  grip.addEventListener('pointercancel', stretchDone);
+  grip.addEventListener('dblclick', () => {
+    if (!settings) return;
+    delete settings.messengerSize;
+    try { save(); } catch (error) { report('мессенджер: сохранение размера', error); }
+    place();
+  });
 
   // ── действия ──
   const run = async (what, task) => {

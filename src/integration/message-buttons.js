@@ -52,12 +52,22 @@ export function mountMessageButtons(onCheck, onSecret = null) {
     console.error('[Kulisy] Could not add message buttons.', error);
   }
   document.addEventListener('click', onClick, true);
+  let queued = false;
+  let mounted = true;
   return {
+    // Several events follow one message: one pass over the chat per frame, not one per event.
     refresh() {
-      try { addButtons(document.getElementById('chat'), Boolean(onSecret)); }
-      catch (error) { console.error('[Kulisy] Could not add message buttons.', error); }
+      if (queued) return;
+      queued = true;
+      (globalThis.requestAnimationFrame ?? (fn => setTimeout(fn, 16)))(() => {
+        queued = false;
+        if (!mounted) return;
+        try { addButtons(document.getElementById('chat'), Boolean(onSecret)); }
+        catch (error) { console.error('[Kulisy] Could not add message buttons.', error); }
+      });
     },
     unmount() {
+      mounted = false;
       document.removeEventListener('click', onClick, true);
       for (const node of document.querySelectorAll(`.${BUTTON_CLASS}, .${SECRET_CLASS}`)) node.remove();
     },

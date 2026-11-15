@@ -118,3 +118,49 @@ test('редактор: открыть, править с автосохране
   assert.equal(document.querySelector('.pud-lored'), null);
   assert.equal(shared.loreEditor, undefined);
 });
+
+test('редактор лорбука: «На английский» переводит только содержимое записи, не трогает название и ключи; оригинал можно вернуть', async () => {
+  const { window } = new JSDOM(`<!doctype html><body>
+    <div id="top-settings-holder"><div id="WI-SP-button" class="drawer"><div id="WIDrawerIcon" class="drawer-icon closedIcon"></div><div id="WorldInfo" class="drawer-content closedDrawer"></div></div></div>
+    <select id="world_editor_select"><option value="">--</option><option value="0">Хайтани Судзу</option></select>
+  </body>`, { pretendToBeVisual: true });
+  const { document } = window;
+  const books = { 'Хайтани Судзу': book() };
+  const saved = [];
+  const api = {
+    ready: async () => {}, names: () => Object.keys(books), selected: () => [],
+    load: async name => structuredClone(books[name]),
+    save: async (name, data) => { saved.push(structuredClone(data)); books[name] = structuredClone(data); },
+    newEntry: () => null, keyMap: () => ({ comment: 'comment', key: 'keys' }), setOriginal: () => {}, deleteOriginal: () => {},
+    splitKeys: text => text.split(',').map(item => item.trim()).filter(Boolean), tokens: async () => 7, setGlobal: () => {},
+    moveEntry: async () => true, editorBook: () => '', closeNativeEditor: () => {},
+  };
+  const calls = [];
+  const translate = async (_ctx, text) => { calls.push(text); return `EN: ${text}`; };
+  const shared = {};
+  const context = { characters: [], eventTypes: {}, POPUP_TYPE: { CONFIRM: 1 }, callGenericPopup: async () => true };
+  const undo = startLoreEditor(document, { context, settings: migrateSettings({}), save() {}, api, shared, translate });
+  try {
+    await shared.loreEditor.open('Хайтани Судзу');
+    await wait(40);
+    const win = document.querySelector('.pud-lored');
+    const uid = win.querySelector('.pud-lerow.on').dataset.uid;
+    const before = books['Хайтани Судзу'].entries[uid];
+    const content = win.querySelector('[data-f="content"]');
+    assert.equal(win.querySelector('[data-act="tr-undo"]').hidden, true, 'пока нечего возвращать');
+    win.querySelector('[data-act="tr"]').click();
+    await wait(30);
+    assert.deepEqual(calls, [before.content], 'переводится только содержимое');
+    assert.equal(content.value, `EN: ${before.content}`);
+    assert.equal(win.querySelector('[data-f="comment"]').value, before.comment, 'название не тронуто');
+    await wait(900);
+    const written = saved.at(-1).entries[uid];
+    assert.equal(written.content, `EN: ${before.content}`, 'сохранено в лорбук');
+    assert.equal(written.comment, before.comment);
+    assert.deepEqual(written.key, before.key, 'ключи не тронуты');
+    assert.equal(win.querySelector('[data-act="tr-undo"]').hidden, false);
+    win.querySelector('[data-act="tr-undo"]').click();
+    assert.equal(win.querySelector('[data-f="content"]').value, before.content, 'оригинал вернулся');
+    assert.equal(win.querySelector('[data-act="tr-undo"]').hidden, true);
+  } finally { undo(); }
+});

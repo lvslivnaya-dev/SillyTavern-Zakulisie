@@ -12,7 +12,7 @@ const dom = new JSDOM(`<!doctype html><html><body>
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 globalThis.Element = dom.window.Element;
-const { mountChatOverlay } = await import('../src/integration/chat-overlay.js');
+const { mountChatOverlay, extraPanes, mediaSection } = await import('../src/integration/chat-overlay.js');
 
 const view = (overrides = {}) => ({
   chips: true,
@@ -442,6 +442,10 @@ test('the strip above the message box says what the scene is and what goes to th
     assert.match(strip.textContent, /вт 22:20/);
     assert.match(strip.textContent, /гараж|палуба/);
     assert.match(strip.textContent, /Майки/, 'who is on stage');
+    assert.equal(strip.querySelector('.ku-ss-out'), null, 'the details sit behind a curtain, closed to begin with');
+    strip.querySelector('.ku-ss-curtain').click();
+    assert.deepEqual(toggles, [], 'the curtain opens the details, not the panel');
+    assert.equal(strip.querySelector('.ku-ss-curtain').getAttribute('aria-expanded'), 'true');
     assert.match(strip.querySelector('.ku-ss-out').textContent, /Уйдёт модели: .*Касания: только касания · заметка: тихо.*Событие: шторм.*с ревностью \(не отправлен\)/, 'the stage, the queued directions and the roll');
     strip.click();
     assert.deepEqual(toggles, [true], 'a click opens the panel');
@@ -471,8 +475,8 @@ test('the songs tile: pin a song from the library, say who sings it, drop a fals
   try {
     overlay.render(view({ songs: songs(), director }));
     const bar = document.getElementById('ku-scene-chips');
-    assert.match(tileOf(bar, 'Песни').textContent, /тихо/);
-    tileOf(bar, 'Песни').click();
+    assert.match(tileOf(bar, 'Медиа').textContent, /тихо/);
+    tileOf(bar, 'Медиа').click();
     // Find a song of the library and put it on.
     const find = bar.querySelector('[data-ku-field="song-find"]');
     find.value = 'ласт';
@@ -481,7 +485,7 @@ test('the songs tile: pin a song from the library, say who sings it, drop a fals
     assert.deepEqual(calls.at(-1), { op: 'pin', songId: 's1', mode: 'sound', singerId: '' });
     // On: it plays; pick who sings it, or take it away.
     overlay.render(view({ songs: songs({ playing: [{ songId: 's1', title: 'Ласточка', artist: 'Кино', mode: 'sound', singerId: '' }] }), director }));
-    assert.match(tileOf(bar, 'Песни').textContent, /▶ 1/);
+    assert.match(tileOf(bar, 'Медиа').textContent, /▶ 1/);
     assert.equal(press(bar, '🔊 Звучит').getAttribute('aria-pressed'), 'true');
     press(bar, '🎤 Майки').click(); await settle();
     assert.deepEqual(calls.at(-1), { op: 'pin', songId: 's1', mode: 'sung', singerId: 'm' });
@@ -489,7 +493,7 @@ test('the songs tile: pin a song from the library, say who sings it, drop a fals
     assert.deepEqual(calls.at(-1), { op: 'unpin', songId: 's1' });
     // A song the posts brought up by mistake: «Не она» mutes it, «Вернуть» brings it back.
     overlay.render(view({ songs: songs({ found: [{ songId: 's2', title: 'Дождь', why: 'lyrics', muted: false }] }), director }));
-    assert.match(tileOf(bar, 'Песни').textContent, /слышно/);
+    assert.match(tileOf(bar, 'Медиа').textContent, /слышно/);
     assert.match(bar.querySelector('.ku-dir-songs').textContent, /Дождь · по словам/);
     press(bar, 'Не она').click(); await settle();
     assert.deepEqual(calls.at(-1), { op: 'mute', songId: 's2' });
@@ -507,14 +511,53 @@ test('the rail stands at either wall and tells the docked panels how much room i
     overlay.render(view());
     const bar = document.getElementById('ku-scene-chips');
     assert.equal(bar.classList.contains('ku-side-right'), false, 'left by default');
-    assert.equal(root.getPropertyValue('--ku-rail-left'), '64px');
+    assert.equal(root.getPropertyValue('--ku-rail-left'), '128px');
     assert.equal(root.getPropertyValue('--ku-rail-right'), '0px');
     overlay.render(view({ railSide: 'right' }));
     assert.equal(bar.classList.contains('ku-side-right'), true);
     assert.equal(root.getPropertyValue('--ku-rail-left'), '0px');
-    assert.equal(root.getPropertyValue('--ku-rail-right'), '64px');
+    assert.equal(root.getPropertyValue('--ku-rail-right'), '128px');
     overlay.render(view({ chips: false }));
     assert.equal(document.getElementById('ku-scene-chips'), null);
     assert.equal(root.getPropertyValue('--ku-rail-right'), '', 'no rail, no room taken');
   } finally { overlay.unmount(); }
+});
+
+test('pages from other modules are ordinary tabs: a tile on the rail, the page inside the panel, the head names it', () => {
+  const toggles = [];
+  const overlay = mountChatOverlay({ onTogglePresent: () => {}, onLeak: () => {}, onToggleOpen: open => toggles.push(open) });
+  extraPanes.set('demo', { id: 'demo', icon: '🧵', name: 'Нити', title: 'Нити сюжета', render: box => { box.textContent = 'страница нитей'; } });
+  try {
+    overlay.render(view({ director: { open: true } }));
+    const bar = document.getElementById('ku-scene-chips');
+    const tile = tileOf(bar, 'Нити');
+    assert.ok(tile, 'a tile on the rail');
+    tile.click();
+    overlay.render(view({ director: { open: true } }));
+    assert.match(bar.querySelector('.ku-dir-inner').textContent, /страница нитей/, 'the page is inside the panel');
+    assert.match(bar.querySelector('.ku-dir-head').textContent, /Нити сюжета/);
+    assert.equal(tileOf(bar, 'Нити').classList.contains('on'), true);
+  } finally { extraPanes.delete('demo'); overlay.unmount(); }
+});
+
+test('a link that suits the scene is offered under the last reply with Включить / Нет, and only there', () => {
+  const actions = [];
+  const overlay = mountChatOverlay({ onTogglePresent: () => {}, onLeak: () => {}, onMediaOffer: (action, payload) => actions.push([action, payload]) });
+  mediaSection.suggest = () => ({ id: 'm1', title: 'Погоня', reason: 'боится' });
+  try {
+    overlay.render(view({ leaks: [] }));
+    const note = document.querySelector('.mes[mesid="4"] .ku-media-note-chat');
+    assert.ok(note, 'under the last reply');
+    assert.equal(document.querySelectorAll('.ku-media-note-chat').length, 1);
+    assert.match(note.textContent, /Подходит под вайб, включить\?.*Погоня · боится/);
+    for (const label of ['▶ Включить', 'Нет']) [...note.querySelectorAll('button')].find(button => button.textContent === label).click();
+    assert.deepEqual(actions, [['play', { id: 'm1' }], ['dismiss', { id: 'm1' }]]);
+    mediaSection.suggest = () => null;
+    overlay.render(view({ leaks: [] }));
+    assert.equal(document.querySelectorAll('.ku-media-note-chat').length, 0, 'nothing suits: no plaque');
+    mediaSection.suggest = () => ({ id: 'm1', title: 'Погоня', reason: '' });
+    document.querySelector('.mes[mesid="4"]').setAttribute('is_user', 'true');
+    overlay.render(view({ leaks: [] }));
+    assert.equal(document.querySelectorAll('.ku-media-note-chat').length, 0, 'the last message is yours: the reply is not here yet');
+  } finally { document.querySelector('.mes[mesid="4"]').removeAttribute('is_user'); mediaSection.suggest = null; overlay.unmount(); }
 });

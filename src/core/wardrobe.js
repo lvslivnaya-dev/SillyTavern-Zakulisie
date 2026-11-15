@@ -69,10 +69,11 @@ export function cleanImagePath(value) {
 
 /** A picture of the wardrobe tree «Гардероб/<полка>/<пол>/<раздел>/файл» (served by the plugin). */
 function isTreePath(path) {
-  const match = /^\/?api\/plugins\/kulisy-images\/wardrobe\/(.+)$/.exec(path);
+  // The library tree «Библиотека/<Вещи|Места>/<папки>/файл» is deeper (library folders nest).
+  const match = /^\/?api\/plugins\/kulisy-images\/(wardrobe|library)\/(.+)$/.exec(path);
   if (!match) return false;
-  const parts = match[1].split('/');
-  if (parts.length < 1 || parts.length > 4) return false;
+  const parts = match[2].split('/');
+  if (parts.length < 1 || parts.length > (match[1] === 'library' ? 6 : 4)) return false;
   const name = parts.at(-1);
   if (!/^[^\\/:*?"<>|\u0000-\u001f]{1,200}\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(name) || name.startsWith('.')) return false;
   return parts.slice(0, -1).every(part => /^[\p{L}\p{N}][\p{L}\p{N} _.()-]{0,59}$/u.test(part) && !part.endsWith('.'));

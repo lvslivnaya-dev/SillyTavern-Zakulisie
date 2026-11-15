@@ -26,9 +26,12 @@ const SHELVES = lookup(Object.entries(WARDROBE_SHELVES), SHELF_ALIASES);
 const GENDERS = lookup(Object.entries(WARDROBE_GENDERS), GENDER_ALIASES);
 const CATEGORIES = lookup(WARDROBE_CATEGORIES);
 
+/** Pictures of the library's things (not clothes) live in their own folder of the tree: «Гардероб/Вещи». */
+export const THINGS_DIR = 'Вещи';
+
 /** Every folder of the tree, relative to «Гардероб»: 'Персона/Женское/Верх', … */
 export function inboxDirectories() {
-  const dirs = [];
+  const dirs = [THINGS_DIR];
   for (const shelf of Object.values(WARDROBE_SHELVES)) {
     for (const gender of Object.values(WARDROBE_GENDERS)) {
       for (const [, section] of WARDROBE_CATEGORIES) dirs.push(`${shelf}/${gender}/${section}`);
@@ -50,7 +53,8 @@ export function treeDirFor(card) {
 /** Pictures of the tree no card points at yet: the ones dropped in by hand. */
 export function newTreeFiles(files, cards) {
   const used = new Set((cards ?? []).map(card => String(card.image ?? '').replace(/^\/+/, '')).filter(Boolean));
-  return (files ?? []).filter(file => file?.public && !used.has(String(file.public).replace(/^\/+/, '')));
+  // «Вещи» holds the library's things: they are not wardrobe cards and are never imported as such
+  return (files ?? []).filter(file => file?.public && !String(file.path ?? '').startsWith(`${THINGS_DIR}/`) && !used.has(String(file.public).replace(/^\/+/, '')));
 }
 
 /**
@@ -92,4 +96,10 @@ export function placeFromPath(relativePath) {
     place.category = category;
   }
   return place;
+}
+
+/** Pictures dropped into «Гардероб/Вещи» that no thing of the library points at yet: they become library things. */
+export function newThingFiles(files, items) {
+  const used = new Set((items ?? []).map(item => String(item.image ?? '').replace(/^\/+/, '')).filter(Boolean));
+  return (files ?? []).filter(file => file?.public && String(file.path ?? '').startsWith(`${THINGS_DIR}/`) && !used.has(String(file.public).replace(/^\/+/, '')));
 }

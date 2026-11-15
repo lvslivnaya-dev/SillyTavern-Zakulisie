@@ -247,7 +247,7 @@ test('окно персон с Закулисьем: слева всегда к�
   assert.ok(left().querySelector('[data-opt="default"]'), 'по умолчанию');
   assert.ok(left().querySelector('[data-act="link-open"]'), 'привязки к персонажам');
 
-  left().querySelector('[data-act="pane"]').click();
+  gear();
   await frame();
   assert.equal(left().querySelector('[data-field="position"]'), null, 'панель настроек сворачивается');
   assert.equal(left().querySelector('.fake-editor').textContent, 'карточка card-suzu');

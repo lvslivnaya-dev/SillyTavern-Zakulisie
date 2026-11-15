@@ -148,7 +148,6 @@ test('callbacks: folder first, save a chat card, switch a folder, import and rem
     listBooks: () => ['Мир'],
     loadBook: async () => ({ entries: { 0: { uid: 0, comment: 'Склад', key: ['склад'], content: 'Пыльный склад.' } } }),
   });
-  assert.throws(() => callbacks.onLibraryAddLocation({ name: 'Бар' }), /Сначала выберите папку/);
   const folder = callbacks.onLibraryAddFolder({ name: 'Мстители' });
   callbacks.onLibraryAddLocation({ folderId: folder.id, name: 'Бар' });
   assert.equal(settings.locationLibrary.locations.length, 1, 'kept in extension settings');

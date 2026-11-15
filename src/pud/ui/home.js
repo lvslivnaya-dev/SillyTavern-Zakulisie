@@ -455,7 +455,9 @@ export function startHome(doc, { context, settings, save, api = tavernApi, stora
   };
   const reloadIfVisible = () => { if (shown || chatsWin.isOpen) load(); };
   on('CHAT_CHANGED', schedule);
-  on('APP_READY', schedule);
+  // The first load may run while the tavern is still fetching its characters (groupChats drops every chat whose owner is not in the list yet,
+  // hence «0 чатов» until the manual refresh): once the app is ready the list is read again.
+  on('APP_READY', () => { schedule(); reloadIfVisible(); });
   for (const name of ['CHAT_DELETED', 'GROUP_CHAT_DELETED', 'CHARACTER_DELETED', 'GROUP_UPDATED']) on(name, reloadIfVisible);
   on('CHAT_RENAMED', data => {
     try {

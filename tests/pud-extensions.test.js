@@ -133,3 +133,26 @@ test('окно расширений: настройки выбранного п�
   assert.equal(document.getElementById('qr_container').parentElement.id, 'extensions_settings2', 'всё вернулось');
   assert.ok(document.getElementById('extensions_url').closest('#rm_extensions_block'));
 });
+
+test('окно расширений: автор — ссылка на страницу расширения (из git или из манифеста), клик по ней не выбирает строку', async () => {
+  const { repoPage } = await import('../src/pud/integration/extensions-api.js');
+  assert.equal(repoPage('git@github.com:Delidgi1/Phone-ST.git'), 'https://github.com/Delidgi1/Phone-ST');
+  assert.equal(repoPage('https://github.com/a/b.git'), 'https://github.com/a/b');
+  assert.equal(repoPage('javascript:alert(1)'), '', 'только http(s)');
+  const { document } = tavern();
+  const api = { ...fakeApi([]), origin: async id => (id.endsWith('Kulisy') ? 'https://github.com/lvslivnaya-dev/SillyTavern-Kulisy' : '') };
+  const homed = { ...manifests, 'third-party/SillyTavern-Horae': { display_name: 'Horae', version: '2.4.1', author: 'Автор', homePage: 'https://github.com/x/horae' } };
+  api.manifest = id => homed[id];
+  const context = { eventTypes: {}, POPUP_TYPE: { CONFIRM: 1 }, callGenericPopup: async () => true };
+  const undo = startExtensions(document, { context, settings: migrateSettings({}), save() {}, api });
+  document.getElementById(EXT_BUTTON_ID).firstElementChild.click();
+  await frame(); await frame();
+  const win = document.querySelector('.pud-exts');
+  assert.equal(win.querySelector('.pud-exrow[data-id="third-party/SillyTavern-Horae"] a.pud-exauthor').href, 'https://github.com/x/horae', 'адрес из манифеста');
+  win.querySelector('.pud-exrow[data-id="third-party/SillyTavern-Kulisy"] .pud-exrow-info').click();
+  await frame(); await frame();
+  const link = win.querySelector('.pud-exrow[data-id="third-party/SillyTavern-Kulisy"] a.pud-exauthor');
+  assert.equal(link.href, 'https://github.com/lvslivnaya-dev/SillyTavern-Kulisy', 'адрес из git подтянулся при выборе');
+  assert.equal(link.target, '_blank'); assert.match(link.rel, /noopener/);
+  undo();
+});

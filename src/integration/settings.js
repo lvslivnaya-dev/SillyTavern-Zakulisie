@@ -83,6 +83,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   aliasesTidied: false,
   // The song library (core/song-library.js): mood, sound and words of songs, shared by all chats.
   songLibrary: { version: 1, enabled: true, folders: [], songs: [] },
+  mediaLibrary: { version: 1, items: [] },
   scenePromptCharacters: 1500,
   // How much of each wardrobe card's description, and of all a character wears, goes into the scene.
   looksCardCharacters: 300,
@@ -144,7 +145,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     model: '',
     maxTokens: 4096,
     fallbackToMain: false,
-    purposes: { analysis: true, discovery: true, generation: true, translation: true },
+    purposes: { analysis: true, discovery: true, generation: true, translation: true, cardgen: true },
   },
   // Semantic choice of headcanons (see embeddings.js); off = pick by mentions.
   embeddings: {

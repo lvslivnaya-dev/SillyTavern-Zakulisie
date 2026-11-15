@@ -53,6 +53,26 @@ export function startInputBar(doc, { lore = personaApi, shared = {}, openLore = 
         stash.remove();
       });
 
+      // Сколько сообщений чата скрыто от ИИ (is_system, как у /hide) и сколько он ещё читает; пересчитывается при каждом открытии меню
+      const counter = doc.createElement('div');
+      counter.id = 'pud-opt-hidden';
+      counter.className = 'pud-opt-info';
+      counter.innerHTML = '<i class="fa-lg fa-solid fa-eye-slash"></i><span></span>';
+      optionsContent.append(counter);
+      undo.push(() => counter.remove());
+      const refreshCounter = () => {
+        try {
+          const list = (view.SillyTavern?.getContext?.().chat ?? []).filter(Boolean);
+          const hidden = list.filter(message => message.is_system).length;
+          counter.querySelector('span').textContent = `Скрыто: ${hidden} · ИИ читает: ${list.length - hidden}`;
+          counter.title = 'Скрытые сообщения остаются на экране, но ИИ их не читает';
+          counter.hidden = !list.length;
+        } catch (error) { report('счётчик скрытых', error); }
+      };
+      refreshCounter();
+      optionsButton.addEventListener('click', refreshCounter);
+      undo.push(() => optionsButton.removeEventListener('click', refreshCounter));
+
       // «Лорбуки чата»: все лорбуки открытого чата, через кого подключены, и правка тут же
       const chatLore = doc.createElement('a');
       chatLore.id = CHAT_LORE_ID;
@@ -109,7 +129,9 @@ export function startInputBar(doc, { lore = personaApi, shared = {}, openLore = 
   if (!setup()) {
     const observer = new view.MutationObserver(() => { if (!done && setup()) observer.disconnect(); });
     observer.observe(doc.body, { childList: true, subtree: true });
-    undo.push(() => observer.disconnect());
+    // not forever: a watcher on the whole page costs on every change of it
+    const giveUp = view.setTimeout(() => observer.disconnect(), 60000);
+    undo.push(() => { view.clearTimeout(giveUp); observer.disconnect(); });
   }
   return () => { for (const fn of undo.reverse()) fn(); };
 }

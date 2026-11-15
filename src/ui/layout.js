@@ -23,6 +23,7 @@ export const NAV_GROUPS = Object.freeze([
     ['dice', 'Кубик', 'dice'],
     ['names', 'Имена', 'tag'],
     ['songs', 'Песни', 'music'],
+    ['player', 'Плеер', 'play'],
   ]) }),
   Object.freeze({ id: 'relations', title: 'Отношения', items: Object.freeze([
     ['overview', 'Обзор пар', 'heart'],
@@ -59,7 +60,7 @@ export const WINDOWS = Object.freeze([
   Object.freeze({ id: 'wardrobe', title: 'Гардероб', subtitle: 'Во что одеты герои и что у них с собой', iconClass: 'fa-shirt', tabs: Object.freeze(['wardrobe']) }),
   Object.freeze({ id: 'quests', title: 'Квесты', subtitle: 'Что герои ведут и что откладывают', iconClass: 'fa-flag', tabs: Object.freeze(['quests']) }),
   Object.freeze({ id: 'calendar', title: 'Календарь', subtitle: 'Время, даты и праздники истории', iconClass: 'fa-calendar-days', tabs: Object.freeze(['calendar']) }),
-  Object.freeze({ id: 'media', title: 'Медиа', subtitle: 'музыка, видео и другое', iconClass: 'fa-music', tabs: Object.freeze(['songs']) }),
+  Object.freeze({ id: 'media', title: 'Медиа', subtitle: 'музыка, видео и другое', iconClass: 'fa-music', tabs: Object.freeze(['player', 'songs']) }),
   // Everything else: the dice, names, weather and the machinery. The persona window is the former Pudrenitsa's one (Kulisy only embeds the card editor in it).
   Object.freeze({ id: 'settings', title: 'Настройки Закулисья', subtitle: 'Тонкая настройка', iconClass: 'fa-gear', tabs: Object.freeze(['weather', 'dice', 'names', 'setup', 'journal', 'lorebooks', 'leaks', 'settings']) }),
 ]);

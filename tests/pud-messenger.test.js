@@ -145,3 +145,36 @@ test('вкладка «Ассистенты»: выбрать ассистент
   undo();
   assert.equal(removed, 1);
 });
+
+test('мессенджер: размер окна меняется за уголок, запоминается и применяется при открытии; двойной щелчок сбрасывает', () => {
+  const dom = tavern();
+  const { document } = dom.window;
+  Object.defineProperty(dom.window, 'innerWidth', { value: 1400, configurable: true });
+  Object.defineProperty(dom.window, 'innerHeight', { value: 900, configurable: true });
+  const settings = { messengerSize: { width: 520, height: 640 } };
+  let saved = 0;
+  const undo = startMessenger(document, { bridge: fakeBridge(), shared: {}, settings, save: () => { saved += 1; } });
+  const win = document.getElementById(MESSENGER_ID);
+  document.getElementById(MESSENGER_BUTTON_ID).click();
+  assert.equal(win.style.width, '520px', 'прежний размер применяется при открытии');
+  assert.equal(win.style.height, '640px');
+  const grip = win.querySelector('[data-grip]');
+  assert.ok(grip);
+  win.getBoundingClientRect = () => ({ left: 100, top: 50, width: 520, height: 640, right: 620, bottom: 690 });
+  const fire = (type, x, y) => { const event = new dom.window.MouseEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true }); grip.dispatchEvent(event); };
+  fire('pointerdown', 620, 690);
+  fire('pointermove', 720, 790);
+  assert.equal(win.style.width, '620px');
+  assert.equal(win.style.height, '740px');
+  fire('pointermove', 5000, 5000);
+  assert.ok(Number.parseFloat(win.style.width) <= 1400 - 100 - 8, 'не больше экрана');
+  fire('pointerup', 5000, 5000);
+  assert.ok(settings.messengerSize.width >= 280 && saved >= 1, 'размер сохранён');
+  fire('pointerdown', 0, 0);
+  fire('pointermove', -900, -900);
+  assert.equal(win.style.width, '280px', 'не меньше минимума');
+  fire('pointerup', 0, 0);
+  grip.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
+  assert.equal('messengerSize' in settings, false, 'двойной щелчок сбрасывает размер');
+  undo();
+});

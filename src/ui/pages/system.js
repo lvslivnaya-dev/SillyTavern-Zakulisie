@@ -510,7 +510,7 @@ export function createSystemPages(ctx) {
       case 'loregate': body = sectionLoreGate(current); break;
       case 'prompt': body = sectionPrompt(); break;
       case 'models': body = [heading('Модели и API'), renderAuxApi(), renderVisionApi(), renderEmbeddings()]; break;
-      case 'data': body = [heading('Данные'), renderImageStorage(), renderHoraeImport(), renderDataTransfer()]; break;
+      case 'data': body = [heading('Данные'), renderMove(), renderCleaner(), renderImageStorage(), renderHoraeImport(), renderDataTransfer()]; break;
       case 'diagnostics': body = [heading('Диагностика'), renderDiagnostics()]; break;
       default: body = sectionModules(current);
     }
@@ -983,6 +983,136 @@ export function createSystemPages(ctx) {
       copy,
       button('Обновить', 'btn', refresh),
       button('Очистить', 'btn', () => { act('onClearDiagnostics', {}); refresh(); }),
+    ]));
+    return card;
+  }
+
+  /**
+   * Переезд со старых «Кулис» и «Пудреницы» и копия всех данных. У Закулисья те же ключи настроек и чата, поэтому на той же таверне
+   * данные подхватываются сами: нужно только выключить старые расширения. Файл копии нужен, чтобы перенести всё на другой компьютер.
+   */
+  let moveStatus = null;
+  let moveLoading = false;
+  function renderMove() {
+    const card = element('div', { className: 'card settings' }, [
+      element('h3', { text: 'Переезд со старых Кулис и Пудреницы' }),
+      element('p', { className: 'muted', style: { fontSize: '11px', marginTop: '0' }, text: 'Закулисье берёт данные Кулис и Пудреницы само: карточки, локации, гардероб, имена, песни, настройки и состояние каждого чата лежат под теми же ключами. На той же таверне достаточно выключить старые расширения и перезагрузить страницу. Чтобы перенести всё на другой компьютер или в другой профиль, скачайте копию здесь и загрузите её там.' }),
+    ]);
+    if (!moveStatus && !moveLoading) {
+      moveLoading = true;
+      Promise.resolve(facade.invoke('onMoveStatus', {}))
+        .then(result => { moveStatus = result ?? { old: [] }; })
+        .catch(() => { moveStatus = { old: [] }; })
+        .finally(() => { moveLoading = false; ctx.render(); });
+    }
+    const status = moveStatus;
+    if (status) {
+      const running = status.old.filter(item => item.enabled);
+      card.append(element('p', { className: 'muted', style: running.length ? { fontSize: '12px', color: 'var(--k-warn)', fontWeight: '600' } : { fontSize: '12px' }, text: running.length
+        ? `Рядом ещё включены: ${running.map(item => item.title).join(', ')}. Пока они работают, модель получает всё дважды.`
+        : status.old.length ? 'Старые расширения выключены. Можно удалить их из меню расширений, когда убедитесь, что всё на месте.' : 'Старых Кулис и Пудреницы рядом нет.' }));
+      if (running.length) card.append(element('div', { className: 'row' }, [button('Выключить старые Кулисы и Пудреницу', 'btn primary', async () => {
+        try {
+          const result = await facade.invoke('onMoveDisableOld', {});
+          moveStatus = null;
+          setStatus(result?.disabled?.length ? 'Выключено. Перезагрузите страницу (Ctrl+F5), чтобы старые совсем ушли.' : 'Выключать нечего');
+          ctx.render();
+        } catch (error) { setStatus(error?.message || 'Не удалось выключить', true); }
+      }, 'Выключает старые расширения так же, как переключатель в окне расширений')]));
+    }
+    const importInput = element('input', { type: 'file', accept: 'application/json,.json', hidden: true });
+    importInput.addEventListener('change', async () => {
+      const file = importInput.files?.[0];
+      if (!file) return;
+      try {
+        const result = await facade.invoke('onBackupImport', { text: await file.text() });
+        if (result) setStatus('Копия загружена, страница сейчас перезагрузится');
+      } catch (error) {
+        setStatus(error?.message || 'Не удалось загрузить копию', true);
+      } finally { importInput.value = ''; }
+    });
+    card.append(importInput, element('div', { className: 'row' }, [
+      button('Скачать копию всех данных', 'btn', () => {
+        try {
+          const { data, filename } = facade.invoke('onBackupExport', {});
+          downloadJson(data, filename);
+          setStatus('Копия скачана. Ключи доступа к моделям в неё не входят.');
+        } catch (error) { setStatus(error?.message || 'Не удалось сделать копию', true); }
+      }, 'Настройки и библиотеки в один файл, без ключей доступа'),
+      button('Загрузить копию из файла', 'btn', () => importInput.click(), 'Заменяет данные Закулисья на этом компьютере содержимым файла'),
+    ]));
+    return card;
+  }
+
+  /**
+   * «Чистилка настроек»: разделы settings.json от расширений, которых уже нет. Таверна при каждом сохранении гоняет весь файл,
+   * и мёртвые разделы её тормозят. Ничего не отмечено заранее; перед удалением скачивается файл, из которого всё можно вернуть.
+   */
+  let cleaner = null;
+  let cleanerLoading = false;
+  const cleanerPicked = new Set();
+  function renderCleaner() {
+    const card = element('div', { className: 'card settings', style: { marginTop: '14px' } }, [
+      element('h3', { text: 'Чистилка настроек' }),
+      element('p', { className: 'muted', style: { fontSize: '11px', marginTop: '0' }, text: 'Когда расширение удаляют, его настройки остаются в файле настроек таверны навсегда, и таверна гоняет их при каждом сохранении. Здесь видно, что занимает место. Отметьте то, что осталось от удалённых расширений, и уберите. Ничего не отмечено заранее; перед удалением скачивается файл, из которого настройки можно вернуть.' }),
+    ]);
+    if (!cleaner && !cleanerLoading) {
+      cleanerLoading = true;
+      Promise.resolve(facade.invoke('onCleanerScan', {}))
+        .then(result => { cleaner = result ?? { items: [], total: 0 }; })
+        .catch(error => { cleaner = { items: [], total: 0, error: error?.message || String(error) }; })
+        .finally(() => { cleanerLoading = false; ctx.render(); });
+    }
+    if (!cleaner) { card.append(element('p', { className: 'muted', text: 'Смотрю, что лежит в настройках…' })); return card; }
+    const sizeText = bytes => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1).replace('.', ',')} МБ` : bytes >= 1024 ? `${Math.round(bytes / 1024)} КБ` : `${bytes} Б`);
+    const rescan = () => { cleaner = null; cleanerPicked.clear(); ctx.render(); };
+    if (cleaner.error) card.append(element('p', { className: 'muted', style: { color: 'var(--k-warn)' }, text: cleaner.error }));
+    const items = cleaner.items.filter(item => item.bytes >= 512);
+    const shown = items.slice(0, 60);
+    card.append(element('p', { className: 'muted', style: { fontSize: '12px' }, text: `Все расширения вместе занимают в настройках ${sizeText(cleaner.total)}. Показано то, что весит от 0,5 КБ${items.length > shown.length ? ` (первые ${shown.length} по размеру)` : ''}.${cleaner.unknown ? ' Список установленных расширений недоступен: пометок «папки нет» не будет.' : ''}` }));
+    const rows = shown.map(item => {
+      const box = element('input', { type: 'checkbox', checked: cleanerPicked.has(item.key), 'aria-label': `Убрать ${item.key}`, style: { width: '18px', flex: '0 0 18px', margin: '0' } });
+      box.addEventListener('change', () => { if (box.checked) cleanerPicked.add(item.key); else cleanerPicked.delete(item.key); ctx.render(); });
+      return element('label', { style: { display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 8px', border: '1px solid var(--k-line)', borderRadius: '8px', marginBottom: '6px', cursor: 'pointer' } }, [
+        box,
+        element('span', {}, [
+          element('strong', { text: item.key }),
+          element('span', { className: 'muted', style: { fontSize: '11px' }, text: ` · ${sizeText(item.bytes)}${cleaner.unknown ? '' : item.hasFolder ? ' · папка расширения есть' : ' · папки расширения нет'}` }),
+        ]),
+      ]);
+    });
+    if (rows.length) card.append(element('div', {}, rows));
+    const orphans = shown.filter(item => !item.hasFolder).map(item => item.key);
+    const picked = shown.filter(item => cleanerPicked.has(item.key));
+    const freed = picked.reduce((sum, item) => sum + item.bytes, 0);
+    const restoreInput = element('input', { type: 'file', accept: 'application/json,.json', hidden: true });
+    restoreInput.addEventListener('change', async () => {
+      const file = restoreInput.files?.[0];
+      if (!file) return;
+      try {
+        const result = await facade.invoke('onCleanerRestore', { text: await file.text() });
+        setStatus(result.restored.length ? `Возвращено: ${result.restored.join(', ')}${result.skipped.length ? `. Уже были и не тронуты: ${result.skipped.join(', ')}` : ''}. Перезагрузите страницу.` : 'Возвращать нечего: всё из файла уже на месте');
+        rescan();
+      } catch (error) { setStatus(error?.message || 'Не удалось вернуть настройки', true); }
+      finally { restoreInput.value = ''; }
+    });
+    card.append(restoreInput, element('div', { className: 'row' }, [
+      ...(cleaner.unknown ? [] : [button('Отметить те, у которых папки нет', 'btn small', () => { cleanerPicked.clear(); for (const key of orphans) cleanerPicked.add(key); ctx.render(); }, 'Только подсказка: имя раздела и имя папки расширения могут не совпадать, проверьте список глазами')]),
+      button('Отметить все', 'btn small', () => { for (const item of shown) cleanerPicked.add(item.key); ctx.render(); }, 'Отметит всё, что показано в списке'),
+      button('Снять все', 'btn small', () => { cleanerPicked.clear(); ctx.render(); }),
+      Object.assign(button(picked.length ? `Убрать выбранное: ${picked.length} (${sizeText(freed)})` : 'Убрать выбранное', 'btn primary small', async () => {
+        try {
+          const keys = picked.map(item => item.key);
+          const { data, filename } = facade.invoke('onCleanerPrepare', { keys });
+          downloadJson(data, filename);
+          const result = await facade.invoke('onCleanerRemove', { keys });
+          if (result === false) { setStatus('Отменено. Файл-копия уже скачан, он не нужен.'); return; }
+          setStatus(`Убрано разделов: ${result.removed.length}, освобождено ${result.size}. Копия скачана.`);
+          rescan();
+        } catch (error) { setStatus(error?.message || 'Не удалось убрать', true); }
+      }, 'Сначала скачивается файл-копия, потом разделы убираются'), { disabled: !picked.length }),
+      button('Вернуть из файла', 'btn small', () => restoreInput.click(), 'Вернёт разделы из файла, который скачала чистилка; то, что уже есть, не затрёт'),
+      button('Обновить список', 'btn small', rescan),
     ]));
     return card;
   }

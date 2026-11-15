@@ -1,5 +1,7 @@
 /** Настройки Пудреницы в extension_settings.pudrenitsa: значения по умолчанию, миграция, ключ набора кнопок пресета. */
 
+import { defaultPeekSettings } from './peek.js';
+
 export const SETTINGS_KEY = 'pudrenitsa';
 export const SETTINGS_VERSION = 1;
 
@@ -50,6 +52,15 @@ export function defaultSettings() {
     icons: { pud: {}, studio: {} },
     // Позиции и размеры окон: имя окна → { left, top, width, height }
     windows: {},
+    // «Слива выглядывает»: маскот-напоминалка, см. core/peek.js
+    peek: defaultPeekSettings(),
+    // Повторы (core/repeats.js), нити (core/threads.js), настроение (core/moods.js, mood-theme.js), звуки погоды, график отношений
+    repeats: { send: true, lastMessages: 60, minMessages: 3, bans: [], ignored: [] },
+    threads: { send: true, max: 5 },
+    moods: { strips: false, send: true, auto: true, autoEvery: 2, icons: {}, custom: [] },
+    moodTheme: { enabled: false, strength: 100 },
+    weatherSound: { enabled: false, volume: 35 },
+    relGraph: { lineId: '', scaleIds: ['affection', 'trust'], pinned: [], positions: {} },
   };
 }
 

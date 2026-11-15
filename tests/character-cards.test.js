@@ -66,7 +66,14 @@ test('the sections of a card are the ones the lorebook prompter knows', () => {
 });
 
 test('a new card starts with the questionnaire sections, empty; the library keeps cards in folders only', () => {
-  assert.throws(() => addLibraryCharacter(emptyLibrary(), { name: 'Майки' }), /Сначала выберите папку/);
+  // no folder open («во всей библиотеке»): the card goes to the folder «Без папки», made once
+  const loose = addLibraryCharacter(emptyLibrary(), { name: 'Майки' });
+  const home = loose.library.folders.find(folder => folder.id === loose.character.folderId);
+  assert.equal(home.name, 'Без папки');
+  assert.ok(!home.persona && !home.parentId);
+  const again = addLibraryCharacter(loose.library, { name: 'Дракен' });
+  assert.equal(again.library.folders.length, 1, 'the folder is not made twice');
+  assert.equal(again.character.folderId, home.id);
   const { library, folder, card } = shelf();
   assert.deepEqual(templateSections().map(section => section.title), ['Basic Info', 'Visual', 'Voice', 'Public Info', 'Skills', 'Relationships', 'Biography', 'Character and psychology', 'NSFW module']);
   assert.equal(card.sections.length, 9);
@@ -509,7 +516,6 @@ test('callbacks: a card is made, switched on by folder, follows the library, goe
     loadBook: async () => book(),
   });
   const folder = callbacks.onLibraryAddFolder({ name: 'Бонтен' });
-  assert.throws(() => callbacks.onLibraryAddCharacter({ name: 'Майки' }), /Сначала выберите папку/);
   const mikey = callbacks.onLibraryAddCharacter({ folderId: folder.id, name: 'Майки' });
   callbacks.onLibraryAddCharacter({ folderId: folder.id, name: 'Иоко' });
   assert.equal(mikey.sections.length, 9);
@@ -572,21 +578,11 @@ test('«Мир → Карточки»: a gallery with a switch per card; the she
   const flush = () => new Promise(resolve => setTimeout(resolve, 0));
   try {
     assert.match(shadow.querySelector('main').textContent, /В запросе сейчас: разделов 3/);
-    // By hand: a form with a name and a folder, which works with no folder open (the open one is offered).
+    // By hand: with no folder open the card is made at once, empty, with no form (the library puts it into «Без папки»).
     byText('+ Карточка').click();
-    const nameField = shadow.querySelector('input[aria-label="Имя персонажа"]');
-    assert.ok(nameField, 'the form of a new card');
-    nameField.value = 'Ран';
-    nameField.dispatchEvent(new dom.window.Event('input'));
-    shadow.querySelector('select[aria-label="Папка новой карточки"]').value = '__new';
-    shadow.querySelector('select[aria-label="Папка новой карточки"]').dispatchEvent(new dom.window.Event('change'));
-    const folderField = shadow.querySelector('input[aria-label="Название новой папки"]');
-    folderField.value = 'Бонтен';
-    folderField.dispatchEvent(new dom.window.Event('input'));
-    byText('Создать и открыть').click();
     await flush();
-    assert.deepEqual(calls.slice(-2).map(([name]) => name), ['onLibraryAddFolder', 'onLibraryAddCharacter']);
-    assert.equal(calls.at(-1)[1].name, 'Ран');
+    assert.equal(shadow.querySelector('.ku-newcard'), null, 'no form of a new card');
+    assert.deepEqual(calls.at(-1), ['onLibraryAddCharacter', { folderId: '', name: '' }]);
     shadow.querySelector('.ku-folder').click();
     const tile = shadow.querySelector('.ku-place-card');
     assert.match(tile.textContent, /Майки[\s\S]*7 из 9 разделов заполнено/);
@@ -1047,4 +1043,13 @@ test('nicknames from a note come in without English ones and signs; typed by han
   assert.deepEqual(imported.library.characters[0].aliases, ['Такеоми', 'Акаши', 'Бог войны']);
   const typed = addLibraryCharacter(tr.library, { folderId: tr.folder.id, name: 'Майки', aliases: ['Mikey', 'Манджиро...'] }).character;
   assert.deepEqual(typed.aliases, ['Mikey', 'Манджиро'], 'typed by hand: the English one is yours, the dots go');
+});
+
+test('выключенный раздел карточки остаётся в ней, но не уходит модели', async () => {
+  const { makeSection, filledSections, normalizeSections } = await import('../src/core/character-cards.js');
+  const card = { sections: normalizeSections([makeSection({ kind: 'voice', text: 'говорит тихо', off: true }), makeSection({ kind: 'visual', text: 'рыжая' })]) };
+  assert.equal(card.sections[0].off, true, 'флаг сохраняется');
+  assert.deepEqual(filledSections(card).map(section => section.kind), ['visual']);
+  delete card.sections[0].off;
+  assert.equal(filledSections(card).length, 2);
 });

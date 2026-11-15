@@ -15,7 +15,9 @@ function shelf() {
 }
 
 test('a place cannot exist in the library without a folder', () => {
-  assert.throws(() => addLocation(emptyLibrary(), { name: 'Бар' }), /Сначала выберите папку/);
+  const loose = addLocation(emptyLibrary(), { name: 'Бар' });
+  assert.equal(loose.library.folders.find(folder => folder.id === loose.location.folderId).name, 'Без папки');
+  assert.equal(addLocation(loose.library, { name: 'Склад' }).library.folders.length, 1);
   assert.throws(() => addLocation(emptyLibrary(), { name: 'Бар', folderId: 'nope' }), /Сначала выберите папку/);
   const { library, bar } = shelf();
   assert.throws(() => updateLocation(library, bar.id, { folderId: '' }), /Сначала выберите папку/);

@@ -165,7 +165,8 @@ test('places: no place without a folder; inside a folder a place is switched on 
     assert.deepEqual(errors, []);
     assert.equal(buttonByText(shadow, '+ Локация').disabled, false, 'the button always works');
     buttonByText(shadow, '+ Локация').click();
-    assert.ok(shadow.querySelector('.ku-newcard'), 'with no folder open the button asks for a name and a folder');
+    await flush();
+    assert.equal(shadow.querySelector('.ku-newcard'), null, 'no form: the place is made at once');
     shadow.querySelector('.ku-folder').click();
     assert.equal(buttonByText(shadow, '+ Локация').disabled, false);
     const card = shadow.querySelector('.ku-place-card');

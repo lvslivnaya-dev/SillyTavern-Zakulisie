@@ -13,6 +13,7 @@ export const AUX_PURPOSES = Object.freeze({
   discovery: 'Поиск персонажей',
   generation: 'Генерация факторов, целей и хедканонов',
   translation: 'Перевод карточек на английский',
+  cardgen: 'Написание разделов карточек',
 });
 
 export function auxEnabledFor(settings, purpose) {

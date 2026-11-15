@@ -1,9 +1,11 @@
 import { button, characterId, characterName, downloadJson, element } from '../helpers.js';
 import { icon } from '../icons.js';
-import { CARD_SECTION_KINDS, CARD_WHEN, KEY_REGEX_MODES, tidyAlias, WARDROBE_CATEGORIES, WARDROBE_GENDERS, WARDROBE_SHELVES, cardLabel, folderPath, personalPieces, folderWithDescendants, keyFromRegex, keyToRegex, listExport, selectFromExport, makeSection, normalizeAlias, searchLibraryCharacters, searchLibraryItems, searchLocations, splitKeys } from '../../core/index.js';
+import { AU_FIELDS, CARD_SECTION_KINDS, CARD_WHEN, auIsEmpty, auPrompt, auSummary, folderAu, normalizeAu, sameAu, KEY_REGEX_MODES, tidyAlias, WARDROBE_CATEGORIES, WARDROBE_GENDERS, WARDROBE_SHELVES, cardLabel, folderPath, personalPieces, folderWithDescendants, keyFromRegex, keyToRegex, listExport, selectFromExport, makeSection, normalizeAlias, searchLibraryCharacters, searchLibraryItems, searchLocations, splitKeys } from '../../core/index.js';
 import { GATE_SECTIONS, GATE_WHEN } from '../../integration/lore-gate.js';
 import { fileToDataUrl, imageUrl } from '../../integration/wardrobe-images.js';
 import { renderNameWords } from '../name-words.js';
+import { freshGeneration, renderGeneratePane, renderSectionBar, runGeneration } from '../card-generate-pane.js';
+import { NO_FOLDER_NAME } from '../../core/location-library.js';
 import { recordsFromDraft, recordsToDraft, renderPersonaRecords } from '../persona-records.js';
 import { access, canRememberFolder, pickFolder, readNotes, recallFolder, rememberFolder } from '../notes-folder.js';
 
@@ -116,6 +118,42 @@ export function createLibraryPages(ctx) {
     render();
   }
 
+  /** Pictures dropped into the folder «Библиотека» on the computer become places and things (onLibraryImportInbox). */
+  let inboxBusy = false;
+  function importInbox() {
+    if (inboxBusy) return;
+    inboxBusy = true;
+    render();
+    attempt(async () => {
+      await invoke('onWardrobeInboxRefresh', {});
+      return act('onLibraryImportInbox', {
+        describe: describeOnUpload,
+        onProgress: (done, total, stage) => setStatus(stage === 'describe' ? `Описываю картинки из папки: ${done} из ${total}…` : `Делаю записи из папки: ${done} из ${total}…`),
+      }, 'library-import-inbox');
+    }, result => {
+      if (!result) return '';
+      const notes = [`новых записей: ${result.added}`];
+      if (result.described) notes.push(`описано: ${result.described}`);
+      if (result.failed) notes.push(`не вышло: ${result.failed}`);
+      if (result.undescribed) notes.push(`не описалось: ${result.undescribed} (опишите в записи)`);
+      if (result.skipped.length) notes.push(`пропущено (непонятная папка): ${result.skipped.length} — ${result.skipped[0].problem}`);
+      return `Из папки: ${notes.join(', ')}`;
+    }).finally(() => { inboxBusy = false; render(); });
+  }
+
+  function renderInboxBanner() {
+    const inbox = snapshot().libraryInbox;
+    if (!inbox?.available || !inbox.count || cards()) return null;
+    const take = button(inboxBusy ? 'Забираю…' : 'Забрать', 'btn primary small', importInbox, 'Сделать записи из картинок папки «Библиотека»');
+    take.disabled = inboxBusy;
+    return element('div', { className: 'ku-row ku-inbox' }, [
+      icon('download'),
+      element('span', { text: `В папке «Библиотека» новых картинок: ${inbox.count}. Тип и папку записи получат по тому, где лежит картинка («Места» или «Вещи», дальше папки библиотеки); имя возьмётся из названия файла. Сами картинки останутся на месте.${describeOnUpload ? ' Модель сразу их опишет.' : ''}` }),
+      element('span', { className: 'ku-push' }),
+      take,
+    ]);
+  }
+
   // ---- The page ------------------------------------------------------------------
 
   /** The library of `shelf` ('places' | 'items'). */
@@ -138,14 +176,17 @@ export function createLibraryPages(ctx) {
     const needFolder = s.folderId ? '' : 'Сначала откройте папку слева';
     // A card is made on a small form: its name and its folder (an existing one or a new one), so it works with no folder open too.
     // Locations and things: with a folder open the entry appears there at once; with none open the same small form asks for a name and a folder.
-    const addEmpty = cards() || !s.folderId
-      ? button(KIND().add, 'btn primary small', () => { s.creating = !s.creating; render(); }, cards() ? 'Ввести карточку вручную: имя, папка, потом разделы' : 'Ввести вручную: название и папка')
-      : button(KIND().add, 'btn small', () => attempt(async () => {
-        const entry = things()
-          ? await invoke('onLibraryAddItem', { folderId: s.folderId, name: KIND().placeholder })
-          : await invoke('onLibraryAddLocation', { folderId: s.folderId, name: KIND().placeholder });
-        if (entry) { s.openId = entry.id; s.draft = null; }
-      }), 'Без картинки: описание можно написать самой');
+    // «+»: the entry opens EMPTY at once, in every shelf. With a folder open it goes there; in «Вся библиотека» it goes to the folder
+    // «Без папки» (made by the library once, when it is first needed); a persona's card needs no folder at all.
+    const addEmpty = button(KIND().add, 'btn primary small', () => attempt(async () => {
+      const fields = { folderId: s.folderId };
+      const entry = cards()
+        ? await invoke('onLibraryAddCharacter', { ...fields, name: '', ...(personaMode ? { persona: true } : {}) })
+        : things()
+          ? await invoke('onLibraryAddItem', { ...fields, name: KIND().placeholder })
+          : await invoke('onLibraryAddLocation', { ...fields, name: KIND().placeholder });
+      if (entry) { s.openId = entry.id; s.draft = null; s.selSection = ''; s.creating = false; s.focusedId = ''; }
+    }), s.folderId || personaMode ? 'Пустая запись откроется сразу: впишите имя и заполните' : 'Пустая запись откроется сразу и ляжет в папку «Без папки» (откройте папку слева, чтобы создавать в ней)');
     const importMenu = element('select', { 'aria-label': 'Импорт' }, [
       element('option', { value: '', text: 'Импорт…' }),
       ...(personaMode ? [] : [element('option', { value: 'lorebook', text: cards() ? 'Из лорбука (анкеты «[ Имя ] - Раздел»)' : 'Из лорбука' })]),
@@ -166,6 +207,7 @@ export function createLibraryPages(ctx) {
       search,
       ...(personaMode ? [] : [filePicker('+ Картинки', { className: 'btn primary small', disabled: !s.folderId, title: needFolder || (cards() ? 'Каждая картинка — новая карточка с этим портретом' : ''), onFiles: addPictures })]),
       addEmpty,
+      ...(!cards() && !personaMode && snapshot().libraryInbox?.available ? [button(inboxBusy ? 'Забираю…' : 'Из папки', 'btn small', importInbox, 'Забрать картинки, которые вы положили в папку «Библиотека» на компьютере (Места / Вещи → папки библиотеки)')] : []),
       button(s.selecting ? 'Готово' : 'Выбрать', s.selecting ? 'btn primary small' : 'btn small', () => { s.selecting = !s.selecting; s.picked.clear(); render(); }, `Отметить несколько: ${cards() ? 'карточки' : things() ? 'вещи' : 'локации'}, чтобы перенести их в другую папку, перевести на английский или удалить`),
       ...(personaMode ? [button('Из таверны', 'btn small', () => attempt(() => act('onPersonaTavernImport', {}, 'persona-tavern-import'), result => `Персон из таверны: добавлено ${result?.added ?? 0}, уже были ${result?.skipped ?? 0}`), 'Сделать карточки из персон таверны: имя, картинка и описание (в Public Info). Описание в самой таверне остаётся, его можно очистить на странице «Персона»')] : []),
       importMenu,
@@ -174,6 +216,8 @@ export function createLibraryPages(ctx) {
     ]));
     if (s.creating && (cards() || !s.folderId)) view.append(renderNewCard());
     if (s.importMode) view.append(renderImport());
+    const inboxBanner = personaMode ? null : renderInboxBanner();
+    if (inboxBanner) view.append(inboxBanner);
 
     const body = element('div', { className: 'ku-wbody' });
     body.append(renderFolders(), renderGallery());
@@ -318,6 +362,7 @@ export function createLibraryPages(ctx) {
         button('Включить все', 'btn small', () => attempt(() => act('onLibraryLink', { folderId: s.folderId, on: true, kind }, 'library-link'), result => `Включено: ${result ?? 0}`)),
         button('Выключить все', 'btn small', () => attempt(() => act('onLibraryLink', { folderId: s.folderId, on: false, kind }, 'library-link'))),
       ]));
+      if (!personaMode && s.auOpen === s.folderId) gallery.append(renderFolderAu(lib.folders.find(item => item.id === s.folderId)));
     } else {
       list = entriesOf();
       gallery.append(element('div', { className: 'ku-row ku-lhead' }, [
@@ -351,6 +396,57 @@ export function createLibraryPages(ctx) {
     return gallery;
   }
 
+  /**
+   * The AU of the open folder: four short notes (see core/au-notes.js). Loose notes can be pasted and sorted into the fields by the model.
+   * What is written here is read whenever a card is written into this folder or any folder inside it.
+   */
+  function renderFolderAu(folder) {
+    if (s.auDraft?.folderId !== folder.id) s.auDraft = { folderId: folder.id, fields: normalizeAu(folder.au), raw: '', extra: [], busy: false };
+    const d = s.auDraft;
+    const parent = folder.parentId ? folderAu(library(), folder.parentId) : null;
+    const panel = element('div', { className: 'ku-aupanel' }, [
+      element('strong', { text: `АУ папки «${folder.name}»` }),
+      element('p', { className: 'ku-hint', text: 'По желанию. Это читается, когда карточку пишут в эту папку или в любую папку внутри неё. Подпапка добавляет своё к АУ внешней, так что можно держать папку фандома и в ней папки отдельных АУ. Если карточку переносят сюда из папки с другим АУ, предложат перестроить её.' }),
+      ...(parent && !auIsEmpty(parent) ? [element('p', { className: 'ku-hint', text: `Уже действует от внешних папок: ${auSummary(parent, 300)}` })] : []),
+    ]);
+    const raw = element('textarea', { rows: 4, value: d.raw, placeholder: 'Напишите как удобно, хоть сплошным текстом: «современное АУ, все учатся в одном универе, банд нет, Эмму жив, Майки не знает Дракена»', 'aria-label': 'АУ своими словами', disabled: d.busy });
+    raw.addEventListener('input', () => { d.raw = raw.value; });
+    const sort = button(d.busy ? 'Разбираю…' : 'Разобрать по полям', 'btn small', async () => {
+      if (!d.raw.trim()) { setStatus('Сначала напишите АУ своими словами.', true); return; }
+      d.busy = true; render();
+      try {
+        const done = await invoke('onFolderAuParse', { text: d.raw, folderName: folder.name });
+        // what is already in a field stays; the new text is added after it
+        for (const field of AU_FIELDS) {
+          const add = done.au[field.id];
+          if (!add) continue;
+          d.fields[field.id] = d.fields[field.id] && !d.fields[field.id].includes(add) ? `${d.fields[field.id]}
+${add}` : (d.fields[field.id] || add);
+        }
+        d.extra = done.extra ?? [];
+        d.raw = '';
+        setStatus('Разобрано по полям: проверьте и нажмите «Сохранить АУ».');
+      } catch (error) { setStatus(error?.message || String(error), true); }
+      finally { d.busy = false; render(); }
+    }, 'Модель разложит ваш текст по четырём полям ниже; ничего не сохраняется, пока вы не нажмёте «Сохранить АУ»');
+    panel.append(
+      element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', text: 'Своими словами' }), raw]),
+      element('div', { className: 'ku-row' }, [sort]),
+      ...(d.extra.length ? [element('p', { className: 'ku-hint', text: `Про отдельных героев (впишите в их карточки, а не сюда): ${d.extra.join('; ')}` })] : []),
+    );
+    for (const field of AU_FIELDS) {
+      const area = element('textarea', { rows: 2, value: d.fields[field.id], placeholder: field.placeholder, 'aria-label': field.label, disabled: d.busy });
+      area.addEventListener('input', () => { d.fields[field.id] = area.value; });
+      panel.append(element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', text: field.label }), area, element('span', { className: 'ku-hint', text: field.hint })]));
+    }
+    panel.append(element('div', { className: 'ku-row' }, [
+      Object.assign(button('Сохранить АУ', 'btn primary small', () => attempt(async () => { await invoke('onLibraryUpdateFolder', { folderId: folder.id, changes: { au: d.fields } }); s.auOpen = ''; s.auDraft = null; }, 'АУ папки сохранено')), { disabled: d.busy }),
+      button('Закрыть', 'btn small', () => { s.auOpen = ''; s.auDraft = null; render(); }),
+      button('Очистить АУ', 'btn small', () => { d.fields = normalizeAu({}); render(); }, 'Очистить поля (сохранится, когда нажмёте «Сохранить АУ»)'),
+    ]));
+    return panel;
+  }
+
   /** The open folder's name with rename / delete. */
   function renderFolderTitle() {
     const folder = library().folders.find(item => item.id === s.folderId);
@@ -368,6 +464,7 @@ export function createLibraryPages(ctx) {
     return [
       element('h3', { className: 'ku-ltitle', text: pathText(folder.id) }),
       iconButton('edit', 'Переименовать папку', () => { s.renaming = true; render(); }),
+      ...(personaMode ? [] : [button(folder.au ? 'АУ папки ✓' : 'АУ папки', `btn small${s.auOpen === folder.id ? ' primary' : ''}`, () => { s.auOpen = s.auOpen === folder.id ? '' : folder.id; s.auDraft = null; render(); }, 'Изменения АУ: читаются, когда карточку пишут в эту папку; если карточку переносят сюда из другой папки, предложат перестроить её под это АУ')]),
       iconButton('close', 'Удалить папку', async () => {
         const removed = await attempt(() => invoke('onLibraryRemoveFolder', { folderId: s.folderId }));
         if (removed) { s.folderId = folder.parentId ?? ''; render(); }
@@ -636,6 +733,8 @@ export function createLibraryPages(ctx) {
   const NAMES = '__names';
   /** And the records about a persona (persona cards only). */
   const RECORDS = '__records';
+  /** And the page that writes sections with the model. */
+  const GENERATE = '__generate';
 
   /**
    * The portrait with its buttons on the picture itself, seen on hover: the whole picture picks a new one, a cross in the corner takes it off
@@ -664,11 +763,49 @@ export function createLibraryPages(ctx) {
    * The sheet of a card, laid out as: who (a strip on top), the sections (a list on the left), one section at a time (on the right).
    * What was typed lives in `s.draft` until «Сохранить» or the card is closed, so any redraw keeps it.
    */
+  /** The state of «Написать карточку» of the open card (one per open card, thrown away when it closes). */
+  const hasPictureOf = entry => Boolean(entry.image || (entry.persona && entry.avatar));
+  const genState = (entry, draft) => (s.gen ??= freshGeneration(draft, { persona: Boolean(entry.persona), hasPicture: hasPictureOf(entry) }));
+  /** The fandom a folder names: the top folder of its path, unless that is «Без папки» (then the user types it). */
+  const fandomOf = folderId => { const root = folderPath(library(), folderId)[0]; return root && !root.hidden && root.name !== NO_FOLDER_NAME ? root.name : ''; };
+  const folderChoices = (draft) => {
+    const list = foldersOf().map(item => ({ id: item.id, text: item.hidden ? NO_FOLDER_NAME : pathText(item.id) }));
+    if (draft.folderId && !list.some(item => item.id === draft.folderId)) list.push({ id: draft.folderId, text: pathText(draft.folderId) || NO_FOLDER_NAME });
+    return list;
+  };
+  /** Rebuild the filled sections for the AU of the folder the card is in now (after a move, or on demand). */
+  const rebuildForAu = (entry, draft, gen) => {
+    const moved = draft.folderId !== entry.folderId;
+    const jobs = draft.sections.filter(section => section.text.trim() && !['nsfw', 'private'].includes(section.kind)).map(section => ({ section, fresh: false }));
+    if (!jobs.length) { setStatus('Нечего перестраивать: заполненных разделов нет.', true); return Promise.resolve(); }
+    gen.dismissedFor = draft.folderId;
+    return runGeneration(gen, {
+      ...genDeps(entry, draft, gen), jobs, wishes: () => '', picture: { on: false },
+      adapt: { from: moved ? auPrompt(folderAu(library(), entry.folderId)) : 'a previous setting that is not known', to: auPrompt(folderAu(library(), draft.folderId)) },
+    });
+  };
+  const genDeps = (entry, draft, gen) => ({
+    gen, draft, entryId: entry.id,
+    card: { name: draft.name, aliases: draft.aliases.split(',').map(value => value.trim()).filter(Boolean), gender: draft.gender },
+    redraw: render, setStatus,
+    generate: request => invoke('onCardGenerate', request),
+    describe: request => invoke('onCardDescribe', request),
+    where: { fandom: () => fandomOf(draft.folderId), folderAu: () => folderAu(library(), draft.folderId) },
+    folders: () => folderChoices(draft),
+    setFolder: id => { draft.folderId = id; render(); },
+    newFolder: async name => {
+      const made = await invoke('onLibraryAddFolder', { name, parentId: '' });
+      if (made?.id) draft.folderId = made.id;
+    },
+    moved: draft.folderId !== entry.folderId,
+    rebuild: () => rebuildForAu(entry, draft, gen),
+  });
+
   function renderCardEditor(entry) {
     const lib = library();
     const emb = embed;
     const layer = element('div', { className: `ku-wlayer${emb ? ' ku-embedded' : ''}` });
-    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; };
+    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; s.gen = null; };
     const close = () => { s.openId = ''; forget(); render(); };
     if (!emb) layer.addEventListener('click', event => { if (event.target === layer) close(); });
     const dialog = element('section', { className: 'ku-wcard ku-ccard', role: emb ? 'region' : 'dialog', ...(emb ? {} : { 'aria-modal': 'true' }), 'aria-label': entry.name });
@@ -689,7 +826,7 @@ export function createLibraryPages(ctx) {
       s.selSection = '';
     }
     const draft = s.draft.fields;
-    if (s.selSection !== CLOSET && s.selSection !== NAMES && s.selSection !== RECORDS && !draft.sections.some(section => section.id === s.selSection)) s.selSection = draft.sections[0]?.id ?? '';
+    if (s.selSection !== CLOSET && s.selSection !== NAMES && s.selSection !== RECORDS && s.selSection !== GENERATE && !draft.sections.some(section => section.id === s.selSection)) s.selSection = draft.sections[0]?.id ?? '';
     const status = promptStatus(entry.id);
 
     // ---- The strip on top: portrait, name, other names, folder
@@ -704,10 +841,32 @@ export function createLibraryPages(ctx) {
     const genderPick = element('select', { 'aria-label': 'Пол', className: 'ku-cgender', title: 'Пол героя: модель получает его вместе с остальным о персонаже, а тексты «пришёл / пришла» пишутся в нужном роде.' },
       [['', 'Пол: не указан'], ['female', 'Женский'], ['male', 'Мужской']].map(([value, text]) => element('option', { value, text, selected: value === draft.gender })));
     genderPick.addEventListener('change', () => { draft.gender = genderPick.value; });
+    const folderPick = entry.persona || emb ? null : element('select', { 'aria-label': 'Папка карточки', className: 'ku-cfolder', title: 'Папка, в которой лежит карточка (фандом или АУ). Перенести её можно прямо здесь, после «Сохранить» она переедет.' },
+      folderChoices(draft).map(item => element('option', { value: item.id, text: item.text, selected: item.id === draft.folderId })));
+    if (folderPick) folderPick.addEventListener('change', () => { draft.folderId = folderPick.value; render(); });
+    // A card moved into a folder with another AU: offer to rebuild it for that AU.
+    const movedGen = folderPick ? genState(entry, draft) : null;
+    const auChanged = folderPick && draft.folderId !== entry.folderId && !sameAu(folderAu(lib, entry.folderId), folderAu(lib, draft.folderId))
+      && draft.sections.some(section => section.text.trim() && !['nsfw', 'private'].includes(section.kind)) && movedGen.dismissedFor !== draft.folderId;
+    const auNotice = auChanged ? element('div', { className: 'ku-aunotice', role: 'status' }, [
+      element('p', { text: `В папке «${pathText(draft.folderId) || NO_FOLDER_NAME}» ${auIsEmpty(folderAu(lib, draft.folderId)) ? 'нет АУ (чистый канон)' : `другое АУ: ${auSummary(folderAu(lib, draft.folderId), 200)}`}. Перестроить карточку под него? Заполненные разделы перепишутся (NSFW и скрытый характер не трогаются), прежние тексты можно вернуть.` }),
+      element('div', { className: 'ku-row' }, [
+        Object.assign(button('Перестроить под АУ', 'btn primary small', () => rebuildForAu(entry, draft, movedGen)), { disabled: movedGen.running }),
+        button('Оставить как есть', 'btn small', () => { movedGen.dismissedFor = draft.folderId; render(); }),
+      ]),
+    ]) : null;
+    // A sign that the model is writing: seen on every page of the card, with the step it is on.
+    const writing = s.gen?.running ? element('div', { className: 'ku-genbadge', role: 'status' }, [
+      element('span', { className: 'ku-genspin', 'aria-hidden': 'true' }),
+      element('span', { text: s.gen.progress || 'Модель пишет карточку…' }),
+    ]) : null;
+    if (writing) s.gen.badgeEl = writing.lastChild;
     const top = element('header', { className: 'ku-ctop' }, [
       element('div', { className: 'ku-cport-box' }, [portraitFrame(entry, portrait)]),
       element('div', { className: 'ku-ctop-main' }, [
-        element('div', { className: 'ku-cfields' }, [nameInput, aliasInput, genderPick]),
+        element('div', { className: 'ku-cfields' }, [nameInput, aliasInput, genderPick, ...(folderPick ? [folderPick] : [])]),
+        ...(writing ? [writing] : []),
+        ...(auNotice ? [auNotice] : []),
         element('p', { className: 'ku-hint', text: 'Имя и «другие имена» — как героя зовут в постах: имя, фамилия, клички, прозвища. Через запятую. Английские варианты и знаки сами убираются. Склонения каждого слова пишутся слева в разделе «Имена»: оттуда модель берёт написание и падежи, а карточка узнаёт героя в постах. В одной папке имена не повторяются, в разных можно.' }),
       ]),
       element('div', { className: 'ku-ctop-tools' }, emb ? (emb.onGear ? [Object.assign(element('button', { type: 'button', className: 'ku-ib ku-gear', 'aria-label': 'Настройки персоны в таверне', title: 'Настройки персоны в таверне' }, [icon('gear')]), { onclick: emb.onGear })] : []) : [
@@ -745,11 +904,11 @@ export function createLibraryPages(ctx) {
         const length = section.text.trim().length;
         const total = s.showSizes ? draft.sections.reduce((sum, item) => sum + item.text.trim().length, 0) : 0;
         const share = total ? Math.round(length / total * 100) : 0;
-        const row = element('button', { type: 'button', className: `ku-cnav${section.id === s.selSection ? ' on' : ''}`, 'aria-current': section.id === s.selSection ? 'true' : null,
+        const row = element('button', { type: 'button', className: `ku-cnav${section.id === s.selSection ? ' on' : ''}${section.off ? ' off' : ''}`, title: section.off ? 'Раздел выключен: рассказчик его не получает' : null, 'aria-current': section.id === s.selSection ? 'true' : null,
           ...(s.showSizes && length ? { style: { backgroundImage: `linear-gradient(to right, color-mix(in srgb, var(--k-accent) 28%, transparent) ${share}%, transparent ${share}%)` } } : {}) }, [
           element('span', { className: `ku-cdot${length ? '' : ' empty'}`, 'aria-hidden': 'true' }),
           element('span', { className: 'ku-cnav-title', text: section.title || CARD_SECTION_KINDS[section.kind] }),
-          element('span', { className: 'ku-hint', text: length ? (s.showSizes ? `${length} · ${share}%` : String(length)) : 'пусто' }),
+          element('span', { className: 'ku-hint', text: section.off ? 'выкл' : length ? (s.showSizes ? `${length} · ${share}%` : String(length)) : 'пусто' }),
         ]);
         row.addEventListener('click', () => { s.selSection = section.id; render(); });
         return row;
@@ -778,6 +937,7 @@ export function createLibraryPages(ctx) {
         }),
       ] : []),
       element('span', { className: 'ku-push' }),
+      Object.assign(button(s.gen?.running ? '✨ Пишется…' : 'Написать разделы', 'btn small', () => { s.selSection = GENERATE; render(); }, 'Модель напишет выбранные разделы по-русски по вашим пожеланиям: для героя из фандома и для оригинального'), { className: `btn small${s.selSection === GENERATE ? ' primary' : ''}` }),
       button('+ Свой раздел', 'btn small', () => {
         const created = makeSection({ kind: 'other', title: 'Новый раздел', text: '' });
         draft.sections.push(created);
@@ -794,6 +954,10 @@ export function createLibraryPages(ctx) {
     const position = draft.sections.findIndex(section => section.id === s.selSection);
     const pane = s.selSection === RECORDS
       ? renderPersonaRecords({ records: draft.records, au: snapshot().personaCards?.au ?? [], cards: (library().characters ?? []).filter(card => !card.persona).map(card => ({ id: card.id, name: card.name })).sort((left, right) => left.name.localeCompare(right.name, 'ru-RU')), redraw: render, selected: recordIndex, add: addRecord, remove: removeRecord })
+      : s.selSection === GENERATE ? (() => {
+        const gen = genState(entry, draft);
+        return renderGeneratePane({ ...genDeps(entry, draft, gen), hasPicture: hasPictureOf(entry), modelField });
+      })()
       : s.selSection === NAMES
       ? renderNameWords({ name: draft.name, aliases: draft.aliases.split(','), words: draft.words, redraw: render, setStatus, fill: payload => invoke('onCardNamesFill', payload) })
       : s.selSection === CLOSET ? renderClosetPane(entry, draft.closet) : position < 0
@@ -862,9 +1026,10 @@ export function createLibraryPages(ctx) {
       const sending = snap.personaCards?.enabled !== false;
       const other = snap.chatPersonaName || snap.personaBoundName;
       return [
-        element('span', { className: `ku-chip ku-pstate${mine ? ' told' : ''}`,
+        // в таверне (embed) состояние «надета» уже написано вверху окна, второй раз внизу не нужно
+        ...(embed ? [] : [element('span', { className: `ku-chip ku-pstate${mine ? ' told' : ''}`,
           title: mine ? 'Эта персона надета в таверне: её карточка и есть карточка твоей персоны в этом чате.' : `Сейчас в этом чате ты${other ? ` — ${other}` : ' другая персона'}. Чтобы эта карточка заработала, нажми «Надеть» вверху окна.`,
-          text: mine ? 'Это ты в этом чате' : 'Не надета сейчас' }),
+          text: mine ? 'Это ты в этом чате' : 'Не надета сейчас' })]),
         element('label', { className: 'ku-inline ku-wear', title: 'Отправлять ли карточку персоны рассказчику (общий выключатель для всех персон)' }, [
           toggle(sending, 'Отправлять карточку персоны модели', on => attempt(() => act('onPersonaCardsEnabled', { enabled: on }, 'persona-card-enabled'), on ? 'Карточка персоны отправляется' : 'Карточка персоны не отправляется')),
           element('strong', { className: 'ku-small', text: sending ? 'Отправляется модели' : 'Не отправляется модели' }),
@@ -937,15 +1102,15 @@ export function createLibraryPages(ctx) {
     queueMicrotask(restore);
     setTimeout(restore, 0);
     layer.append(dialog);
-    if (personaMode && lookState(entry).open) layer.append(renderLook(entry, draft));
+    if (lookState(entry).open) layer.append(renderLook(entry, draft));
     if (s.focusedId !== entry.id) {
       s.focusedId = entry.id;
-      setTimeout(() => { if (dialog.isConnected && !dialog.contains(ctx.shadow?.activeElement)) nameInput.focus({ preventScroll: true }); }, 0);
+      setTimeout(() => { if (dialog.isConnected && !dialog.contains(ctx.shadow?.activeElement)) { nameInput.focus({ preventScroll: true }); if (/^Новый персонаж( \d+)?$/.test(nameInput.value)) nameInput.select(); } }, 0);
     }
     return layer;
   }
 
-  /** «Чем описывать»: the model for the pictures of personas. Empty = the one of the wardrobe pictures. */
+  /** «Чем описывать»: the model for the pictures of cards and personas. Empty = the one of the wardrobe pictures. */
   function modelField(st) {
     const snap = snapshot();
     const choices = snap.visionChoices ?? {};
@@ -991,7 +1156,7 @@ export function createLibraryPages(ctx) {
     const describe = async () => {
       st.busy = true; st.failed = false; st.note = 'Смотрю на картинку… Если модель думает, это может занять несколько минут.'; render();
       try {
-        const done = await invoke('onPersonaDescribe', { cardId: entry.id, picture: st.custom, wishes: st.wishes, voice: st.voice, voiceWishes: st.voiceWishes });
+        const done = await invoke('onCardDescribe', { cardId: entry.id, picture: st.custom, wishes: st.wishes, voice: st.voice, voiceWishes: st.voiceWishes });
         st.looks = done.looks; st.voiceText = done.voice || '';
         st.note = 'Готово. Поправьте текст и впишите его в карточку.';
       } catch (error) { st.failed = true; st.note = error?.message || String(error); } finally { st.busy = false; render(); }
@@ -1022,7 +1187,7 @@ export function createLibraryPages(ctx) {
       ]),
       modelField(st),
       field('Пожелания к внешности', 'wishes', 3, 'рост 156, веснушки, клыки; подчеркни глаза'),
-      element('label', { className: 'ku-inline ku-plook-opt' }, [voice, element('span', {}, [element('strong', { text: 'Добавить голос' }), element('span', { className: 'ku-hint', text: 'как он звучит в разные моменты, без фирменных словечек и примеров реплик' })])]),
+      element('label', { className: 'ku-inline ku-plook-opt' }, [voice, element('span', {}, [element('strong', { text: 'Добавить голос' }), element('span', { className: 'ku-hint', text: 'только звучание (тембр, высота, темп) и как оно может действовать на окружающих; без словечек, фраз и придуманных привычек' })])]),
       ...(st.voice ? [field('Пожелания к голосу', 'voiceWishes', 2, 'низкий, с хрипотцой; когда злится, становится тише')] : []),
       element('div', { className: 'ku-row' }, [Object.assign(button(st.busy ? 'Описываю…' : 'Описать', 'btn primary small', describe), { disabled: st.busy || !src }), ...(st.note ? [element('span', { className: `ku-small${st.failed ? ' ku-danger' : ' muted'}`, text: st.note })] : [])]),
       element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', text: 'Внешность по-русски (можно править)' }), lookText]),
@@ -1143,7 +1308,7 @@ export function createLibraryPages(ctx) {
     const draft = s.draft.fields;
     const own = status?.get(section.id);
     const kindLabel = key => (key === 'other' ? 'Прочее (по ключевым словам)' : CARD_SECTION_KINDS[key]);
-    const chip = !own ? null : own.action === 'force'
+    const chip = section.off ? element('span', { className: 'ku-chip', text: 'выключен: не уходит рассказчику' }) : !own ? null : own.action === 'force'
       ? element('span', { className: 'ku-chip told', text: 'сейчас уходит в запрос' })
       : element('span', { className: 'ku-chip', title: own.action === 'trim' ? 'Блок «Карточки» упёрся в лимит объёма' : '', text: own.action === 'trim' ? 'не влезло в лимит объёма' : `сейчас придержан${own.why ? `: ${own.why}` : ''}` });
     const trimmedNote = own?.action === 'trim'
@@ -1242,8 +1407,11 @@ export function createLibraryPages(ctx) {
     if (auButtonHere) tools.append(auButtonHere);
     return element('div', { className: 'ku-cpane' }, [
       element('div', { className: 'ku-ctitlerow' }, [element('h3', { className: 'ku-ctitle', text: section.title || CARD_SECTION_KINDS[section.kind] }), ...(chip ? [chip] : []),
-        ...(personaMode && entry && (section.kind === 'visual' || section.kind === 'voice') ? [element('span', { className: 'ku-push' }), button('Описать по картинке…', 'btn small', () => { lookState(entry).open = true; render(); }, 'Модель опишет по картинке то, что не меняется: лицо, глаза, волосы, рост, сложение (и голос, если отметить)')] : [])]),
+        ...(section.kind === 'private' ? [] : [element('label', { className: 'ku-inline ku-secoff', title: 'Выключенный раздел остаётся в карточке, но рассказчик его не получает' }, [toggle(!section.off, `Раздел «${section.title || CARD_SECTION_KINDS[section.kind]}» включён`, on => { if (on) delete section.off; else section.off = true; render(); }), element('span', { className: 'ku-small', text: section.off ? 'Выключен' : 'Включён' })])]),
+        ...(section.kind === 'voice' ? [button('Заготовка досье голоса', 'btn small', () => { const template = ['Манера речи: темп, громкость, длина фраз, любимые обороты', 'Фирменные фразы: ', 'Ласковые обращения: ', 'Грубости и ругательства: ', 'Как говорит, когда злится: ', 'Как говорит, когда нежничает: ', 'Как говорит, когда смущается: ', 'Привычки в речи (слова-паразиты, междометия, смех): '].join('\n'); section.text = section.text?.trim() ? `${section.text.trim()}\n\n${template}` : template; render(); }, 'Вставляет в текст раздела готовые строки для голоса героя (манера, фирменные фразы, обращения, грубости, речь в гневе, нежности и смущении). Остаётся заполнить.')] : []),
+        ...(entry && hasPictureOf(entry) && (section.kind === 'visual' || section.kind === 'voice') ? [element('span', { className: 'ku-push' }), button('Описать по картинке…', 'btn small', () => { lookState(entry).open = true; render(); }, 'Модель опишет по картинке то, что не меняется: лицо, глаза, волосы, рост, сложение (и голос, если отметить)')] : [])]),
       ...(trimmedNote ? [trimmedNote] : []),
+      ...(entry && section.kind !== 'private' ? [renderSectionBar({ ...genDeps(entry, draft, genState(entry, draft)), section, openPage: () => { s.selSection = GENERATE; render(); } })] : []),
       element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', htmlFor: 'ku-card-text', text: 'Текст раздела' }), text, count]),
       ...(personaMode ? [] : [whenBox]),
       ...(personaMode ? [element('p', { className: 'ku-hint', text: 'Разделы персоны уходят модели всегда: ни правил отправки, ни ключевых слов тут не нужно.' })] : []),
@@ -1600,7 +1768,7 @@ export const LIBRARY_STYLE = `
 .ku-wlayer.ku-embedded{position:static;inset:auto;z-index:auto;display:block;padding:0;background:none;backdrop-filter:none;height:100%}
 .ku-wlayer.ku-embedded .ku-ccard{width:100%;height:100%;max-height:none;border:0;border-radius:0;box-shadow:none;background:transparent}
 /* the same editor in a narrow window: a tighter head, a slimmer list (the long hints are tooltips everywhere, see below) */
-.ku-embedded .ku-ctop{gap:12px;padding:10px 14px;align-items:center}
+.ku-embedded .ku-ctop{gap:12px;padding:10px 14px;align-items:flex-start}
 .ku-embedded .ku-cport-wrap,.ku-embedded .ku-cport{width:96px;height:120px}
 .ku-embedded .ku-cfields input{min-height:38px}
 .ku-embedded .ku-cstrip{padding:6px 14px;gap:6px 10px}
@@ -1625,6 +1793,8 @@ export const LIBRARY_STYLE = `
 .ku-cfields .ku-cgender{flex:0 1 150px}
 .ku-cname{font-size:18px;font-weight:700}
 .ku-ctop-tools{display:flex;gap:6px;align-items:center}
+.ku-ctop-tools .ku-gear{width:38px;height:38px;min-height:38px;border:1px solid var(--k-line);border-radius:12px;background:var(--k-inset);color:var(--k-muted)}
+.ku-ctop-tools .ku-gear:hover{color:var(--k-text);border-color:var(--k-accent-line);background:var(--k-inset)}
 .ku-cbodybox{flex:1 1 auto;min-height:0;display:flex}
 .ku-cnavbox{flex:0 0 260px;box-sizing:border-box;padding:16px 14px;border-right:1px solid var(--k-line);display:flex;flex-direction:column;gap:4px;overflow:auto}
 .ku-cnavhead{padding:0 8px 8px}
@@ -1637,7 +1807,8 @@ export const LIBRARY_STYLE = `
 .ku-crec{height:auto;min-height:40px;align-items:flex-start;padding:8px 12px;line-height:1.3}
 .ku-crec .ku-crec-title{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word}
 .ku-crec .ku-crec-title.empty{color:var(--k-muted);font-style:italic}
-.ku-crec.off{opacity:.55}
+.ku-crec.off,.ku-cnav.off{opacity:.55}
+.ku-secoff{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
 .ku-crecwrap{position:relative;flex:0 0 auto}
 .ku-crecwrap .ku-crec{padding-right:34px}
 .ku-crec-x{position:absolute;top:6px;right:6px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:50%;background:transparent;color:var(--k-muted);cursor:pointer;opacity:0;transition:opacity .15s ease,color .15s ease,background-color .15s ease}
@@ -1653,6 +1824,9 @@ export const LIBRARY_STYLE = `
 .ku-wsel select{width:100%}
 .ku-closet-row{display:flex;align-items:center;gap:10px;padding:6px 8px;border:1px solid var(--k-line);border-radius:8px;margin-bottom:6px}
 .ku-closet-row.on{border-color:var(--k-accent)}
+.ku-genbadge{display:flex;align-items:center;gap:8px;align-self:flex-start;max-width:100%;padding:5px 12px;border:1px solid var(--k-accent);border-radius:999px;background:var(--k-accent-soft);color:var(--k-accent);font-size:12px;font-weight:600}
+.ku-genbadge span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ku-genspin{flex:0 0 12px;width:12px;height:12px;border:2px solid var(--k-accent);border-right-color:transparent;border-radius:50%;animation:rs-spin 0.9s linear infinite}
 .ku-closet-name{flex:1 1 auto;min-width:0}
 .ku-closet-own{position:absolute;top:6px;left:6px;padding:1px 7px;border-radius:20px;background:var(--k-accent);color:var(--k-bg);font-size:10.5px}
 .ku-closet-tile{position:relative}
@@ -1683,6 +1857,16 @@ export const LIBRARY_STYLE = `
 .ku-cnavbox .btn{margin-top:6px;min-height:40px}
 .ku-cpane{flex:1 1 auto;min-width:0;box-sizing:border-box;padding:22px 28px;display:flex;flex-direction:column;gap:22px;overflow:auto}
 .ku-ctitlerow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.ku-closet-row input[type=checkbox],.ku-copt input[type=checkbox],.ku-fact-text input[type=checkbox],.ku-wlayer input[type=checkbox]:not(.ku-switch):not(.set-switch):not(.ku-pickbox),.ku-lib input[type=checkbox]:not(.ku-switch):not(.set-switch):not(.ku-pickbox){width:18px;height:18px;min-height:0;padding:0;margin:0;flex:0 0 auto;accent-color:var(--k-accent)}
+.ku-cfolder{max-width:100%}
+.ku-aunotice{display:grid;gap:6px;margin-top:8px;padding:8px 10px;border:1px solid var(--k-warn);border-radius:10px;background:var(--k-warn-soft)}
+.ku-aunotice p{margin:0;font-size:12.5px}
+.ku-aupanel{display:grid;gap:10px;margin:8px 0 14px;padding:12px 14px;border:1px solid var(--k-line);border-radius:12px}
+.ku-aupanel textarea{min-height:60px}
+.ku-gbar{display:grid;gap:4px;margin:6px 0 10px;padding:8px 10px;border:1px solid var(--k-line);border-radius:10px}
+.ku-gbar .ku-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ku-gbar .ku-row input[type=text]{flex:1 1 220px;min-width:0}
+.ku-gbar p{margin:0}
 .ku-plook{flex-direction:column;align-items:stretch;justify-content:flex-start;width:min(680px,100%);gap:12px;padding:18px 20px;overflow:auto;text-align:left;background:var(--k-bg)}
 .ku-plook>*{flex:0 0 auto;min-width:0}
 .ku-plook .ku-row{align-items:center;flex-wrap:wrap;gap:8px}
@@ -1722,7 +1906,7 @@ export const LIBRARY_STYLE = `
 .ku-secau{gap:6px}.ku-secau.set,.ku-secau.on{border-color:var(--k-accent);color:var(--k-accent)}
 .ku-secaupop{position:static;width:auto;max-width:420px;margin:0 0 10px;box-shadow:none}
 .ku-cfoot-tools{display:flex;gap:8px;align-items:stretch}
-.ku-cfoot-tool,.ku-cfoot-del{flex:0 0 auto;width:48px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--k-line);border-radius:12px;background:var(--k-inset);color:var(--k-muted);cursor:pointer;transition:color .15s ease,border-color .15s ease,background-color .15s ease}
+.ku-cfoot-tool,.ku-cfoot-del{flex:0 0 auto;width:auto;height:auto;aspect-ratio:1/1;align-self:stretch;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--k-line);border-radius:12px;background:var(--k-inset);color:var(--k-muted);cursor:pointer;transition:color .15s ease,border-color .15s ease,background-color .15s ease}
 .ku-cfoot-tool .ku-ico,.ku-cfoot-del .ku-ico{width:21px;height:21px}
 .ku-cfoot-tool:hover{color:var(--k-text);border-color:var(--k-accent-line)}
 .ku-cfoot-tool.on{color:var(--k-accent);border-color:var(--k-accent);background:var(--k-accent-soft)}

@@ -81,6 +81,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
   const search = win.body.querySelector('.pud-ptools input[type="search"]');
   const sortSelect = win.body.querySelector('.pud-psort select');
   const importInput = win.body.querySelector('.pud-pimport');
+  list.classList.add('pud-plist-compact');
   for (const el of [left, list, views, folders, bulk]) skipSameHtml(el);
 
   const descWin = createWindow(doc, { id: 'persona-desc', title: 'Описание персоны', icon: 'doc', width: 640, height: 560, store: settings.windows, save });
@@ -180,8 +181,7 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
     }
     if (left.firstElementChild !== tavBar) { left.innerHTML = ''; left.append(tavBar, tavPane, cardHost); shown = ''; }
     const current = api.current() === persona.avatar;
-    tavBar.innerHTML = `${current ? '<span class="pud-ptag pud-ptag-now">сейчас ты</span>' : `<button type="button" class="pud-pwear" data-act="wear">${icon('persona')}<span>Надеть</span></button>`}
-      <button type="button" class="pud-pdescbtn pud-tavtoggle${state.paneOpen ? ' on' : ''}" data-act="pane" aria-expanded="${state.paneOpen}" title="Привязки к персонажам, картинка, папка, лорбук персоны: настройки самой таверны">${icon('gear')}<span>Связи и настройки</span></button>`;
+    tavBar.innerHTML = `${current ? '<span class="pud-ptag pud-ptag-now">сейчас ты</span>' : `<button type="button" class="pud-pwear" data-act="wear">${icon('persona')}<span>Надеть</span></button>`}`;
     tavPane.hidden = !state.paneOpen;
     tavPane.innerHTML = state.paneOpen ? tavernHtml(persona, { card: true }) : '';
     const key = `${persona.avatar}|${cardId}`;
@@ -293,21 +293,20 @@ export function startPersonas(doc, { context, settings, save, api = personaApi, 
     const fav = new Set(settings.favorites.personas);
     const archived = new Set(settings.archive.personas);
     list.classList.toggle('pud-selmode', state.select);
+    const folderNameOf = avatar => settings.folders.personas.find(folder => folder.id === folderOf(settings, avatar))?.name ?? 'без папки';
     list.innerHTML = shown.length ? shown.map(persona => {
       const links = persona.connections.map(link => link.name ?? nameOf(link)).filter(Boolean);
-      return `<article class="pud-prow${persona.avatar === state.picked ? ' on' : ''}${state.checked.has(persona.avatar) ? ' checked' : ''}" role="listitem" tabindex="0" data-avatar="${escapeHtml(persona.avatar)}">
+      return `<article class="pud-prow${persona.avatar === state.picked ? ' on' : ''}${state.checked.has(persona.avatar) ? ' checked' : ''}" role="listitem" tabindex="0" data-avatar="${escapeHtml(persona.avatar)}" title="${escapeHtml([persona.name, persona.title, links.length ? `привязана: ${links.join(', ')}` : ''].filter(Boolean).join(' · '))}">
         <span class="pud-ck" aria-hidden="true"></span>
-        <img class="pud-prow-ph" src="${escapeHtml(rowPicture(persona.avatar))}" alt="" loading="lazy" decoding="async">
-        <div class="pud-prow-info">
-          <b class="pud-prow-name">${escapeHtml(persona.name)}</b>
-          ${persona.title ? `<span class="pud-prow-title">${escapeHtml(persona.title)}</span>` : ''}
-          <span class="pud-prow-sub">${icon('book')}<span>${persona.lorebook ? escapeHtml(persona.lorebook) : 'без лорбука'}</span></span>
-          <span class="pud-prow-sub">${icon('link')}<span>${links.length ? escapeHtml(links.join(', ')) : 'ни к кому'}</span></span>
-        </div>
-        <div class="pud-prow-marks">
-          ${persona.avatar === current ? '<span class="pud-ptag pud-ptag-now">ты</span>' : ''}
-          ${fav.has(persona.avatar) ? `<span class="pud-prow-star" title="Избранная">${icon('star')}</span>` : ''}
-        </div>
+        <span class="pud-prow-frame">
+          <img class="pud-prow-ph" src="${escapeHtml(rowPicture(persona.avatar))}" alt="" loading="lazy" decoding="async">
+          <span class="pud-prow-marks">
+            ${persona.avatar === current ? '<span class="pud-ptag pud-ptag-now">ты</span>' : ''}
+            ${fav.has(persona.avatar) ? `<span class="pud-prow-star" title="Избранная">${icon('star')}</span>` : ''}
+          </span>
+        </span>
+        <b class="pud-prow-name" title="${escapeHtml(persona.name)}">${escapeHtml(persona.name)}</b>
+        <span class="pud-prow-sub" title="Папка">${icon('folder')}<span>${escapeHtml(folderNameOf(persona.avatar))}</span></span>
         <div class="pud-prow-acts">
           <button type="button" class="pud-crow-btn" data-act="edit" title="Редактировать описание">${icon('pencil')}</button>
           <button type="button" class="pud-crow-btn" data-act="copy" title="Копия">${icon('copy')}</button>

@@ -95,6 +95,10 @@ export function startAssistants(doc, { bridge, hub }) {
           <option value="n" ${data.settings.userGender === 'n' ? 'selected' : ''}>Не указывать (без рода)</option>
         </select>
       </div>
+      <label class="pud-card pud-asst-api pud-opt">
+        <span><b>Смотреть журнал ошибок</b><small>Когда вы пишете ассистенту о поломке (ошибка, не работает, API, подключение, оборвался пост), он читает то, что показала бы консоль F12: ошибки, сбои запросов, остановки генерации, и объясняет их простыми словами. Ключи и секреты вырезаются, журнал живёт в памяти страницы.</small></span>
+        <input type="checkbox" data-field="console" ${data.settings.seeConsole !== false ? 'checked' : ''}>
+      </label>
       <div class="pud-card pud-asst-api">
         <div>
           <b>Через какой API отвечает</b>
@@ -148,7 +152,8 @@ export function startAssistants(doc, { bridge, hub }) {
       if (id) run('свой ассистент', () => api.saveSettings({ editCustom: { id, [own]: target.value } }));
       return;
     }
-    if (target.dataset?.field === 'gender') run('пол', () => api.saveSettings({ userGender: target.value }));
+    if (target.dataset?.field === 'console') run('журнал ошибок', () => api.saveSettings({ seeConsole: target.checked }));
+    else if (target.dataset?.field === 'gender') run('пол', () => api.saveSettings({ userGender: target.value }));
     else if (target.dataset?.field === 'profile') run('API', () => api.saveSettings({ profileId: target.value }));
     else if (target.dataset?.field === 'prompt') run('правила', () => api.saveSettings({ prompt: target.value }));
   });

@@ -15,6 +15,8 @@ let controlId = 0;
 
 export function element(tag, options = {}, children = []) {
   const node = document.createElement(tag);
+  // Pictures are decoded off the main thread and loaded when they come near the screen: a gallery of big files used to freeze the page.
+  if (tag === 'img') { node.decoding = 'async'; node.loading = 'lazy'; }
   for (const [key, value] of Object.entries(options)) {
     if (value == null) continue;
     if (key === 'className') node.className = value;

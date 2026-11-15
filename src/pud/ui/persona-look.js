@@ -42,7 +42,7 @@ export function startPersonaLook(doc, { context, settings, save, api = personaAp
       </div>
       <label class="pud-field"><span>Чем описывать</span><select class="text_pole" data-field="model" aria-label="Модель для описания"></select><small class="pud-tech" data-model-note></small></label>
       <label class="pud-field"><span>Пожелания к внешности</span><textarea class="text_pole" data-field="wishes" rows="3" placeholder="рост 156, веснушки, клыки; про одежду не писать; подчеркни глаза"></textarea></label>
-      <label class="pud-opt"><span>Добавить голос<small>как он звучит в разные моменты, без фирменных словечек и примеров реплик</small></span><input type="checkbox" data-field="voice"></label>
+      <label class="pud-opt"><span>Добавить голос<small>только звучание (тембр, высота, темп) и как оно может действовать на окружающих; без словечек, фраз и придуманных привычек</small></span><input type="checkbox" data-field="voice"></label>
       <label class="pud-field" data-voice-wishes hidden><span>Пожелания к голосу</span><textarea class="text_pole" data-field="voiceWishes" rows="2" placeholder="низкий, с хрипотцой; когда злится, становится тише"></textarea></label>
       <div class="pud-look-row"><button type="button" class="pud-padd" data-act="describe">Описать</button><span class="pud-tech" data-status></span></div>
       <section class="pud-look-part">

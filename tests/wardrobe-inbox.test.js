@@ -108,7 +108,9 @@ test('paths: the folder gives shelf, gender and section; a file name becomes the
   assert.equal(treeDirFor({ shelf: 'persona', gender: 'unisex', category: 'nails' }), 'Персона/Унисекс/Маникюр');
   assert.equal(treeDirOf(`${TREE}Персона/Унисекс/Маникюр/a.png`), 'Персона/Унисекс/Маникюр');
   assert.equal(isTreeImage(`/${TREE}x.png`), true);
-  assert.equal(new Set(inboxDirectories()).size, 2 * 3 * 16);
+  assert.equal(new Set(inboxDirectories()).size, 2 * 3 * 16 + 1, 'the tree plus «Вещи» for the library things');
+  assert.ok(inboxDirectories().includes('Вещи'));
+  assert.deepEqual(newTreeFiles([{ path: 'Вещи/a.jpg', public: 'x/Вещи/a.jpg' }], []), [], 'things are not wardrobe cards');
   assert.deepEqual(newTreeFiles([{ public: `${TREE}a.png` }, { public: `${TREE}b.png` }], [{ image: `/${TREE}a.png` }]).map(file => file.public), [`${TREE}b.png`]);
 });
 
@@ -192,4 +194,29 @@ test('moving to the folder: wardrobe pictures go into their section folders, nam
   assert.deepEqual(copies[0], ['/user/images/kulisy-wardrobe/wear_1.jpg', { dir: 'Персона/Женское/Платья', name: 'Белое платье' }]);
   assert.equal(copies[1][1], null, 'library pictures are not part of the wardrobe tree');
   assert.equal(cards.cards[0].image, `${TREE}Персона/Женское/Платья/Белое платье.jpg`);
+});
+
+test('import: pictures of «Вещи» become things of the library (folder «Вещи», a folder per subfolder), and are never wardrobe cards', async () => {
+  const { createLibraryCallbacks, createLocationLibraryStore } = await import('../src/integration/location-library-actions.js');
+  const { newThingFiles } = await import('../src/integration/wardrobe-inbox.js');
+  const files = [treeFile('Вещи/старый телефон.jpg'), treeFile('Вещи/Оружие/IMG_5.png'), treeFile('Персона/Женское/Верх/a.png')];
+  assert.equal(newTreeFiles(files, []).length, 1, 'only the clothes are cards');
+  const lib = { settings: { locationLibrary: undefined } };
+  const library = createLocationLibraryStore({ settings: () => lib.settings, save() {} });
+  const libraryCallbacks = createLibraryCallbacks({ library, getState: () => ({ entities: {}, world: {} }), commitOperations: async () => {}, confirm: async () => true, log() {} });
+  const wardrobeSettings = { wardrobe: { version: 1, cards: [], looks: [] } };
+  const store = createWardrobeStore({ settings: () => wardrobeSettings, save() {} });
+  const callbacks = createWardrobeCallbacks({
+    store, getState: () => ({ entities: {}, world: {} }), commitOperations: async () => {}, confirm: async () => true,
+    inbox: { list: async () => files },
+    things: { pending: list => newThingFiles(list, library.get().items), import: (list, options) => libraryCallbacks.onLibraryImportThings({ files: list, ...options }) },
+  });
+  const result = await callbacks.onWardrobeImportInbox({});
+  assert.equal(result.added, 1); assert.equal(result.things, 2);
+  const { items, folders } = library.get();
+  assert.deepEqual(items.map(item => item.name).sort(), ['Новая вещь', 'старый телефон']);
+  assert.equal(items.find(item => item.name === 'старый телефон').image, `${TREE}Вещи/старый телефон.jpg`, 'the picture stays where it lies');
+  const root = folders.find(folder => folder.name === 'Вещи');
+  assert.ok(root && folders.some(folder => folder.name === 'Оружие' && folder.parentId === root.id));
+  assert.equal(newThingFiles(files, items).length, 0, 'taken things are not new any more');
 });

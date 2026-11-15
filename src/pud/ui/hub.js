@@ -19,8 +19,12 @@ export const HUB_TABS = [
   { id: 'bg', title: 'Фон', icon: 'image', drawer: 'backgrounds-button', content: 'Backgrounds' },
 ];
 
-/** Вкладки блока «Визуал»: он стоит в самом конце списка, перед ссылками (порядок — как здесь). */
-export const VISUAL_TABS = ['bg', 'palette', 'icons'];
+/** Блок «Родные настройки»: то, что есть в самой таверне (порядок — как здесь). */
+export const NATIVE_TABS = ['ai', 'api', 'format', 'user', 'wand'];
+/** Блок «Сливовые приблуды»: всё своё от Закулисья. Неизвестные вкладки попадают сюда же, в конец. */
+export const SLIVA_TABS = ['chips', 'assistants', 'prompts', 'peek', 'repeats', 'threads', 'mood', 'sounds', 'relgraph'];
+/** Блок «Визуал»: идёт после своих приблуд и перед ссылками. */
+export const VISUAL_TABS = ['bg', 'palette', 'moodtheme', 'icons'];
 
 export const HUB_LINKS = [
   { title: 'Документация', icon: 'doc', href: 'https://docs.sillytavern.app/' },
@@ -85,15 +89,11 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
     pane.className = 'pud-pane';
     pane.dataset.pane = id;
     pane.hidden = true;
-    // вкладки других модулей встают перед своей вкладкой «Пудреница» и ссылками
-    const ownTab = tabs.querySelector('[data-tab="pud"]');
-    if (ownTab) {
-      ownTab.before(tab);
-      panes.querySelector('[data-pane="pud"]').before(pane);
-    } else {
-      tabs.append(tab);
-      panes.append(pane);
-    }
+    // вкладки других модулей встают перед ссылками (порядок по блокам расставляет regroup), панели — перед панелью «Закулисья»
+    const linksNode = tabs.querySelector('.pud-links');
+    tabs.insertBefore(tab, linksNode);
+    const ownPane = panes.querySelector('[data-pane="pud"]');
+    if (ownPane) panes.insertBefore(pane, ownPane); else panes.append(pane);
     return pane;
   };
 
@@ -135,6 +135,7 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
 
   // своя вкладка
   const own = addTab('pud', 'Закулисье', 'theater');
+  const ownTab = tabs.querySelector('[data-tab="pud"]');
   own.innerHTML = `
     <h3>Закулисье</h3>
     <p class="pud-hint">Тема, окна и всё остальное для таверны. Цвета меняются во вкладке «Палитра», кнопки пресета во вкладке «Кнопки пресета», встроенные промпты нарратора во вкладке «Промпты».</p>
@@ -159,30 +160,54 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
   own.querySelector('.pud-native-personas').addEventListener('click', () => { hub.close(); shared.personas?.openNative?.(); });
   own.querySelector('.pud-native-chars').addEventListener('click', () => { hub.close(); shared.characters?.openNative?.(); });
 
-  // ссылки
+  // ссылки: три маленькие кнопки-значки в одну строку, название — при наведении
   const links = doc.createElement('div');
   links.className = 'pud-links';
-  links.innerHTML = `<div class="pud-tabs-sub">Ссылки</div>${HUB_LINKS.map(link => `<a href="${link.href}" target="_blank" rel="noopener noreferrer">${icon(link.icon)}<span>${link.title}</span></a>`).join('')}
-    ${EQ_SPOT}`;
+  links.innerHTML = HUB_LINKS.map(link => `<a href="${link.href}" target="_blank" rel="noopener noreferrer" title="${link.title}" aria-label="${link.title}">${icon(link.icon)}</a>`).join('');
   tabs.append(links);
+  const eqSpot = doc.createElement('div');
+  eqSpot.innerHTML = EQ_SPOT;
+  const eq = eqSpot.firstElementChild;
+  if (eq) tabs.append(eq);
+  // «Закулисье» — кнопкой-значком в ряду ссылок, а не отдельной строкой списка
+  if (ownTab) {
+    ownTab.title = 'Закулисье';
+    ownTab.setAttribute('aria-label', 'Закулисье');
+    links.append(ownTab);
+  }
 
   select(tabs.querySelector('[data-tab]')?.dataset.tab ?? 'pud');
   doc.body.classList.add(HUB_CLASS);
   undo.push(() => doc.body.classList.remove(HUB_CLASS));
 
-  // «Визуал» (фон, палитра, иконки) — отдельный блок в конце, перед ссылками. Заголовка нет, если таких вкладок нет.
-  const regroup = () => {
-    let head = tabs.querySelector('[data-visual-head]');
-    const found = VISUAL_TABS.map(id => tabs.querySelector(`[data-tab="${id}"]`)).filter(Boolean);
-    if (!found.length) { head?.remove(); return; }
-    if (!head) {
-      head = doc.createElement('div');
+  // Порядок слева: «Родные настройки» → «Сливовые приблуды» → «Визуал» → ссылки → «Закулисье» (самым последним).
+  // Заголовка нет, если во вкладках блока пусто.
+  const heads = new Map();
+  const headFor = (key, title) => {
+    if (!heads.has(key)) {
+      const head = doc.createElement('div');
       head.className = 'pud-tabs-sub';
-      head.dataset.visualHead = '1';
-      head.textContent = 'Визуал';
+      head.dataset.groupHead = key;
+      head.textContent = title;
+      heads.set(key, head);
     }
-    tabs.insertBefore(head, links);
-    for (const tab of found) tabs.insertBefore(tab, links);
+    return heads.get(key);
+  };
+  const regroup = () => {
+    const all = [...tabs.children].filter(el => el.dataset?.tab);
+    const byId = id => all.find(tab => tab.dataset.tab === id);
+    const known = new Set([...NATIVE_TABS, ...VISUAL_TABS, ...SLIVA_TABS, 'pud']);
+    const groups = [
+      ['native', 'Родные настройки', NATIVE_TABS.map(byId).filter(Boolean)],
+      ['sliva', 'Сливовые приблуды', [...SLIVA_TABS.map(byId).filter(Boolean), ...all.filter(tab => !known.has(tab.dataset.tab))]],
+      ['visual', 'Визуал', VISUAL_TABS.map(byId).filter(Boolean)],
+    ];
+    for (const [key, title, list] of groups) {
+      const head = headFor(key, title);
+      if (!list.length) { head.remove(); continue; }
+      tabs.insertBefore(head, links);
+      for (const tab of list) tabs.insertBefore(tab, links);
+    }
   };
   regroup();
 

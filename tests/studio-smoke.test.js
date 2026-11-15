@@ -524,7 +524,7 @@ test('persona window, the embedded card: no strip of its own, the foot says whet
     const shadow = studio.element.shadowRoot;
     assert.equal(shadow.querySelector('.ku-embed-strip'), null, 'no strip over the card: the card has all the room');
     assert.equal(shadow.querySelector('select[aria-label="Персона SillyTavern для этого чата"]'), null, 'nothing to choose or tie: the worn persona is the persona of the chat');
-    assert.match(shadow.querySelector('.ku-pstate').textContent, /Это ты в этом чате|Не надета сейчас/);
+    assert.equal(shadow.querySelector('.ku-pstate'), null, 'inside the tavern the top of the window already says whether she is worn');
     assert.ok(shadow.querySelector('.ku-cfoot-au'), 'the AU is a button with a caption beside the names, the closet and the sizes');
     assert.equal(shadow.querySelector('textarea[aria-label="Скрытый характер персоны"]'), null, 'it lives in the card of the persona');
     studio.showWindow?.('relations');

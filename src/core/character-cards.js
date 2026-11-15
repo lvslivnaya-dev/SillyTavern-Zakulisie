@@ -7,7 +7,8 @@
  *   lang   — 'en' once the card was translated into English (absent = as written, Russian);
  *   source — { path, hash, stale? } where the card came from: a note of the Obsidian folder (path inside it; hash of what was
  *            read; stale — the note has changed since). The note stays the Russian original, the card holds the working copy.
- * section = { id, kind, title, text, when?, keys[]? }
+ * section = { id, kind, title, text, when?, keys[]?, off? }
+ *   off    — switched off by hand: the text stays on the card, but is never sent to a model
  *   text   — the section; ONE text per section, so the card never holds two languages at once
  *   kind  — one of CARD_SECTION_KINDS: it says which rule of «Суфлёр» the section follows
  *           (the same ids as the sheet sections of a lorebook: basic, voice, visual…);
@@ -134,6 +135,7 @@ export function makeSection(raw = {}, { id } = {}) {
     ...(when ? { when } : {}),
     ...(keys.length ? { keys } : {}),
     ...(au.length ? { au } : {}),
+    ...(raw?.off === true ? { off: true } : {}),
   };
 }
 
@@ -162,9 +164,9 @@ export function normalizeSections(input) {
   return result;
 }
 
-/** Sections that have any text (an empty section is never sent). */
+/** Sections that have any text and are not switched off by hand (an empty or a switched-off section is never sent). */
 export function filledSections(card) {
-  return (card?.sections ?? []).filter(section => section.kind !== 'private' && section.text.trim());
+  return (card?.sections ?? []).filter(section => section.kind !== 'private' && !section.off && section.text.trim());
 }
 
 /** The hidden character of a persona card (the section of that kind), or ''. Only the factor generator reads it. */

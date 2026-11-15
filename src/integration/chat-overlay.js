@@ -15,6 +15,19 @@ import { iconSvg } from '../ui/icons.js';
 import { NAV_TABS } from '../ui/layout.js';
 
 const CHIPS_ID = 'ku-scene-chips';
+
+/** Страницы шторки от других модулей (Закулисье): { id, icon, name, title, render(container) }. Плитки в рейке и страницы панели. */
+export const extraPanes = new Map();
+/** Связь с отрисовкой шторки: перерисовать и узнать, какая страница открыта. */
+export const extraPaneHooks = { rerender: null, current: () => '' };
+/** The playlist of the media library, drawn under the songs on the tab «Медиа» of the drawer (index.js sets render and now). */
+export const mediaSection = { render: null, now: () => '', suggest: null };
+
+function extraPaneBody(item) {
+  const box = node('div', 'pud-pane-host');
+  try { item.render(box); } catch (error) { console.error('[Kulisy] Extra pane failed.', error); box.textContent = 'Не получилось показать страницу.'; }
+  return box;
+}
 const STRIP_ID = 'ku-scene-strip';
 const SETUP_ID = 'ku-setup-banner';
 const AU_ID = 'ku-au-banner';
@@ -26,6 +39,7 @@ const LEAK_CLASS = 'ku-leak';
 const SLIP_CLASS = 'ku-slip';
 const DEATH_CLASS = 'ku-death-note-chat';
 const QUEST_HINT_CLASS = 'ku-quest-note-chat';
+const MEDIA_OFFER_CLASS = 'ku-media-note-chat';
 const REVEAL_CLASS = 'ku-reveal-note';
 const SECRET_HINT_CLASS = 'ku-secret-hint';
 
@@ -83,10 +97,10 @@ function chipButton(text, action, data = {}, title = '', className = 'ku-dir-btn
  *                  secrets: [{ eventId, label, text }] }
  * eventIdeas() → [text]: today's calendar events, offered as ready scene events.
  */
-export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, onQuestStep, onSong, onQuestPush, onDiceRoll, onDiceToggle, onDiceLock, onDiceAdd, onDiceSend, onDiceClear, onSetTime, onWeather, onSceneMode, onTogglePresent, onLeak, onSlip, onDeath, onReveal, onSecretHint, onOpenStudio, onOpenPersonas, onSetupOff, onCalendarSave, onCalendarRemove,
+export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, onMediaOffer, onQuestStep, onSong, onQuestPush, onDiceRoll, onDiceToggle, onDiceLock, onDiceAdd, onDiceSend, onDiceClear, onSetTime, onWeather, onSceneMode, onTogglePresent, onLeak, onSlip, onDeath, onReveal, onSecretHint, onOpenStudio, onOpenPersonas, onSetupOff, onCalendarSave, onCalendarRemove,
   onCue, onRemoveCue, onKickNow, onToggleOpen, onFavorite, describe, eventIdeas }) {
   // The panel's own state: what is selected and typed survives every re-render.
-  const fresh = () => ({ stageNote: null, diceAdd: '', diceDraft: '', clock: null, selected: '', pane: '', wait: 0, draft: '', eventDraft: '', sceneDraft: '', noteDraft: '', placeDraft: '', placeId: '', skip: 'none', sceneCast: [], songFind: '', calDay: '', calForm: null });
+  const fresh = () => ({ stageNote: null, diceAdd: '', diceDraft: '', clock: null, selected: '', pane: '', wait: 0, draft: '', eventDraft: '', sceneDraft: '', noteDraft: '', placeDraft: '', placeId: '', skip: 'none', sceneCast: [], songFind: '', calDay: '', calForm: null, stripOpen: false });
   const ui = fresh();
   let lastView = null;
   const snoozed = new Set(); // chats whose setup reminder was put off until the page is reloaded
@@ -188,7 +202,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
         // The tab that is already on: a second press folds the panel back into the rail.
         if (open && !ui.selected && (ui.pane || 'who') === data.pane) { onToggleOpen?.(false); return true; }
         ui.pane = data.pane;
-        if (['event', 'others', 'scene', 'note', 'who', 'weather', 'mode', 'time', 'dice', 'quests', 'songs', 'heat'].includes(data.pane)) ui.selected = '';
+        if (['event', 'others', 'scene', 'note', 'who', 'weather', 'mode', 'time', 'dice', 'quests', 'songs', 'heat'].includes(data.pane) || extraPanes.has(data.pane)) ui.selected = '';
         if (data.pane === 'time') ui.clock = null;
         if (!open) onToggleOpen?.(true);
         rerender();
@@ -256,6 +270,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       case 'dir-fav-del': onFavorite?.(data.text, false); return true;
       case 'dir-remove': onRemoveCue?.(data.cueId); return true;
       case 'dir-kick': onKickNow?.(); return true;
+      case 'dir-strip': ui.stripOpen = !ui.stripOpen; if (lastView) renderStrip(lastView); return true;
       default: return false;
     }
   }
@@ -276,6 +291,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       else if (action === 'open-personas') onOpenPersonas?.(target.dataset.avatar ?? '');
       else if (action.startsWith('reveal-')) onReveal?.(action.slice(7), { messageIndex: Number(messageIndex), entityId, eventId });
       else if (action.startsWith('secret-')) onSecretHint?.(action.slice(7), { messageIndex: Number(messageIndex), eventId });
+      else if (action.startsWith('media-')) onMediaOffer?.(action.slice(6), { id: target.dataset.mediaId });
       else if (action.startsWith('quest-')) onQuestHint?.(action.slice(6), { messageIndex: Number(messageIndex), hintId: target.dataset.hintId });
       else if (action.startsWith('death-')) onDeath?.(action.slice(6), { messageIndex: Number(messageIndex), entityId });
       else if (action.startsWith('slip-')) onSlip?.(action.slice(5), { messageIndex: Number(messageIndex), slipIndex: Number(slipIndex) });
@@ -338,6 +354,8 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
   document.addEventListener('keydown', onHotkey, true);
 
   function rerender() { if (lastView) renderChips(lastView); }
+  extraPaneHooks.rerender = rerender;
+  extraPaneHooks.current = () => ui.pane || 'who';
 
   function pill(text, title, tab = 'scene') {
     return chipButton(text, 'studio', { tab }, title, 'ku-chips-place');
@@ -683,7 +701,9 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     sendLine.append(node('b', null, 'Уйдёт модели: '));
     if (out.length) for (const text of out) sendLine.append(node('span', 'ku-ss-tag', text));
     else sendLine.append(node('span', 'ku-ss-none', 'ничего заготовленного'));
-    const parts = [...items, sendLine];
+    // The details (what goes out, what went out, from the library) hide in a curtain under the first line; it opens by its little arrow.
+    const parts = [...items];
+    const details = [sendLine];
     // What really went with the last request (read back from the prompt when it was built).
     if (view.lastSent) {
       const last = view.lastSent;
@@ -692,7 +712,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       sent.push(...last.cues);
       const line = node('span', 'ku-ss-last');
       line.append(node('b', null, 'В последний запрос ушло: '), node('span', sent.length ? 'ku-ss-tag' : 'ku-ss-none', sent.length ? sent.join(' · ') : 'ничего от Закулисья, кроме обычной сцены'));
-      parts.push(line);
+      details.push(line);
       // Library entries: the sections of the character cards and the place, so that «was it used» is seen, not guessed.
       const lib = node('span', 'ku-ss-last ku-ss-lib');
       lib.append(node('b', null, 'Из библиотеки ушло: '));
@@ -720,9 +740,18 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       if (last.place) { lib.append(node('span', 'ku-ss-tag', `📍 ${last.place.name || 'место'}${last.place.parts.length ? `: ${last.place.parts.join(', ')}` : ': только название'}`)); any = true; }
       for (const thing of last.things ?? []) { lib.append(node('span', 'ku-ss-tag', `👗 ${thing}`)); any = true; }
       if (!any) lib.append(node('span', 'ku-ss-none', 'ни одной карточки или локации'));
-      parts.push(lib);
+      details.push(lib);
     }
-    if (view.build) parts.push(node('span', 'ku-ss-ver', `Закулисье ${view.build}`));
+    if (view.build) details.push(node('span', 'ku-ss-ver', `Закулисье ${view.build}`));
+    const open = Boolean(ui.stripOpen);
+    const curtain = node('span', 'ku-ss-curtain', open ? '▴ Скрыть' : '▾ Что уходит модели');
+    curtain.dataset.kuAction = 'dir-strip';
+    curtain.setAttribute('role', 'button');
+    curtain.setAttribute('tabindex', '0');
+    curtain.setAttribute('aria-expanded', String(open));
+    curtain.title = open ? 'Спрятать подробности' : 'Показать, что уйдёт модели, что ушло в последний запрос и из библиотеки';
+    parts.push(curtain);
+    if (open) parts.push(...details);
     strip.replaceChildren(...parts);
   }
 
@@ -806,7 +835,11 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       const body = node('div', 'ku-dir-body');
       body.append(node('div', 'ku-dir-inner'));
       panel.append(headElement, body);
-      bar.append(node('div', 'ku-rail'), panel);
+      // Two rails of tabs, one on each side of the panel: the scene's own on one, the tools (songs, scene, event, note and the pages of Закулисье) on the other;
+      // under the tools the little buttons of Закулисье (the sound, «пнуть») live in .pud-sidebar.
+      const railTools = node('div', 'ku-rail2');
+      railTools.append(node('div', 'ku-rail ku-rail-r'), node('div', 'pud-sidebar'));
+      bar.append(node('div', 'ku-rail'), panel, railTools);
       bar.addEventListener('input', onInput);
       bar.addEventListener('keydown', onKey);
       document.body.append(bar);
@@ -817,8 +850,8 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     // The side of the rail; the docked panels of the Studio keep clear of it (they read these two lengths).
     const right = view.railSide === 'right';
     bar.classList.toggle('ku-side-right', right);
-    document.documentElement.style.setProperty('--ku-rail-left', right ? '0px' : '64px');
-    document.documentElement.style.setProperty('--ku-rail-right', right ? '64px' : '0px');
+    document.documentElement.style.setProperty('--ku-rail-left', right ? '0px' : '128px');
+    document.documentElement.style.setProperty('--ku-rail-right', right ? '128px' : '0px');
     const focused = document.activeElement?.dataset?.kuField ?? '';
     const caret = focused ? document.activeElement.selectionStart : null;
 
@@ -875,10 +908,11 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       tile('🔥', 'Накал', view.heat?.value ? `${view.heat.value} · ${view.heat.label}` : 'спокойно', 'dir-pane', { pane: 'heat' }, { on: pane === 'heat', title: 'Накал сцены: насколько она заряжена. Падает логично, поправить можно рукой' }),
       tile('📅', 'Календарь', view.calendar?.next?.[0] ? view.calendar.next[0].when : (view.calendar ? 'пусто' : 'не задан'), 'dir-pane', { pane: 'calendar' }, { on: pane === 'calendar', title: 'Календарь: ближайшие события и месяц целиком' }),
       tile('🧭', 'Квесты', view.quests?.length ? `${view.quests.length} идут` : 'нет', 'dir-pane', { pane: 'quests' }, { on: pane === 'quests', title: 'Квесты: отметить шаг, ввести его в сюжет' }),
-      tile('🎵', 'Песни', view.songs?.playing?.length ? `▶ ${view.songs.playing.length}` : view.songs?.found?.some(item => !item.muted) ? 'слышно' : 'тихо', 'dir-pane', { pane: 'songs' }, { on: pane === 'songs', title: 'Песни: что звучит, кто поёт, какая узнана в постах' }),
+      tile('🎵', 'Медиа', view.songs?.playing?.length ? `▶ ${view.songs.playing.length}` : view.songs?.found?.some(item => !item.muted) ? 'слышно' : 'тихо', 'dir-pane', { pane: 'songs' }, { on: pane === 'songs', title: 'Песни: что звучит, кто поёт, какая узнана в постах' }),
       tile('🎬', 'Сцена', 'новая', 'dir-pane', { pane: 'scene' }, { on: pane === 'scene', title: 'Начать новую сцену: с чего, когда, где и с кем' }),
       tile('⚡', 'Событие', 'случится', 'dir-pane', { pane: 'event' }, { on: pane === 'event', title: 'Пусть в сцене что-то случится' }),
       tile('📝', 'Рассказчику', 'указание', 'dir-pane', { pane: 'note' }, { on: pane === 'note', title: 'Указание на следующий ответ, без персонажа' }),
+      ...[...extraPanes.values()].map(item => tile(item.icon, item.name, '', 'dir-pane', { pane: item.id }, { on: pane === item.id, title: item.title })),
       tile('▶', 'Пнуть', 'сейчас', 'dir-kick', {}, { kick: true, title: director.canKick ? 'Отправить: с твоим текстом из поля, а если оно пустое — без поста' : 'Сейчас идёт генерация' }),
     );
     const modeCard = () => {
@@ -1104,9 +1138,14 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     const toggle = chipButton(open ? '◂' : '▸', 'dir-toggle', {}, open ? 'Свернуть панель в рейку' : 'Развернуть панель сцены', 'ku-rail-toggle');
     toggle.setAttribute('aria-expanded', String(open));
     if (pending) toggle.append(node('span', 'ku-rail-badge', pending));
-    bar.querySelector('.ku-rail').replaceChildren(toggle, ...grid.children);
-    const TAB_TITLES = { who: 'Кто на сцене', others: 'Позвать', time: 'Время', weather: 'Погода', mode: 'Тип сцены', dice: 'Кубик близости', heat: 'Накал сцены', quests: 'Квесты', songs: 'Песни', scene: 'Новая сцена', event: 'Событие', note: 'Рассказчику' };
-    headElement.replaceChildren(node('strong', 'ku-dir-title', ui.selected ? 'Персонаж' : (TAB_TITLES[pane] ?? 'Сцена')), ...places);
+    // The tabs are shared out between the two rails: the state of the scene on one side, the tools on the other.
+    const TOOL_PANES = new Set(['songs', 'scene', 'event', 'note', ...extraPanes.keys()]);
+    const tiles = [...grid.children];
+    const isTool = child => TOOL_PANES.has(child.dataset?.pane) || child.dataset?.kuAction === 'dir-kick';
+    bar.querySelector('.ku-rail:not(.ku-rail-r)').replaceChildren(toggle, ...tiles.filter(child => !isTool(child)));
+    bar.querySelector('.ku-rail-r').replaceChildren(...tiles.filter(isTool));
+    const TAB_TITLES = { who: 'Кто на сцене', others: 'Позвать', time: 'Время', weather: 'Погода', mode: 'Тип сцены', dice: 'Кубик близости', heat: 'Накал сцены', quests: 'Квесты', songs: 'Медиа', scene: 'Новая сцена', event: 'Событие', note: 'Рассказчику' };
+    headElement.replaceChildren(node('strong', 'ku-dir-title', ui.selected ? 'Персонаж' : (TAB_TITLES[pane] ?? extraPanes.get(pane)?.title ?? 'Сцена')), ...places);
     if (!open) { inner.replaceChildren(); return; }
     const parts = [];
     if (ui.selected) {
@@ -1118,7 +1157,17 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     else if (pane === 'time') parts.push(timeCard());
     else if (pane === 'quests') parts.push(questsCard());
     else if (pane === 'calendar') parts.push(calendarCard());
-    else if (pane === 'songs') parts.push(songsCard());
+    else if (pane === 'songs') {
+      // «Медиа»: the songs the narrator hears (as before) and, under them, the playlist to play from
+      const tab = node('div', 'ku-media-tab');
+      if (mediaSection.render) { const host = node('div', 'pud-pane-host ku-media-host'); try { mediaSection.render(host, view); } catch (error) { console.error('[Kulisy] Media list failed.', error); } tab.append(host); }
+      // the songs the narrator hears fold under the playlist (open when one plays or is noticed)
+      const songs = node('details', 'ku-media-songs');
+      songs.open = Boolean(view.songs?.playing?.length || view.songs?.found?.some(item => !item.muted));
+      songs.append(node('summary', null, '♪ Песни для рассказчика'), songsCard());
+      tab.append(songs);
+      parts.push(tab);
+    }
     else if (pane === 'heat') parts.push(heatCard());
     else if (pane === 'dice') parts.push(diceCard(view));
     else if (pane === 'weather') parts.push(weatherCard());
@@ -1126,6 +1175,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     else if (pane === 'event') parts.push(eventMenu());
     else if (pane === 'scene') parts.push(sceneMenu(director));
     else if (pane === 'note') parts.push(noteMenu());
+    else if (extraPanes.has(pane)) parts.push(extraPaneBody(extraPanes.get(pane)));
     if (director.cues?.length) {
       const queue = node('div', 'ku-dir-row ku-dir-queue');
       queue.append(node('span', 'ku-dir-caption', 'Режиссура:'));
@@ -1251,6 +1301,27 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     }
   }
 
+  /** A link of the media library that suits the scene: a note under the last reply, like the quests the chronicler finds. Only a proposal. */
+  function renderMediaOffer(view) {
+    for (const old of document.querySelectorAll(`#chat .${MEDIA_OFFER_CLASS}`)) old.remove();
+    const offer = view.chips === false ? null : mediaSection.suggest?.(view);
+    if (!offer) return;
+    const last = [...document.querySelectorAll('#chat .mes')].at(-1);
+    if (!last || last.getAttribute('is_user') === 'true') return; // the reply is not here yet
+    const block = last.querySelector('.mes_block');
+    if (!block) return;
+    const data = { mediaId: offer.id };
+    const note = node('div', `${LEAK_CLASS} ${MEDIA_OFFER_CLASS}`);
+    note.setAttribute('role', 'note');
+    const text = node('div', 'ku-leak-text');
+    text.append(node('i', 'fa-solid fa-music'), node('b', null, ' Подходит под вайб, включить? '), node('span', 'ku-leak-quote', `${offer.title}${offer.reason ? ` · ${offer.reason}` : ''}`));
+    const actions = node('div', 'ku-leak-actions');
+    actions.append(actionButton('▶ Включить', 'media-play', data, 'Играть в плеере шторки'), actionButton('Нет', 'media-dismiss', data, 'Не предлагать это в этой сцене'));
+    note.append(text, actions);
+    const anchor = block.querySelector('.mes_text');
+    if (anchor?.nextSibling) block.insertBefore(note, anchor.nextSibling); else block.append(note);
+  }
+
   function renderDeaths(view) {
     for (const old of document.querySelectorAll(`#chat .${DEATH_CLASS}`)) old.remove();
     for (const death of view.deaths ?? []) {
@@ -1306,6 +1377,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
         renderLeaks(view);
         renderDeaths(view);
         renderQuestHints(view);
+        renderMediaOffer(view);
         renderReveals(view);
         renderSecretHints(view);
         renderSlips(view);
@@ -1314,6 +1386,8 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       }
     },
     unmount() {
+      extraPaneHooks.rerender = null;
+      extraPaneHooks.current = () => '';
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('keydown', onHotkey, true);
       document.getElementById(CHIPS_ID)?.remove();
@@ -1322,6 +1396,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       for (const old of document.querySelectorAll(`.${SLIP_CLASS}`)) old.remove();
       for (const old of document.querySelectorAll(`.${DEATH_CLASS}`)) old.remove();
       for (const old of document.querySelectorAll(`.${QUEST_HINT_CLASS}`)) old.remove();
+      for (const old of document.querySelectorAll(`.${MEDIA_OFFER_CLASS}`)) old.remove();
       for (const old of document.querySelectorAll(`.${REVEAL_CLASS}`)) old.remove();
       for (const old of document.querySelectorAll(`.${SECRET_HINT_CLASS}`)) old.remove();
     },

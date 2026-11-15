@@ -67,9 +67,17 @@ export function isFolderImage(path) {
   return String(path ?? '').replace(/^\/+/, '').startsWith(FOLDER_PREFIX);
 }
 
+/** Library pictures in the folder may also live in the tree «Библиотека/<Вещи|Места>/<папки библиотеки>/». */
+export const LIBRARY_TREE_PREFIX = 'api/plugins/kulisy-images/library/';
+
 /** Is this a picture of the wardrobe tree (it lies where the user sees it in Explorer)? */
 export function isTreeImage(path) {
   return String(path ?? '').replace(/^\/+/, '').startsWith(TREE_PREFIX);
+}
+
+/** Is this a picture of the library tree? */
+export function isLibraryTreeImage(path) {
+  return String(path ?? '').replace(/^\/+/, '').startsWith(LIBRARY_TREE_PREFIX);
 }
 
 /** 'api/plugins/kulisy-images/wardrobe/Персона/Женское/Платья/a.jpg' → 'Персона/Женское/Платья'. */
@@ -138,7 +146,7 @@ export async function moveTreeImage(context, path, dir) {
 /** Delete a stored picture, wherever it lives. A missing file is fine (already gone). */
 export async function deleteWardrobeImage(context, path) {
   if (!path) return;
-  const url = isTreeImage(path) ? `${FOLDER_PLUGIN_BASE}/tree/delete` : isFolderImage(path) ? `${FOLDER_PLUGIN_BASE}/delete` : '/api/images/delete';
+  const url = isTreeImage(path) || isLibraryTreeImage(path) ? `${FOLDER_PLUGIN_BASE}/tree/delete` : isFolderImage(path) ? `${FOLDER_PLUGIN_BASE}/delete` : '/api/images/delete';
   const response = await fetch(url, { method: 'POST', headers: context.getRequestHeaders(), body: JSON.stringify({ path: String(path).replace(/^\//, '') }) });
   if (!response.ok && response.status !== 404) throw new Error(`Картинка не удалилась (HTTP ${response.status}).`);
 }
@@ -171,20 +179,22 @@ export async function browseImageFolder(context) {
 
 // ---- The tree «Гардероб» in the folder (wardrobe-inbox.js) --------------------
 
-/** Create the tree's folders (relative to «Гардероб»). */
-export async function prepareInbox(context, dirs) {
-  const { response, data } = await postJson(context, `${FOLDER_PLUGIN_BASE}/tree/prepare`, { dirs });
-  if (!response.ok) throw new Error(data?.error || `Папки гардероба не создались (HTTP ${response.status}).`);
+/** Create the tree's folders (relative to «Гардероб», or to «Библиотека» with tree 'library'). */
+export async function prepareInbox(context, dirs, tree = 'wardrobe') {
+  const { response, data } = await postJson(context, `${FOLDER_PLUGIN_BASE}/tree/prepare`, { dirs, tree });
+  if (!response.ok) throw new Error(data?.error || `Папки для картинок не создались (HTTP ${response.status}).`);
   return data;
 }
 
-/** Every picture of «Гардероб»: [{ path, public, size, modified }]. */
-export async function listInbox() {
-  const response = await fetch(`${FOLDER_PLUGIN_BASE}/tree/list`, { cache: 'no-store' });
+/** Every picture of «Гардероб» (or «Библиотека», tree 'library'): [{ path, public, size, modified }]. */
+export async function listInbox(tree = 'wardrobe') {
+  const response = await fetch(`${FOLDER_PLUGIN_BASE}/tree/list${tree === 'library' ? '?tree=library' : ''}`, { cache: 'no-store' });
   let data = null;
   try { data = await response.json(); } catch { data = null; }
-  if (!response.ok) throw new Error(data?.error || `Папку «Гардероб» не удалось прочитать (HTTP ${response.status}).`);
-  return Array.isArray(data?.files) ? data.files : [];
+  if (!response.ok) throw new Error(data?.error || `Папку «${tree === 'library' ? 'Библиотека' : 'Гардероб'}» не удалось прочитать (HTTP ${response.status}).`);
+  const files = Array.isArray(data?.files) ? data.files : [];
+  // A plugin older than 0.4.0 does not know the library tree and would answer with the wardrobe's list.
+  return tree === 'library' ? files.filter(file => isLibraryTreeImage(file?.public)) : files;
 }
 
 const EXTENSION_FORMAT = { png: 'png', jpg: 'jpg', jpeg: 'jpg', webp: 'webp', gif: 'gif' };
@@ -197,7 +207,7 @@ export async function copyImageTo(context, path, storage, tree = null) {
   const clean = String(path ?? '').replace(/^\/+/, '');
   const parts = clean.split('/');
   const fileName = parts.at(-1) ?? '';
-  const folder = parts.at(-2) || WARDROBE_IMAGE_FOLDER;
+  const folder = isLibraryTreeImage(clean) ? LIBRARY_IMAGE_FOLDER : parts.at(-2) || WARDROBE_IMAGE_FOLDER;
   const dot = fileName.lastIndexOf('.');
   const base = dot > 0 ? fileName.slice(0, dot) : fileName;
   const format = EXTENSION_FORMAT[fileName.slice(dot + 1).toLowerCase()];
@@ -219,6 +229,7 @@ export function imageUrl(path) {
   if (!path) return '';
   const clean = String(path).replace(/^\/+/, '');
   if (clean.startsWith(TREE_PREFIX)) return `/${TREE_PREFIX}${clean.slice(TREE_PREFIX.length).split('/').map(encodeURIComponent).join('/')}`;
+  if (clean.startsWith(LIBRARY_TREE_PREFIX)) return `/${LIBRARY_TREE_PREFIX}${clean.slice(LIBRARY_TREE_PREFIX.length).split('/').map(encodeURIComponent).join('/')}`;
   return `/${clean}`;
 }
 

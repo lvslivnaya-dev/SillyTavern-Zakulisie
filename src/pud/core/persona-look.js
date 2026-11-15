@@ -43,9 +43,11 @@ export function lookMemory(raw) {
 const APPEARANCE_RULES = `You write the PERMANENT APPEARANCE of a roleplay character from the picture, in Russian, as plain continuous prose: third person, present tense, no lists, no headings, no quotes, no mention of the picture. 4 to 7 sentences.
 Include what does not change from scene to scene: the face (shape, eyes and their colour, brows, nose, lips), the hair (natural colour, length, texture; a hairstyle only as a plain fact), skin, build, hands, and lasting marks (freckles, moles, scars, tattoos, fangs, permanent piercings).
 Leave out everything that changes: clothes, shoes, bags, jewellery that is taken off, make-up, glasses if they look like an accessory, the pose, a single moment's expression or mood, the background, lighting.
-Describe only what the picture shows. Do not invent a personality, a past or a name.`;
+Describe only what the picture shows. Do not invent a personality, a past or a name.
+Never write about the voice, speech, sounds or manner of talking here: the voice is a separate part and only when it is asked for.`;
 
-const VOICE_RULES = `After the appearance, add 2 to 3 sentences about the VOICE: how it sounds in different moments (calm, excited, angry, tender, tired): pitch, timbre, tempo, volume, how it changes. Do not give catchphrases, speech quirks, example lines or quotes; only how the voice sounds.`;
+const VOICE_RULES = `After the appearance, add a new paragraph of 2 to 3 sentences about the VOICE, and nothing else after it. Say only how the voice SOUNDS (pitch, timbre, texture such as husky, soft or clear, usual tempo and volume) and what effect that sound can have on the people who listen. The picture cannot tell the voice, so build it from the look of the character and from the user's wishes, and stay general where nothing is known.
+Do NOT describe behaviour or personality, do NOT make up how the voice changes with each emotion, and do NOT give catchphrases, favourite words, speech quirks, manner of talking, example lines or quotes. The voice must not be repeated in the appearance part.`;
 
 /** Запрос на описание: текст для модели (картинка идёт отдельной частью). */
 export function describePrompt({ wishes = '', voice = false, voiceWishes = '', name = '' } = {}) {

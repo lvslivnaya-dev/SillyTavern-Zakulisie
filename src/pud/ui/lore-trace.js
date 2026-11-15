@@ -549,7 +549,8 @@ export function startLoreTrace(doc, { context, settings, save = () => {}, shared
   if (!addMenu()) {
     const observer = new view.MutationObserver(() => { if (addMenu()) observer.disconnect(); });
     observer.observe(doc.body, { childList: true, subtree: true });
-    undo.push(() => observer.disconnect());
+    const giveUp = view.setTimeout(() => observer.disconnect(), 60000);
+    undo.push(() => { view.clearTimeout(giveUp); observer.disconnect(); });
   }
 
   return () => {

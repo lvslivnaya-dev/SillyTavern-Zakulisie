@@ -159,6 +159,7 @@ export function createWardrobePages(ctx) {
     }, result => {
       if (!result) return '';
       const notes = [`новых карточек: ${result.added}`];
+      if (result.things) notes.push(`новых вещей: ${result.things}`);
       if (result.described) notes.push(`описано: ${result.described}`);
       if (result.failed) notes.push(`не вышло: ${result.failed}`);
       if (result.undescribed) notes.push(`не описалось: ${result.undescribed} (опишите в карточке или «Переписать описания»)`);
@@ -167,14 +168,26 @@ export function createWardrobePages(ctx) {
     }).finally(() => { importing = false; render(); });
   }
 
+  /** Where the new pictures of the folder lie: «Персона · Женское · Верх — 2», «Вещи — 3»; the same picture list feeds the badges of the sections. */
+  function inboxWhere(inbox) {
+    const counts = new Map();
+    for (const place of inbox.places ?? []) {
+      const label = [WARDROBE_SHELVES[place.shelf], WARDROBE_GENDERS[place.gender], SECTION[place.category]].filter(Boolean).join(' · ') || 'без раздела';
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    if (inbox.things) counts.set('Вещи', inbox.things);
+    const parts = [...counts].map(([label, count]) => `${label} — ${count}`);
+    return parts.length > 8 ? `${parts.slice(0, 8).join('; ')}; и ещё в ${parts.length - 8} разд.` : parts.join('; ');
+  }
+
   function renderInboxBanner() {
     const inbox = snapshot().inbox;
     if (!inbox?.available || !inbox.count) return null;
-    const take = button(importing ? 'Забираю…' : 'Забрать', 'btn primary small', importInbox, 'Сделать карточки из картинок папки «Гардероб»');
+    const take = button(importing ? 'Забираю…' : 'Забрать', 'btn primary small', importInbox, 'Сделать карточки и вещи из картинок папки «Гардероб»');
     take.disabled = importing;
     return element('div', { className: 'ku-row ku-inbox' }, [
       icon('download'),
-      element('span', { text: `В папке «Гардероб» новых картинок: ${inbox.count}. Раздел, пол и полку карточки получат по папке, в которой лежит картинка; сами картинки останутся на месте.${describeOnUpload ? ' Модель сразу их опишет.' : ''}` }),
+      element('span', { text: `В папке «Гардероб» новых картинок: ${inbox.count}. Где: ${inboxWhere(inbox)}. Раздел, пол и полку карточки получат по папке, в которой лежит картинка (из папки «Вещи» получаются вещи библиотеки); сами картинки останутся на месте.${describeOnUpload ? ' Модель сразу их опишет.' : ''}` }),
       element('span', { className: 'ku-push' }),
       take,
     ]);
@@ -340,15 +353,17 @@ export function createWardrobePages(ctx) {
       element('label', { className: 'ku-inline ku-small', title: 'Сразу просить модель описать новые картинки (тратит запрос на каждую)' }, [auto, 'описывать сразу']),
       ...(snapshot().inbox?.available ? [button(importing ? 'Забираю…' : 'Из папки', 'btn small', importInbox, 'Забрать картинки, которые вы положили в папку «Гардероб» на компьютере')] : []),
     ]));
-    const banner = things || looksTab ? null : renderInboxBanner();
+    const banner = renderInboxBanner();
     if (banner) view.append(banner);
 
     const body = element('div', { className: 'ku-wbody' });
     const sections = element('nav', { className: 'ku-wsec', 'aria-label': 'Подразделы' });
     const ofShelf = cardsOf(wardrobe(), { shelf, gender });
+    const waiting = (snapshot().inbox?.places ?? []).filter(place => place.shelf === shelf && (!place.gender || place.gender === gender));
+    const fresh = count => (count ? [element('b', { className: 'ku-wnew', text: `+${count}`, title: 'Новых картинок в папке «Гардероб»: нажмите «Забрать»' })] : []);
     for (const [key, label] of [['', 'Всё'], ...WARDROBE_CATEGORIES]) {
       const count = key ? ofShelf.filter(card => card.category === key).length : ofShelf.length;
-      const node = element('button', { type: 'button', className: `ku-wsb${section === key ? ' on' : ''}`, 'aria-current': section === key ? 'true' : null }, [element('span', { text: label }), element('i', { text: String(count) })]);
+      const node = element('button', { type: 'button', className: `ku-wsb${section === key ? ' on' : ''}`, 'aria-current': section === key ? 'true' : null }, [element('span', { text: label }), ...fresh(key ? waiting.filter(place => place.category === key).length : waiting.length), element('i', { text: String(count) })]);
       node.addEventListener('click', () => { section = key; render(); });
       sections.append(node);
     }
@@ -356,7 +371,7 @@ export function createWardrobePages(ctx) {
     const looksNode = element('button', { type: 'button', className: `ku-wsb ku-wsb-things${looksTab ? ' on' : ''}`, 'aria-current': looksTab ? 'true' : null, title: 'Готовые образы: что в них входит видно по картинкам. Здесь же образ собирается и надевается.' }, [element('span', { text: 'Образы' }), element('i', { text: String(looksCount) })]);
     looksNode.addEventListener('click', () => { section = LOOKS; render(); });
     const thingsCount = (snapshot().locationLibrary?.items ?? []).length + (world().items ?? []).filter(item => !item.libraryId).length;
-    const thingsNode = element('button', { type: 'button', className: `ku-wsb ku-wsb-things${things ? ' on' : ''}`, 'aria-current': things ? 'true' : null, title: 'Любые предметы, не одежда: телефон, оружие, ноутбук, портсигар… Библиотека и то, что есть только в этом чате' }, [element('span', { text: 'Вещи' }), element('i', { text: String(thingsCount) })]);
+    const thingsNode = element('button', { type: 'button', className: `ku-wsb ku-wsb-things${things ? ' on' : ''}`, 'aria-current': things ? 'true' : null, title: 'Любые предметы, не одежда: телефон, оружие, ноутбук, портсигар… Библиотека и то, что есть только в этом чате' }, [element('span', { text: 'Вещи' }), ...fresh(snapshot().inbox?.things ?? 0), element('i', { text: String(thingsCount) })]);
     thingsNode.addEventListener('click', () => { section = THINGS; render(); });
     sections.append(looksNode, thingsNode);
     body.append(sections);
@@ -762,6 +777,7 @@ export const WARDROBE_STYLE = `
 .ku-wsb:hover{color:var(--k-text);background:var(--k-inset)}
 .ku-wsb.on{background:var(--k-accent-soft);color:var(--k-accent);font-weight:800}
 .ku-wsb i{font-style:normal;font-size:11px;opacity:.8}
+.ku-wsb .ku-wnew{margin-left:auto;padding:0 6px;border-radius:999px;background:var(--k-accent);color:var(--k-bg);font-size:10.5px;font-weight:800;line-height:16px}
 .ku-chatthings{margin-bottom:8px}
 .ku-wsb-things{margin-top:8px;border-top:1px solid var(--k-line);border-radius:0 0 8px 8px}
 .ku-wsb-things+.ku-wsb-things{margin-top:0;border-top:0;border-radius:8px}

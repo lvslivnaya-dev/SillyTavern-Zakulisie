@@ -41,6 +41,7 @@ function meta(reason) {
 
 /**
  * deps: { store, getState(), commitOperations(ops), confirm(title, text) → boolean,
+ *         things?: { pending(files) → files for the library's things, import(files, { describe, onProgress }) → { added, described, failed, undescribed } },
  *         upload(dataUrl, name) → path, removeImage(path), imageForModel(path) → dataUrl,
  *         ask(dataUrl, prompt) → model text, log(level, text, error) }
  */
@@ -156,14 +157,16 @@ export function createWardrobeCallbacks(deps) {
      */
     onWardrobeImportInbox: async ({ describe: describeNow = false, onProgress = () => {} } = {}) => {
       if (!deps.inbox) throw new Error('Папка для картинок не подключена.');
-      const files = newTreeFiles(await deps.inbox.list(), store.get().cards);
-      if (!files.length) throw new Error('В папке «Гардероб» нет новых картинок.');
+      const everything = await deps.inbox.list();
+      const files = newTreeFiles(everything, store.get().cards);
+      const thingFiles = deps.things ? deps.things.pending(everything) : [];
+      if (!files.length && !thingFiles.length) throw new Error('В папке «Гардероб» нет новых картинок.');
       const placed = files.map(file => ({ ...file, place: placeFromPath(file.path) }));
       const skipped = placed.filter(file => file.place.problem).map(file => ({ path: file.path, problem: file.place.problem }));
       const todo = placed.filter(file => !file.place.problem);
-      if (!todo.length) return { added: 0, described: 0, failed: 0, undescribed: 0, skipped };
+      if (!todo.length && !thingFiles.length) return { added: 0, described: 0, failed: 0, undescribed: 0, skipped };
       const ok = await deps.confirm('Забрать картинки из папки',
-        `Новых карточек: ${todo.length}. Картинки останутся в своих папках, карточки будут показывать их оттуда.${describeNow ? ` Модель опишет каждую (${todo.length} запросов, по одному).` : ''} Продолжить?`);
+        `Новых карточек: ${todo.length}${thingFiles.length ? `, вещей: ${thingFiles.length} (из папки «Вещи»)` : ''}. Картинки останутся в своих папках, карточки будут показывать их оттуда.${describeNow ? ` Модель опишет каждую (${todo.length + thingFiles.length} запросов, по одному).` : ''} Продолжить?`);
       if (!ok) return null;
       const result = { added: 0, described: 0, failed: 0, undescribed: 0, skipped };
       const made = [];
@@ -187,6 +190,13 @@ export function createWardrobeCallbacks(deps) {
           try { await describe(item.card.id, { adoptSection: !item.category, adoptGender: !item.gender }); result.described += 1; }
           catch (error) { result.undescribed += 1; deps.log?.('warn', `Карточка из папки создана, но не описалась: ${item.path}`, error); }
         }
+      }
+      if (thingFiles.length) {
+        const things = await deps.things.import(thingFiles, { describe: describeNow, onProgress });
+        result.things = things.added;
+        result.described += things.described;
+        result.failed += things.failed;
+        result.undescribed += things.undescribed;
       }
       return result;
     },

@@ -27,6 +27,7 @@
  */
 import { addBond, cleanBonds } from './bond-records.js';
 import { uniqueId } from './ids.js';
+import { auIsEmpty, normalizeAu } from './au-notes.js';
 import { NAME_CASES, syncNameWords } from './name-library.js';
 import { ITEM_IMPORTANCE } from './world.js';
 import { cleanImagePath } from './wardrobe.js';
@@ -99,7 +100,7 @@ export function normalizeLibrary(input) {
     const name = cleanText(raw?.name, LIBRARY_LIMITS.name);
     if (!id || !name || folderIds.has(id) || library.folders.length >= LIBRARY_LIMITS.folders) continue;
     folderIds.add(id);
-    library.folders.push({ id, name, ...(raw.parentId ? { parentId: String(raw.parentId) } : {}), ...(raw.persona ? { persona: true } : {}), ...(raw.persona && raw.hidden ? { hidden: true } : {}) });
+    library.folders.push({ id, name, ...(raw.parentId ? { parentId: String(raw.parentId) } : {}), ...(raw.persona ? { persona: true } : {}), ...(raw.persona && raw.hidden ? { hidden: true } : {}), ...(auIsEmpty(raw.au) ? {} : { au: normalizeAu(raw.au) }) });
   }
   for (const folder of library.folders) {
     if (folder.parentId && (!folderIds.has(folder.parentId) || !noLoop(library.folders, folder.parentId, folder.id))) delete folder.parentId;
@@ -172,6 +173,8 @@ export function normalizeLibrary(input) {
 
 /** The folder the persona cards sit in when no folder of theirs is open: it is not shown in the list of folders. */
 export const PERSONA_HOME_NAME = 'Персоны';
+/** Where an entry made with no folder open («во всей библиотеке») goes; the folder is made once, when it is first needed. */
+export const NO_FOLDER_NAME = 'Без папки';
 
 /** Its id (made when missing), in `next` itself. */
 export function ensurePersonaHome(next) {
@@ -181,6 +184,11 @@ export function ensurePersonaHome(next) {
   const folder = { id: uniqueId('folder'), name: PERSONA_HOME_NAME, persona: true, hidden: true };
   next.folders.push(folder);
   return folder.id;
+}
+
+/** Its id (made when missing, in `next` itself): the top folder «Без папки» of the ordinary shelves. */
+export function ensureNoFolder(next) {
+  return ensureFolder(next, NO_FOLDER_NAME, '');
 }
 
 /** The picture fields of an entry: { image?, autoName? }. */
@@ -298,6 +306,7 @@ export function updateFolder(library, folderId, changes = {}) {
   const folder = next.folders.find(candidate => candidate.id === folderId);
   if (!folder) throw new RangeError('Такой папки нет');
   if (changes.name != null) folder.name = requireName(changes.name);
+  if (changes.au !== undefined) { const au = normalizeAu(changes.au); if (auIsEmpty(au)) delete folder.au; else folder.au = au; }
   if (changes.parentId !== undefined) {
     const parentId = String(changes.parentId ?? '');
     if (parentId && !next.folders.some(candidate => candidate.id === parentId)) throw new RangeError('Такой папки нет');
@@ -368,7 +377,7 @@ function applyLocationFields(next, location, fields) {
 export function addLocation(library, fields = {}) {
   const next = clone(library);
   if (next.locations.length >= LIBRARY_LIMITS.locations) throw new RangeError('Слишком много локаций');
-  if (!fields.folderId) throw new RangeError('Сначала выберите папку');
+  if (!fields.folderId) fields = { ...fields, folderId: ensureNoFolder(next) };
   const location = { id: uniqueId('place'), folderId: '', name: '', aliases: [], description: '', traits: [] };
   applyLocationFields(next, location, { name: fields.name ?? '', ...fields });
   next.locations.push(location);
@@ -423,7 +432,7 @@ export function addLibraryItem(library, fields = {}) {
   const next = clone(library);
   next.items ??= [];
   if (next.items.length >= LIBRARY_LIMITS.items) throw new RangeError('Слишком много вещей');
-  if (!fields.folderId) throw new RangeError('Сначала выберите папку');
+  if (!fields.folderId) fields = { ...fields, folderId: ensureNoFolder(next) };
   const item = { id: uniqueId('thing'), folderId: '', name: '', aliases: [], description: '', importance: 'normal' };
   applyItemFields(next, item, { name: fields.name ?? '', ...fields });
   next.items.push(item);
@@ -493,8 +502,7 @@ export function addLibraryCharacter(library, fields = {}) {
   const next = clone(library);
   next.characters ??= [];
   if (next.characters.length >= LIBRARY_LIMITS.characters) throw new RangeError('Слишком много карточек');
-  if (!fields.folderId && !fields.persona) throw new RangeError('Сначала выберите папку');
-  if (!fields.folderId) fields = { ...fields, folderId: ensurePersonaHome(next) };
+  if (!fields.folderId) fields = { ...fields, folderId: fields.persona ? ensurePersonaHome(next) : ensureNoFolder(next) };
   const card = { id: uniqueId('card'), folderId: '', name: '', aliases: [], sections: fields.sections != null ? [] : fields.persona ? personaTemplateSections() : templateSections(), ...(fields.persona ? { persona: true } : {}) };
   applyCharacterFields(next, card, { name: fields.name ?? '', ...fields });
   next.characters.push(card);
@@ -874,6 +882,9 @@ export function importLibrary(library, data, targetFolderId = '') {
   for (const folder of incoming.folders) {
     let parentId = targetFolderId;
     for (const step of pathOf(folder.id)) parentId = ensureFolder(result.library, step, parentId);
+    // The AU of the folder comes along, but never over an AU the user already has on that folder.
+    const here = result.library.folders.find(candidate => candidate.id === parentId);
+    if (here && !auIsEmpty(folder.au) && auIsEmpty(here.au)) here.au = normalizeAu(folder.au);
   }
   return result;
 }

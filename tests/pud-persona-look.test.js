@@ -17,8 +17,8 @@ test('запрос на описание: только постоянное, п�
   assert.doesNotMatch(plain, /wishes/);
   const full = describePrompt({ wishes: 'рост 156, веснушки', voice: true, voiceWishes: 'низкий голос', name: 'Судзу' });
   assert.match(full, /The user's wishes about the appearance\. They are facts[^\n]*:\nрост 156, веснушки/);
-  assert.match(full, /VOICE: how it sounds in different moments/);
-  assert.match(full, /Do not give catchphrases, speech quirks, example lines or quotes/);
+  assert.match(full, /how the voice SOUNDS/);
+  assert.match(full, /do NOT give catchphrases[^.]*example lines or quotes/);
   assert.match(full, /wishes about the voice:\nнизкий голос/);
   assert.match(full, /«Судзу»/);
   assert.match(full, /win over the picture/);

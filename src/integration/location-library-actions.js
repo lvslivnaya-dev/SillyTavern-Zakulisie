@@ -12,9 +12,11 @@ import {
 } from '../core/index.js';
 import { draftFromMarkdown, draftsFromLorebook, draftsFromMarkdownFiles, draftsFromMarkdownNote, listLorebookEntries } from './location-import.js';
 import { draftFromPersonaNote, draftFromQuestionnaire, draftsFromLorebookCharacters, draftsFromPersonaNotes, draftsFromQuestionnaires, listLorebookCharacters } from './character-import.js';
+import { addFromTreePicture, newLibraryFiles, placeFromLibraryPath } from './library-inbox.js';
 import { cardLinks, linkCards, syncCardLinks, unlinkCards } from './card-links.js';
 import { linkOperations, linkedCards, saveCardDraft, syncOperations, unlinkOperations } from './location-links.js';
 import { itemLinkOperations, itemUnlinkOperations, linkedItems, saveItemDraft, syncItemOperations } from './item-links.js';
+import { nameFromFile } from './wardrobe-inbox.js';
 import { PLACE_PROMPT, THING_PROMPT, parseDescription, parsePersonaLook, personaLookPrompt } from './vision.js';
 
 /** Names a new entry gets before the model (or the user) names it. */
@@ -53,7 +55,7 @@ function summary(result) {
  * Studio callbacks.
  * deps: { library (store), getState(), commitOperations(ops), replaceState(state) (attaching cards is not journaled), confirm(title, html) → boolean,
  *         listBooks() → names, loadBook(name) → book, notify(text),
- *         pictures: upload(dataUrl, name) → path, removeImage(path), imageForModel(path) → dataUrl,
+ *         pictures: upload(dataUrl, name) → path, removeImage(path), imageForModel(path) → dataUrl, inbox: { list() } (the folder «Библиотека»),
  *         ask(dataUrl, prompt) → text (the same model as the wardrobe), log(level, text, error) }
  */
 export function createLibraryCallbacks(deps) {
@@ -380,7 +382,9 @@ export function createLibraryCallbacks(deps) {
       return result.aliases;
     },
     onLibraryAddCharacter: fields => {
-      const { library: next, character } = addLibraryCharacter(library.get(), fields);
+      // An empty card (no name yet) gets «Новый персонаж», «Новый персонаж 2»…: the name is typed in the open card
+      const named = String(fields?.name ?? '').trim() ? fields : { ...fields, name: freeCardName(fields?.folderId ?? '', PLACEHOLDERS.characters) };
+      const { library: next, character } = addLibraryCharacter(library.get(), named);
       library.set(next);
       return character;
     },
@@ -571,10 +575,54 @@ export function createLibraryCallbacks(deps) {
       return true;
     },
 
+    /**
+     * Pictures of the folder «Гардероб/Вещи» become things of the library: the folder «Вещи» (and a folder per subfolder of it) is made
+     * when missing, the thing's name is the file's name when it is a name. The picture stays where it lies. files: [{ path, public }].
+     * Returns { added, described, failed, undescribed }.
+     */
+    onLibraryImportThings: async ({ files = [], describe: describeNow = false, onProgress = () => {} } = {}) => {
+      const result = { added: 0, described: 0, failed: 0, undescribed: 0 };
+      const folderNamed = (name, parentId) => {
+        let found = library.get().folders.find(folder => !folder.persona && folder.name === name && (folder.parentId ?? '') === parentId);
+        if (!found) {
+          const added = addFolder(library.get(), { name, parentId });
+          library.set(added.library);
+          found = library.get().folders.find(folder => folder.id === added.folder.id) ?? added.folder;
+        }
+        return found.id;
+      };
+      const made = [];
+      for (const [index, file] of files.entries()) {
+        try {
+          const parts = String(file.path).split('/').filter(Boolean);
+          parts.shift(); // «Вещи»
+          const fileName = parts.pop() ?? '';
+          const root = folderNamed('Вещи', '');
+          const folderId = parts[0] ? folderNamed(parts[0], root) : root;
+          const added = addLibraryItem(library.get(), { folderId, name: nameFromFile(fileName) || PLACEHOLDERS.items, image: file.public });
+          library.set(added.library);
+          made.push({ id: added.item.id, path: file.path });
+          result.added += 1;
+        } catch (error) {
+          result.failed += 1;
+          deps.log?.('warn', `Картинка из папки не стала вещью: ${file.path}`, error);
+        }
+        try { onProgress(index + 1, files.length, 'add'); } catch { /* the page may be gone */ }
+      }
+      if (describeNow) {
+        for (const [index, item] of made.entries()) {
+          try { onProgress(index + 1, made.length, 'describe'); } catch { /* the page may be gone */ }
+          try { await describe('items', item.id); result.described += 1; }
+          catch (error) { result.undescribed += 1; deps.log?.('warn', `Вещь из папки создана, но не описалась: ${item.path}`, error); }
+        }
+      }
+      return result;
+    },
+
     /** A new place, thing or card from a picture, in `folderId`; `describe`: ask the model right away. */
     onLibraryAddFromImage: async ({ kind = 'places', folderId, imageDataUrl, describe: describeNow = false }) => {
       if (!folderId) throw new Error('Сначала откройте папку.');
-      const image = await deps.upload(imageDataUrl, uniqueId(IDS[kind] ?? 'place'));
+      const image = await deps.upload(imageDataUrl, uniqueId(IDS[kind] ?? 'place'), kind);
       let entry;
       try {
         const fields = { folderId, name: kind === 'characters' ? freeCardName(folderId, PLACEHOLDERS[kind]) : PLACEHOLDERS[kind], image };
@@ -591,9 +639,52 @@ export function createLibraryCallbacks(deps) {
       }
       return entry;
     },
+    /**
+     * Pictures dropped into the folder «Библиотека/<Места|Вещи>/<папки>» become places and things. The picture stays where it
+     * lies: the entry points at that file. The folders under the shelf are the library's folders (made when missing). Entries are
+     * made first, all of them; describing comes after, one by one, and a failure never stops the rest.
+     * deps.inbox: { list() → [{ path, public }] }; onProgress(done, total, stage).
+     * Returns { added, described, failed, undescribed, skipped: [{ path, problem }] } or null when declined.
+     */
+    onLibraryImportInbox: async ({ describe: describeNow = false, onProgress = () => {} } = {}) => {
+      if (!deps.inbox) throw new Error('Папка для картинок не подключена.');
+      const files = newLibraryFiles(await deps.inbox.list(), library.get());
+      if (!files.length) throw new Error('В папке «Библиотека» нет новых картинок.');
+      const placed = files.map(file => ({ ...file, place: placeFromLibraryPath(file.path) }));
+      const skipped = placed.filter(file => file.place.problem).map(file => ({ path: file.path, problem: file.place.problem }));
+      const todo = placed.filter(file => !file.place.problem);
+      if (!todo.length) return { added: 0, described: 0, failed: 0, undescribed: 0, skipped };
+      const ok = await confirm('Забрать картинки из папки',
+        `Новых записей: ${todo.length}. Картинки останутся в своих папках, записи будут показывать их оттуда; нужных папок в библиотеке я заведу сам.${describeNow ? ` Модель опишет каждую (${todo.length} запросов, по одному).` : ''} Продолжить?`);
+      if (!ok) return null;
+      const result = { added: 0, described: 0, failed: 0, undescribed: 0, skipped };
+      const made = [];
+      let working = library.get();
+      for (const [index, file] of todo.entries()) {
+        try {
+          const added = addFromTreePicture(working, file.place, file.public, PLACEHOLDERS[file.place.kind]);
+          working = added.library;
+          made.push({ kind: file.place.kind, id: added.entry.id, path: file.path });
+          result.added += 1;
+        } catch (error) {
+          result.failed += 1;
+          deps.log?.('warn', `Картинка из папки не стала записью: ${file.path}`, error);
+        }
+        try { onProgress(index + 1, todo.length, 'add'); } catch { /* the page may be gone */ }
+      }
+      if (made.length) library.set(working);
+      if (describeNow) {
+        for (const [index, item] of made.entries()) {
+          try { onProgress(index + 1, made.length, 'describe'); } catch { /* the page may be gone */ }
+          try { await describe(item.kind, item.id); result.described += 1; }
+          catch (error) { result.undescribed += 1; deps.log?.('warn', `Запись из папки создана, но не описалась: ${item.path}`, error); }
+        }
+      }
+      return result;
+    },
     onLibrarySetImage: async ({ kind = 'places', id, imageDataUrl }) => {
       const old = entryOf(kind, id).image ?? '';
-      const image = await deps.upload(imageDataUrl, uniqueId(IDS[kind] ?? 'place'));
+      const image = await deps.upload(imageDataUrl, uniqueId(IDS[kind] ?? 'place'), kind);
       const entry = await change(kind, id, { image });
       await forgetImages([old]);
       // A persona's card: her picture is also her avatar in SillyTavern (the chat, its own lists), so it goes there too.
@@ -614,9 +705,11 @@ export function createLibraryCallbacks(deps) {
      * The looks (and, on request, the voice) of a persona card from a picture: `picture` (a data: URL) when one was picked, else the card's
      * own, else her picture in SillyTavern. Only the text comes back: the card changes when the user puts it into a section.
      */
+    /** The same for a card of any character (not only a persona's): the one entry point of the picture step of «Написать разделы». */
+    onCardDescribe: payload => callbacks.onPersonaDescribe(payload),
     onPersonaDescribe: async ({ cardId, picture = '', wishes = '', voice = false, voiceWishes = '' }) => {
-      const card = (library.get().characters ?? []).find(item => item.id === cardId && item.persona);
-      if (!card) throw new Error('Такой карточки персоны нет.');
+      const card = (library.get().characters ?? []).find(item => item.id === cardId);
+      if (!card) throw new Error('Такой карточки нет.');
       if (!deps.ask) throw new Error('Модель для картинок не настроена.');
       let source = picture ? (deps.prepareImage ? await deps.prepareImage(picture) : picture)
         : card.image ? await deps.imageForModel(card.image) : card.avatar && deps.avatarForModel ? await deps.avatarForModel(card.avatar) : '';

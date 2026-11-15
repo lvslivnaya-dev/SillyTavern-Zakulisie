@@ -85,7 +85,7 @@ export function startConnection(doc, { context, settings = {}, save = () => {} }
     if (!row?.parentElement) return () => {};
 
     const panel = doc.createElement('div');
-    panel.className = 'pud-conn';
+    panel.className = 'pud-conn pud-conn-panel';
     row.before(panel);
     row.classList.add(NATIVE_OFF);
 

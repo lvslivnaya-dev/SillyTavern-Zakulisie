@@ -18,6 +18,8 @@
  *   POST /tree/upload { image, format, dir, filename } → { path }
  *   POST /tree/move { path, dir }          → { path } (the card moved to another section)
  *   POST /tree/delete { path }
+ * The library tree «Библиотека/<Вещи|Места>/<папки библиотеки>/картинка.jpg» works the same way: the same /tree/… routes
+ * with `tree: 'library'` (body, or ?tree= for GET), and GET /library/<path in the tree> for the pictures.
  *
  * The chosen folder is remembered per SillyTavern user in <user data>/kulisy-images.json,
  * so updating the plugin never loses it. Only pictures inside the chosen folder are
@@ -29,7 +31,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 export const PLUGIN_ID = 'kulisy-images';
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 export const SUBFOLDERS = Object.freeze(['kulisy-wardrobe', 'kulisy-library']);
 export const FORMATS = Object.freeze(['png', 'jpg', 'webp', 'gif']);
 export const CONFIG_NAME = 'kulisy-images.json';
@@ -160,9 +162,17 @@ export function browseWindows(initial = '', { timeoutMs = 300_000, run = spawn }
 // Pictures are dropped there by hand (or saved there by the extension); a card points
 // at its file, which stays where it is and moves only when the card changes section.
 
-export const INBOX = 'Гардероб';
-export const TREE_PREFIX = `api/plugins/${PLUGIN_ID}/wardrobe/`;
+/** The two trees: the wardrobe (shelf/gender/section) and the library (shelf/folder/subfolder…: the library's folders nest). */
+export const TREES = Object.freeze({
+  wardrobe: Object.freeze({ name: 'wardrobe', root: 'Гардероб', prefix: `api/plugins/${PLUGIN_ID}/wardrobe/`, depth: 3 }),
+  library: Object.freeze({ name: 'library', root: 'Библиотека', prefix: `api/plugins/${PLUGIN_ID}/library/`, depth: 5 }),
+});
+export const INBOX = TREES.wardrobe.root;
+export const TREE_PREFIX = TREES.wardrobe.prefix;
 export const INBOX_LIMITS = Object.freeze({ dirs: 400, depth: 3, files: 5000 });
+/** The tree a request means ('library' or, by default, the wardrobe); a path tells its tree by its prefix. */
+const treeNamed = value => (value === 'library' ? TREES.library : TREES.wardrobe);
+const treeOfPath = value => (String(value ?? '').replace(/^\/+/, '').startsWith(TREES.library.prefix) ? TREES.library : TREES.wardrobe);
 const SEGMENT_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} _.()-]{0,59}$/u;
 const INBOX_FILE_PATTERN = /^[^\\/:*?"<>|\u0000-\u001f]{1,200}\.(png|jpe?g|webp|gif|bmp|avif)$/i;
 
@@ -179,11 +189,11 @@ export function cleanTreeName(value, format) {
 }
 
 /** 'Персона/Женское/Верх/фото.jpg' → ['Персона', 'Женское', 'Верх', 'фото.jpg'] or null. */
-export function parseInboxPath(value) {
+export function parseInboxPath(value, tree = TREES.wardrobe) {
   const text = String(value ?? '').replace(/\\/g, '/');
-  if (text.startsWith('/')) return null; // always relative to «Гардероб»
+  if (text.startsWith('/')) return null; // always relative to the tree's root
   const parts = text.split('/').filter(Boolean);
-  if (parts.length < 1 || parts.length > INBOX_LIMITS.depth + 1) return null;
+  if (parts.length < 1 || parts.length > tree.depth + 1) return null;
   const name = parts.at(-1);
   if (!INBOX_FILE_PATTERN.test(name) || name.startsWith('.') || name.trim() !== name) return null;
   if (parts.slice(0, -1).some(part => cleanSegment(part) !== part)) return null;
@@ -191,25 +201,26 @@ export function parseInboxPath(value) {
 }
 
 /** 'Персона/Женское/Верх' → parts, or null. */
-export function parseTreeDir(value) {
+export function parseTreeDir(value, tree = TREES.wardrobe) {
   const parts = String(value ?? '').split('/').filter(Boolean);
-  if (parts.length > INBOX_LIMITS.depth || parts.some(part => cleanSegment(part) !== part)) return null;
+  if (parts.length > tree.depth || parts.some(part => cleanSegment(part) !== part)) return null;
   return parts;
 }
 
 /** The path a card keeps for a picture of the tree (segments as they are, not URL-encoded). */
-export function treePublicPath(parts) {
-  return `${TREE_PREFIX}${parts.join('/')}`;
+export function treePublicPath(parts, tree = TREES.wardrobe) {
+  return `${tree.prefix}${parts.join('/')}`;
 }
 
-/** A card's path (with or without the leading /) or a tree-relative path → parts, or null. */
+/** A card's path (with or without the leading /) or a tree-relative path → parts, or null. The prefix says which tree. */
 export function treeParts(value) {
   const text = String(value ?? '').replace(/^\/+/, '');
+  const tree = treeOfPath(text);
   // Only a card path may start with '/'; a bare tree path is always relative.
-  return parseInboxPath(text.startsWith(TREE_PREFIX) ? text.slice(TREE_PREFIX.length) : String(value ?? ''));
+  return parseInboxPath(text.startsWith(tree.prefix) ? text.slice(tree.prefix.length) : String(value ?? ''), tree);
 }
 
-async function listInboxFiles(root) {
+async function listInboxFiles(root, tree = TREES.wardrobe) {
   const files = [];
   async function walk(dir, parts) {
     if (files.length >= INBOX_LIMITS.files) return;
@@ -220,11 +231,11 @@ async function listInboxFiles(root) {
       if (files.length >= INBOX_LIMITS.files) return;
       const next = [...parts, entry.name];
       if (entry.isDirectory()) {
-        if (parts.length < INBOX_LIMITS.depth && cleanSegment(entry.name) === entry.name) await walk(path.join(dir, entry.name), next);
-      } else if (entry.isFile() && parseInboxPath(next.join('/'))) {
+        if (parts.length < tree.depth && cleanSegment(entry.name) === entry.name) await walk(path.join(dir, entry.name), next);
+      } else if (entry.isFile() && parseInboxPath(next.join('/'), tree)) {
         try {
           const stat = await fsp.stat(path.join(dir, entry.name));
-          files.push({ path: next.join('/'), public: treePublicPath(next), size: stat.size, modified: stat.mtimeMs });
+          files.push({ path: next.join('/'), public: treePublicPath(next, tree), size: stat.size, modified: stat.mtimeMs });
         } catch { /* gone meanwhile */ }
       }
     }
@@ -249,6 +260,29 @@ async function freeName(dir, name) {
 /** The route handlers, separate from Express so tests can call them. */
 export function createHandlers({ platform = process.platform, browse = browseWindows } = {}) {
   const fail = (response, status, error) => response.status(status).send({ error });
+
+  /** A handler that serves the pictures of one tree (the wardrobe's or the library's). */
+  function serveTree(tree) {
+    return async function treeFile(request, response) {
+      try {
+        if (request.method !== 'GET' && request.method !== 'HEAD') return response.sendStatus(405);
+        let relative;
+        try { relative = String(request.path ?? '').split('/').filter(Boolean).map(decodeURIComponent).join('/'); }
+        catch { return response.sendStatus(404); }
+        const parts = parseInboxPath(relative, tree);
+        if (!parts) return response.sendStatus(404);
+        const { folder } = await readConfig(request);
+        if (!folder) return response.sendStatus(404);
+        const root = path.join(folder, tree.root);
+        const target = path.join(root, ...parts);
+        if (!isInside(root, target) || !fs.existsSync(target)) return response.sendStatus(404);
+        response.sendFile(parts.at(-1), { root: path.dirname(target), dotfiles: 'deny', headers: { 'Cache-Control': 'private, max-age=3600' } });
+      } catch (error) {
+        console.warn(`[${PLUGIN_ID}] tree picture could not be sent:`, error?.message ?? error);
+        if (!response.headersSent) response.sendStatus(500);
+      }
+    };
+  }
 
   async function readyFolder(request) {
     const { folder } = await readConfig(request);
@@ -337,12 +371,13 @@ export function createHandlers({ platform = process.platform, browse = browseWin
       try {
         const current = await readyFolder(request);
         if (!current.ready) return fail(response, 409, current.error);
+        const tree = treeNamed(request.body?.tree);
         const dirs = Array.isArray(request.body?.dirs) ? request.body.dirs.slice(0, INBOX_LIMITS.dirs) : [];
-        const root = path.join(current.folder, INBOX);
+        const root = path.join(current.folder, tree.root);
         await fsp.mkdir(root, { recursive: true });
         let created = 0;
         for (const dir of dirs) {
-          const parts = parseTreeDir(dir);
+          const parts = parseTreeDir(dir, tree);
           if (!parts?.length) continue;
           const target = path.join(root, ...parts);
           if (!isInside(root, target)) continue;
@@ -359,73 +394,60 @@ export function createHandlers({ platform = process.platform, browse = browseWin
       try {
         const current = await readyFolder(request);
         if (!current.ready) return fail(response, 409, current.error);
-        response.send({ files: await listInboxFiles(path.join(current.folder, INBOX)) });
+        const tree = treeNamed(request.query?.tree);
+        response.send({ files: await listInboxFiles(path.join(current.folder, tree.root), tree) });
       } catch (error) {
         fail(response, 500, error?.message ?? String(error));
       }
     },
 
     /** GET /wardrobe/<segments, URL-encoded> → the picture. */
-    async treeFile(request, response) {
-      try {
-        if (request.method !== 'GET' && request.method !== 'HEAD') return response.sendStatus(405);
-        let relative;
-        try { relative = String(request.path ?? '').split('/').filter(Boolean).map(decodeURIComponent).join('/'); }
-        catch { return response.sendStatus(404); }
-        const parts = parseInboxPath(relative);
-        if (!parts) return response.sendStatus(404);
-        const { folder } = await readConfig(request);
-        if (!folder) return response.sendStatus(404);
-        const root = path.join(folder, INBOX);
-        const target = path.join(root, ...parts);
-        if (!isInside(root, target) || !fs.existsSync(target)) return response.sendStatus(404);
-        response.sendFile(parts.at(-1), { root: path.dirname(target), dotfiles: 'deny', headers: { 'Cache-Control': 'private, max-age=3600' } });
-      } catch (error) {
-        console.warn(`[${PLUGIN_ID}] tree picture could not be sent:`, error?.message ?? error);
-        if (!response.headersSent) response.sendStatus(500);
-      }
-    },
+    treeFile: serveTree(TREES.wardrobe),
+    /** GET /library/<segments, URL-encoded> → the picture. */
+    libraryFile: serveTree(TREES.library),
 
-    /** Save a picture into a folder of the tree: { image (base64), format, dir, filename } → { path }. */
+    /** Save a picture into a folder of the tree: { image (base64), format, dir, filename, tree? } → { path }. */
     async treeUpload(request, response) {
       try {
         const { image, format, dir, filename } = request.body ?? {};
-        const parts = parseTreeDir(dir);
-        if (!parts) return fail(response, 400, 'Недопустимая папка гардероба.');
+        const tree = treeNamed(request.body?.tree);
+        const parts = parseTreeDir(dir, tree);
+        if (!parts) return fail(response, 400, 'Недопустимая папка для картинок.');
         if (!FORMATS.includes(format)) return fail(response, 400, 'Нужен PNG, JPEG, WebP или GIF.');
         if (typeof image !== 'string' || !image || image.length > MAX_BASE64) return fail(response, 400, 'Картинки нет или она слишком большая.');
         const current = await readyFolder(request);
         if (!current.ready) return fail(response, 409, current.error);
-        const root = path.join(current.folder, INBOX);
+        const root = path.join(current.folder, tree.root);
         const targetDir = path.join(root, ...parts);
-        if (!isInside(root, path.join(targetDir, 'x'))) return fail(response, 400, 'Недопустимая папка гардероба.');
+        if (!isInside(root, path.join(targetDir, 'x'))) return fail(response, 400, 'Недопустимая папка для картинок.');
         await fsp.mkdir(targetDir, { recursive: true });
         const name = await freeName(targetDir, cleanTreeName(filename, format));
         await fsp.writeFile(path.join(targetDir, name), Buffer.from(image, 'base64'));
-        response.send({ path: treePublicPath([...parts, name]) });
+        response.send({ path: treePublicPath([...parts, name], tree) });
       } catch (error) {
         fail(response, 500, error?.message ?? String(error));
       }
     },
 
-    /** Move a picture to another folder of the tree, keeping its name: { path, dir } → { path }. */
+    /** Move a picture to another folder of its tree, keeping its name: { path, dir } → { path }. */
     async treeMove(request, response) {
       try {
+        const tree = treeOfPath(request.body?.path);
         const parts = treeParts(request.body?.path);
-        const dirParts = parseTreeDir(request.body?.dir);
+        const dirParts = parseTreeDir(request.body?.dir, tree);
         if (!parts || !dirParts) return fail(response, 400, 'Недопустимый путь.');
         const { folder } = await readConfig(request);
         if (!folder) return fail(response, 404, 'Папка не выбрана.');
-        const root = path.join(folder, INBOX);
+        const root = path.join(folder, tree.root);
         const from = path.join(root, ...parts);
         const targetDir = path.join(root, ...dirParts);
         if (!isInside(root, from) || !isInside(root, path.join(targetDir, 'x'))) return fail(response, 400, 'Недопустимый путь.');
         if (!fs.existsSync(from)) return fail(response, 404, 'Файла уже нет.');
-        if (path.dirname(from) === targetDir) return response.send({ path: treePublicPath(parts) });
+        if (path.dirname(from) === targetDir) return response.send({ path: treePublicPath(parts, tree) });
         await fsp.mkdir(targetDir, { recursive: true });
         const name = await freeName(targetDir, parts.at(-1));
         await fsp.rename(from, path.join(targetDir, name));
-        response.send({ path: treePublicPath([...dirParts, name]) });
+        response.send({ path: treePublicPath([...dirParts, name], tree) });
       } catch (error) {
         fail(response, 500, error?.message ?? String(error));
       }
@@ -433,11 +455,12 @@ export function createHandlers({ platform = process.platform, browse = browseWin
 
     async treeDelete(request, response) {
       try {
+        const tree = treeOfPath(request.body?.path);
         const parts = treeParts(request.body?.path);
         if (!parts) return fail(response, 400, 'Недопустимый путь.');
         const { folder } = await readConfig(request);
         if (!folder) return fail(response, 404, 'Папка не выбрана.');
-        const root = path.join(folder, INBOX);
+        const root = path.join(folder, tree.root);
         const target = path.join(root, ...parts);
         if (!isInside(root, target)) return fail(response, 400, 'Недопустимый путь.');
         try { await fsp.unlink(target); }
@@ -480,6 +503,7 @@ export async function init(router) {
   router.post('/tree/move', handlers.treeMove);
   router.post('/tree/delete', handlers.treeDelete);
   router.use('/wardrobe', handlers.treeFile);
+  router.use('/library', handlers.libraryFile);
   console.log(`[${PLUGIN_ID}] ${VERSION}: pictures of «Кулисы» can be kept in a folder on this computer.`);
 }
 

@@ -58,3 +58,30 @@ test('редактор сбоку: рядом с библиотекой, пов�
   undo();
   assert.equal(document.querySelector('[data-win="loreeditor2"]'), null);
 });
+
+test('редактор сбоку: клик по окну библиотеки не сбрасывает размер редактора', async () => {
+  const { window } = new JSDOM('<!doctype html><body><div id="top-settings-holder"></div></body>', { pretendToBeVisual: true });
+  const { document } = window;
+  const books = { Альфа: entries('альфа') };
+  const api = {
+    ready: async () => {}, names: () => Object.keys(books), selected: () => [], load: async name => structuredClone(books[name]), save: async () => {},
+    newEntry: () => 1, keyMap: () => ({ comment: 'comment', key: 'keys' }), setOriginal() {}, deleteOriginal() {}, splitKeys: text => text.split(','),
+    tokens: async () => 1, setGlobal() {}, moveEntry: async () => true, editorBook: () => '', closeNativeEditor() {},
+  };
+  const shared = {};
+  const undo = startLoreEditor(document, { context: { characters: [], eventTypes: {} }, settings: migrateSettings({}), save() {}, api, shared });
+  const library = { rect: { left: 20, top: 50, width: 500, height: 600 }, isOpen: true };
+  try {
+    await shared.loreEditor.toggleDocked('Альфа', library);
+    await wait(30);
+    const editor = document.querySelector('[data-win="loreeditor"]');
+    assert.equal(editor.style.width, '488px');
+    // человек растянул редактор
+    editor.style.width = '470px';
+    editor.style.height = '555px';
+    // клик по библиотеке: библиотека только поднялась наверх (изменился z-index), её рамка та же
+    shared.loreEditor.follow();
+    assert.equal(editor.style.width, '470px', 'клик по библиотеке не вернул размер');
+    assert.equal(editor.style.height, '555px');
+  } finally { undo(); }
+});

@@ -12,6 +12,7 @@ import {
 } from '../core/lore-entries.js';
 import { plural } from '../core/library.js';
 import { loreApi } from '../integration/lorebooks-api.js';
+import { translateText } from '../../integration/card-translate.js';
 import { skipSameHtml } from './dom.js';
 import { icon } from './icons.js';
 import { createWindow } from './window.js';
@@ -36,7 +37,7 @@ export function startLoreEditor(doc, deps) {
 const DOCK_GAP = 8;
 const DOCK_MIN = 420;
 
-export function createLoreEditor(doc, { context, settings, save, api = loreApi, shared = {}, secondary = false }) {
+export function createLoreEditor(doc, { context, settings, save, api = loreApi, shared = {}, secondary = false, translate = translateText }) {
   const view = doc.defaultView;
   const undo = [];
   const live = () => globalThis.SillyTavern?.getContext?.() ?? context;
@@ -211,7 +212,7 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
           <label class="pud-lelogic"><span>Основной ключ</span><select class="text_pole" data-f="selectiveLogic">${LOGIC.map(item => `<option value="${item.value}" ${Number(entry.selectiveLogic) === item.value ? 'selected' : ''}>${item.title}</option>`).join('')}</select></label>
           <div class="pud-field"><span>Вторичные ключи</span>${chips('keysecondary', valuesOf(entry, 'keysecondary'), 'вторичный ключ')}</div>
         </div>
-        <label class="pud-field pud-lecontent"><span>Содержимое</span><textarea class="text_pole" data-f="content" rows="12">${escapeHtml(entry.content ?? '')}</textarea></label>
+        <div class="pud-field pud-lecontent"><span class="pud-lehd">Содержимое<span class="pud-letools"><span data-tr-status></span><button type="button" class="menu_button" data-act="tr" title="Перевести содержимое записи на английский. Название, ключи и настройки не меняются">🌐 На английский</button><button type="button" class="menu_button" data-act="tr-undo" title="Вернуть текст, который был до перевода"${translated.has(trKey(entry.uid)) ? '' : ' hidden'}>↩ Оригинал</button></span></span><textarea class="text_pole" data-f="content" rows="12">${escapeHtml(entry.content ?? '')}</textarea></div>
         <small class="pud-tech pud-lecount"></small>
         <div class="pud-lepos">
           <label class="pud-field pud-lepos-where"><span>Куда вставлять</span><select class="text_pole" data-f="position">${POSITIONS.map(item => `<option value="${item.value}" ${position === item.value ? 'selected' : ''}>${item.title}</option>`).join('')}</select></label>
@@ -389,6 +390,64 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
     target.value = value === null || value === undefined ? '' : String(value);
   });
 
+
+  // ── перевод содержимого записи (только текст записи: название, ключи и настройки не трогаем) ──
+  const translated = new Map(); // `${лорбук}:${uid}` → оригинал до перевода
+  const trKey = uid => `${state.name}:${uid}`;
+  const trStatus = text => { const node = edit.querySelector('[data-tr-status]'); if (node) node.textContent = text; };
+  /** Записать новое содержимое записи uid (даже если пока открыта другая) и обновить поле, если запись на экране. */
+  const setContentFor = (uid, text) => {
+    const target = state.data?.entries?.[uid];
+    if (!target) return;
+    target.content = text;
+    const original = originalTarget('content', text, api.keyMap());
+    if (original) api.setOriginal(state.data, uid, original[0], original[1]);
+    touch();
+    if (current()?.uid === uid) {
+      const field = edit.querySelector('[data-f="content"]');
+      if (field) field.value = text;
+      countTokens();
+    }
+  };
+  const refreshTrButtons = () => {
+    const entry = current();
+    const undoButton = edit.querySelector('[data-act="tr-undo"]');
+    if (undoButton) undoButton.hidden = !(entry && translated.has(trKey(entry.uid)));
+  };
+  let translating = false;
+  async function translateEntry() {
+    const entry = current();
+    if (!entry || translating) return;
+    const uid = entry.uid;
+    const original = String(entry.content ?? '');
+    if (!original.trim()) { trStatus('Содержимое пустое: переводить нечего.'); return; }
+    translating = true;
+    for (const button of edit.querySelectorAll('[data-act="tr"], [data-act="tr-undo"]')) button.disabled = true;
+    trStatus('Перевожу…');
+    try {
+      const result = await translate(live(), original, 'перевод записи лорбука…');
+      if (!state.data?.entries?.[uid]) return;
+      translated.set(trKey(uid), original);
+      setContentFor(uid, result);
+      trStatus('Переведено. Оригинал можно вернуть.');
+    } catch (error) {
+      report('редактор лорбука: перевод', error);
+      trStatus(`Не вышло: ${String(error?.message ?? error)}`);
+    } finally {
+      translating = false;
+      for (const button of edit.querySelectorAll('[data-act="tr"], [data-act="tr-undo"]')) button.disabled = false;
+      refreshTrButtons();
+    }
+  }
+  const undoTranslate = () => {
+    const entry = current();
+    if (!entry || !translated.has(trKey(entry.uid))) return;
+    setContentFor(entry.uid, translated.get(trKey(entry.uid)));
+    translated.delete(trKey(entry.uid));
+    trStatus('Оригинал возвращён.');
+    refreshTrButtons();
+  };
+
   // ключи-чипсы: Enter или запятая добавляет, × убирает, Backspace в пустом поле убирает последний
   const setKeys = (field, values) => {
     const entry = current();
@@ -460,6 +519,8 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
   edit.addEventListener('toggle', event => { if (event.target.classList?.contains('pud-lemore')) state.moreOpen = event.target.open; }, true);
 
   win.body.addEventListener('click', event => {
+    if (event.target.closest('[data-act="tr"]')) { translateEntry(); return; }
+    if (event.target.closest('[data-act="tr-undo"]')) { undoTranslate(); return; }
     const unkey = event.target.closest('[data-unkey]');
     if (unkey) {
       const field = unkey.closest('[data-keys]').dataset.keys;
@@ -548,11 +609,21 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
 
   // ── связь с библиотекой и таверной ──
   /** Docked: stands beside the library window (to the right if there is room, else to the left), same height. */
-  const layoutDock = () => {
+  // Клик по окну библиотеки только поднимает его (меняется z-index), а не двигает: пока библиотека не сдвинулась и
+  // не сменила размер, редактор не трогаем, иначе он каждый раз «возвращал бы» свою настройку размера.
+  let lastDockKey = '';
+  let placedWidth = 0;
+  let dockWidth = prefs.dockWidth ?? 640;
+  const layoutDock = (force = false) => {
     if (!library || !library.isOpen || !win.isOpen) return;
     const lib = library.rect;
     const room = win.viewport;
-    const wanted = Math.max(DOCK_MIN, Math.min(prefs.dockWidth ?? 640, 820));
+    const key = [lib.left, lib.top, lib.width, lib.height, room.width, room.height].map(value => Math.round(value)).join(',');
+    if (!force && key === lastDockKey) return;
+    lastDockKey = key;
+    // если человек сам растянул редактор по ширине, дальше держим его ширину
+    if (placedWidth && Math.abs(win.rect.width - placedWidth) > 2) dockWidth = win.rect.width;
+    const wanted = Math.max(DOCK_MIN, Math.min(dockWidth, 820));
     const right = lib.left + lib.width + DOCK_GAP;
     const spaceRight = room.width - right - DOCK_GAP;
     const spaceLeft = lib.left - DOCK_GAP * 2;
@@ -560,6 +631,7 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
     if (spaceRight >= DOCK_MIN) { left = right; width = Math.min(wanted, spaceRight); }
     else if (spaceLeft >= DOCK_MIN) { width = Math.min(wanted, spaceLeft); left = lib.left - DOCK_GAP - width; }
     else { width = Math.min(wanted, room.width - DOCK_GAP * 2); left = room.width - width - DOCK_GAP; }
+    placedWidth = width;
     win.place({ left, top: lib.top, width, height: lib.height });
   };
   const openSecond = async (name, uid = null) => {
@@ -575,7 +647,7 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
       if (win.isOpen && state.name === name && library) { library = null; win.close(); return false; }
       library = libraryWindow;
       await openBook(name);
-      layoutDock();
+      layoutDock(true);
       return true;
     },
     /** The library moved or changed size: follow it while docked. */

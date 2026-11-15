@@ -25,6 +25,14 @@ import { startExtensions } from './ui/extensions.js';
 import { startLorebooks } from './ui/lorebooks.js';
 import { startLoreEditor } from './ui/lore-editor.js';
 import { startLoreTrace } from './ui/lore-trace.js';
+import { startPeek } from './ui/peek.js';
+import { startQuick } from './ui/quick.js';
+import { startMoodTheme } from './ui/mood-theme.js';
+import { startRepeats } from './ui/repeats.js';
+import { startThreads } from './ui/threads.js';
+import { startMood } from './ui/mood.js';
+import { startWeatherSound } from './ui/weather-sound.js';
+import { startRelGraph } from './ui/relgraph.js';
 
 const FONT_BASE = new URL('../../assets/fonts/', import.meta.url);
 
@@ -104,6 +112,38 @@ const MODULES = [
   {
     name: 'что сработало из лорбуков',
     start: ({ context, settings, shared }) => startLoreTrace(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared }),
+  },
+  {
+    name: 'Слива выглядывает',
+    start: ({ context, settings, shared }) => startPeek(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared }),
+  },
+  {
+    name: 'быстрое меню шторки',
+    start: ({ shared, bridge }) => startQuick(document, { shared, bridge }),
+  },
+  {
+    name: 'повторы',
+    start: ({ context, settings, shared }) => startRepeats(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared }),
+  },
+  {
+    name: 'нити',
+    start: ({ context, settings, shared }) => startThreads(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared }),
+  },
+  {
+    name: 'настроение',
+    start: ({ context, settings, shared, bridge }) => startMood(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared, bridge }),
+  },
+  {
+    name: 'тема по настроению',
+    start: ({ context, settings, shared, bridge }) => startMoodTheme(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared, bridge }),
+  },
+  {
+    name: 'звуки погоды',
+    start: ({ context, settings, shared, bridge }) => startWeatherSound(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared, bridge }),
+  },
+  {
+    name: 'график отношений',
+    start: ({ context, settings, shared, bridge }) => startRelGraph(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared, bridge }),
   },
 ];
 

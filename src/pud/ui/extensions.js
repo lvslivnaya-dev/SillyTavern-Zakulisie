@@ -10,7 +10,7 @@ import {
   NOBODY, OFF, ORPHANS, SORT_NAME, SORT_RECENT, UPDATE, assignBlocks, buildExtensions, extensionCounts, filterExtensions,
 } from '../core/extensions.js';
 import { ALL, NO_FOLDER, createFolder, deleteFolder, folderOf, moveToFolder, renameFolder } from '../core/personas.js';
-import { extensionApi } from '../integration/extensions-api.js';
+import { extensionApi, repoPage } from '../integration/extensions-api.js';
 import { skipSameHtml } from './dom.js';
 import { icon } from './icons.js';
 import { REPLACED_EXTENSIONS } from './theme.js';
@@ -34,7 +34,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
   const view = doc.defaultView;
   const undo = [];
   const live = () => globalThis.SillyTavern?.getContext?.() ?? context;
-  const state = { view: ALL, query: '', sort: settings.extensionsSort === SORT_RECENT ? SORT_RECENT : SORT_NAME, installed: {}, picked: '', updates: {}, checked: false, checking: false, pending: new Set(), extras: false, ready: false };
+  const state = { view: ALL, query: '', sort: settings.extensionsSort === SORT_RECENT ? SORT_RECENT : SORT_NAME, installed: {}, origins: {}, asked: new Set(), picked: '', updates: {}, checked: false, checking: false, pending: new Set(), extras: false, ready: false };
 
   // ── окно ──
   const win = createWindow(doc, {
@@ -167,6 +167,19 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
   };
 
   // ── данные ──
+  /** Автор расширения: ссылкой на его страницу в GitHub, когда адрес известен (из манифеста или из git). */
+  const originOf = item => state.origins[item.id] || repoPage(api.manifest?.(item.id)?.homePage);
+  const authorHtml = item => {
+    if (!item.author) return '';
+    const url = originOf(item);
+    return url ? `<a class="pud-exauthor" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="Открыть страницу расширения: ${escapeHtml(url)}">${escapeHtml(item.author)}</a>` : escapeHtml(item.author);
+  };
+  /** Адрес из git тянем лениво, когда расширение выбрали: на весь список это был бы десяток запросов. */
+  const askOrigin = item => {
+    if (!item || item.system || state.origins[item.id] || state.asked.has(item.id) || !api.origin) return;
+    state.asked.add(item.id);
+    Promise.resolve(api.origin(item.id)).then(url => { if (url) { state.origins[item.id] = url; schedule(); } }).catch(() => {});
+  };
   const items = () => buildExtensions(api.names(), api.manifest, api.disabled(), api.types(), state.updates, state.installed);
   const byId = id => items().find(item => item.id === id);
   const replacedTitle = item => REPLACED_EXTENSIONS[item.folder];
@@ -200,7 +213,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
             <input type="checkbox" class="pud-exsw" ${item.enabled ? 'checked' : ''} title="${item.enabled ? 'Выключить' : 'Включить'}" aria-label="Включено">
             <div class="pud-exrow-info">
               <b>${escapeHtml(item.name)}</b>
-              <span class="pud-tech">${[item.version, item.author, item.system ? 'встроенное' : item.type === 'global' ? 'для всех' : ''].filter(Boolean).map(escapeHtml).join(' · ')}</span>
+              <span class="pud-tech">${[item.version && escapeHtml(item.version), authorHtml(item), item.system ? 'встроенное' : item.type === 'global' ? 'для всех' : ''].filter(Boolean).join(' · ')}</span>
             </div>
             <div class="pud-exrow-tags">
               ${item.update ? '<span class="pud-ptag pud-ptag-upd">обновление</span>' : ''}
@@ -235,10 +248,11 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
     }
     const mine = owners[item.id] ?? [];
     const replaced = replacedTitle(item);
+    askOrigin(item);
     head.innerHTML = `
       <div class="pud-exhead-row"><h3>${escapeHtml(item.name)}</h3>
         <label class="pud-exswitch"><input type="checkbox" class="pud-exsw" data-id="${escapeHtml(item.id)}" ${item.enabled ? 'checked' : ''}><span>${item.enabled ? 'включено' : 'выключено'}</span></label></div>
-      <span class="pud-tech">${[item.version && `версия ${item.version}`, item.author, item.system ? 'встроенное, обновляется вместе с таверной' : item.folder].filter(Boolean).map(escapeHtml).join(' · ')}</span>
+      <span class="pud-tech">${[item.version && `версия ${escapeHtml(item.version)}`, authorHtml(item), escapeHtml(item.system ? 'встроенное, обновляется вместе с таверной' : item.folder)].filter(Boolean).join(' · ')}</span>
       ${replaced ? '<p class="pud-hint">Его работу делает Закулисье, его можно выключить.</p>' : ''}
       <div class="pud-exhead-acts">
         ${item.update ? `<button type="button" class="menu_button pud-exupd" data-act="update">${icon('update')}Обновить</button>` : ''}
@@ -326,6 +340,7 @@ export function startExtensions(doc, { context, settings, save, api = extensionA
     if (target.dataset.linkTo && target.value) { settings.extensionLinks[target.value] = target.dataset.linkTo; save(); schedule(); }
   });
   win.body.addEventListener('click', event => {
+    if (event.target.closest('a.pud-exauthor')) return; // ссылка на страницу расширения: идёт по ссылке, строку не выбирает
     const viewButton = event.target.closest('[data-view]');
     if (viewButton) { state.view = viewButton.dataset.view; schedule(); return; }
     const tool = event.target.closest('[data-tool]')?.dataset.tool;

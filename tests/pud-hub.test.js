@@ -79,3 +79,24 @@ test('без верхней панели ничего не делает', () => 
   assert.equal(document.querySelector('.pud-win'), null);
   undo();
 });
+
+test('вкладки по блокам: родные → сливовые приблуды → визуал → ссылки значками → «Закулисье» последним', () => {
+  const { document } = tavern();
+  const shared = {};
+  const undo = startHub(document, { settings: { windows: {} }, save() {}, stopAll() {}, shared });
+  for (const [id, title] of [['palette', 'Палитра'], ['mood', 'Настроение'], ['chips', 'Кнопки пресета'], ['strange', 'Чужая'], ['moodtheme', 'Тема'], ['wand', 'Меню палочки'], ['peek', 'Слива']]) shared.hub.addTab(id, title, 'heart');
+  const order = [...document.querySelector('.pud-tabs').children].map(node => node.dataset?.tab ?? node.dataset?.groupHead ?? (node.classList.contains('pud-links') ? 'links' : node.className));
+  const at = id => order.indexOf(id);
+  const heads = ['native', 'sliva', 'visual'].map(at);
+  assert.deepEqual(heads, [...heads].sort((a, b) => a - b), 'блоки идут подряд');
+  assert.ok(heads[0] === 0, 'первый блок — родные настройки');
+  assert.ok(at('ai') < at('sliva') && at('wand') < at('sliva'), 'родные и меню палочки до сливовых');
+  assert.ok(at('chips') < at('peek') && at('peek') < at('mood') && at('mood') < at('strange'), 'сливовые по порядку, незнакомые в конец блока');
+  assert.ok(at('strange') < at('visual') && at('bg') > at('visual') && at('palette') < at('moodtheme'), 'визуал отдельным блоком');
+  assert.ok(at('moodtheme') < at('links'), 'ссылки после визуала');
+  assert.ok(document.querySelector('.pud-links > [data-tab="pud"]'), '«Закулисье» — кнопка в ряду ссылок');
+  const links = [...document.querySelectorAll('.pud-links a')];
+  assert.equal(links.length, HUB_LINKS.length);
+  for (const a of links) { assert.ok(a.title && a.getAttribute('aria-label') === a.title, 'название при наведении'); assert.equal(a.textContent.trim(), '', 'подписи нет, только значок'); }
+  undo();
+});

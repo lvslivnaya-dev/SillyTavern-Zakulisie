@@ -29,7 +29,9 @@ function chat() {
 }
 
 test('library things: a folder first, search, export and import with places in one file', () => {
-  assert.throws(() => addLibraryItem(emptyLibrary(), { name: 'Нож' }), /Сначала выберите папку/);
+  const loose = addLibraryItem(emptyLibrary(), { name: 'Нож' });
+  assert.equal(loose.library.folders.find(folder => folder.id === loose.item.folderId).name, 'Без папки');
+  assert.equal(addLibraryItem(loose.library, { name: 'Ключ' }).library.folders.length, 1);
   const { library, folder, bike } = shelf();
   assert.equal(folderContents(library, folder.id).items[0].id, bike.id);
   assert.deepEqual(searchLibraryItems(library, 'бабу').map(item => item.id), [bike.id]);
@@ -123,7 +125,6 @@ test('callbacks: things in folders, switched on by folder, saved from the chat, 
     loadBook: async () => ({ entries: { 0: { uid: 0, comment: 'Кастет', key: ['кастет'], content: 'Латунный кастет.' } } }),
   });
   const folder = callbacks.onLibraryAddFolder({ name: 'ТР' });
-  assert.throws(() => callbacks.onLibraryAddItem({ name: 'Нож' }), /Сначала выберите папку/);
   callbacks.onLibraryAddItem({ folderId: folder.id, name: 'Плащ Тосвы', ownerName: 'Майки' });
   await callbacks.onLibraryImportLorebook({ book: 'Мир', folderId: folder.id, kind: 'items' });
   assert.equal(settings.locationLibrary.items.length, 2);
@@ -178,7 +179,10 @@ test('«Вещи» → «Библиотека»: no thing outside a folder, a sw
     assert.deepEqual(calls.at(-1), ['onLibrarySaveItem', { itemId: 'ring', folderId: folder.id }]);
     assert.equal(byText('Библиотека вещей'), undefined, 'no page «Вещи» of its own in the world menu');
     byText('+ Вещь').click();
-    assert.ok(shadow.querySelector('.ku-newcard'), 'no folder open: the form asks for a name and a folder');
+    await flush();
+    assert.equal(shadow.querySelector('.ku-newcard'), null, 'no form: the thing is made at once');
+    assert.equal(calls.at(-1)[0], 'onLibraryAddItem');
+    assert.equal(calls.at(-1)[1].folderId, '', 'no folder open: the library puts it into «Без папки»');
     shadow.querySelector('.ku-folder').click();
     assert.equal(byText('+ Вещь').disabled, false);
     const card = shadow.querySelector('.ku-place-card');
