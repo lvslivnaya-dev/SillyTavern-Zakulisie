@@ -838,15 +838,17 @@ ${add}` : (d.fields[field.id] || add);
       adapt: { from: moved ? auPrompt(folderAu(library(), entry.folderId)) : 'a previous setting that is not known', to: auPrompt(folderAu(library(), draft.folderId)) },
     });
   };
+  /** The sections go into the card at once (a text written by the model, a piece moved into a section of its own): nothing waits for «Сохранить». */
+  const keepSections = async (entry, draft) => {
+    await invoke('onLibraryUpdateCharacter', { cardId: entry.id, changes: { sections: draft.sections } });
+    // the sections are saved now: only what is typed after them counts as unsaved
+    if (s.draft?.id === entry.id && s.draft.base !== undefined) { const base = JSON.parse(s.draft.base); base.sections = JSON.parse(JSON.stringify(draft.sections)); s.draft.base = JSON.stringify(base); }
+  };
   const genDeps = (entry, draft, gen) => ({
     gen, draft, entryId: entry.id,
     card: { name: draft.name, aliases: draft.aliases.split(',').map(value => value.trim()).filter(Boolean), gender: draft.gender },
     redraw: render, setStatus,
-    save: async () => {
-      await invoke('onLibraryUpdateCharacter', { cardId: entry.id, changes: { sections: draft.sections } });
-      // the sections are saved now: only what is typed after them counts as unsaved
-      if (s.draft?.id === entry.id && s.draft.base !== undefined) { const base = JSON.parse(s.draft.base); base.sections = JSON.parse(JSON.stringify(draft.sections)); s.draft.base = JSON.stringify(base); }
-    },
+    save: () => keepSections(entry, draft),
     generate: request => invoke('onCardGenerate', request),
     describe: request => invoke('onCardDescribe', request),
     where: { fandom: () => fandomOf(draft.folderId), folderAu: () => folderAu(library(), draft.folderId) },
@@ -870,13 +872,13 @@ ${add}` : (d.fields[field.id] || add);
     const leaveWith = action => { if (dirty()) { s.leaving = action; render(); } else action(); };
     const closeNow = () => { s.leaving = null; s.openId = ''; forget(); render(); };
     // A model is writing: closing would hide it, so the window is folded to the pill instead (the card stays, the work goes on).
-    const close = () => { if (s.gen?.running) { ctx.minimize?.(); return; } leaveWith(closeNow); };
+    const close = () => { if (s.gen?.running || s.translating?.id === entry.id) { ctx.minimize?.(); return; } leaveWith(closeNow); };
     if (!emb) layer.addEventListener('click', event => { if (event.target === layer) close(); });
     const dialog = element('section', { className: 'ku-wcard ku-ccard', role: emb ? 'region' : 'dialog', ...(emb ? {} : { 'aria-modal': 'true' }), 'aria-label': entry.name });
     if (!emb) dialog.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } });
     const siblings = entriesOf().filter(item => item.folderId === entry.folderId);
     const index = siblings.findIndex(item => item.id === entry.id);
-    const go = step => { if (s.gen?.running) { setStatus('Идёт запись: дождитесь конца или откройте другую карточку позже.', true); return; } const next = siblings[index + step]; if (next) leaveWith(() => { s.leaving = null; s.openId = next.id; forget(); render(); }); };
+    const go = step => { if (s.gen?.running || s.translating?.id === entry.id) { setStatus('Идёт запись: дождитесь конца или откройте другую карточку позже.', true); return; } const next = siblings[index + step]; if (next) leaveWith(() => { s.leaving = null; s.openId = next.id; forget(); render(); }); };
 
     // The draft: what the user changed and has not saved yet. Sections are a list of plain objects edited in place.
     if (s.draft?.id !== entry.id) {
@@ -937,6 +939,10 @@ ${add}` : (d.fields[field.id] || add);
       ]),
     ]) : null;
     if (s.leaving && !leaveNotice) s.leaving = null;
+    const translateFailed = s.translateError?.id === entry.id ? element('div', { className: 'ku-aunotice', role: 'alert' }, [
+      element('p', { text: `Перевод не удался: ${s.translateError.text}. Ничего не переведено наполовину: карточка осталась как была.` }),
+      element('div', { className: 'ku-row' }, [button('Понятно', 'btn small', () => { s.translateError = null; render(); })]),
+    ]) : null;
 
     // ---- The strip on top: portrait, name, other names, folder
     const portrait = entry.image
@@ -965,16 +971,18 @@ ${add}` : (d.fields[field.id] || add);
       ]),
     ]) : null;
     // A sign that the model is writing: seen on every page of the card, with the step it is on.
-    const writing = s.gen?.running ? element('div', { className: 'ku-genbadge', role: 'status' }, [
+    const translatingHere = s.translating?.id === entry.id;
+    const writing = s.gen?.running || translatingHere ? element('div', { className: 'ku-genbadge', role: 'status' }, [
       element('span', { className: 'ku-genspin', 'aria-hidden': 'true' }),
-      element('span', { text: s.gen.progress || 'Модель пишет карточку…' }),
+      element('span', { text: translatingHere ? s.translating.text : (s.gen.progress || 'Модель пишет карточку…') }),
     ]) : null;
-    if (writing) s.gen.badgeEl = writing.lastChild;
+    if (writing && !translatingHere) s.gen.badgeEl = writing.lastChild;
     const top = element('header', { className: 'ku-ctop' }, [
       element('div', { className: 'ku-cport-box' }, [portraitFrame(entry, portrait), refBox(entry)]),
       element('div', { className: 'ku-ctop-main' }, [
         element('div', { className: 'ku-cfields' }, [nameInput, aliasInput, genderPick, ...(folderPick ? [folderPick] : [])]),
         ...(writing ? [writing] : []),
+        ...(translateFailed ? [translateFailed] : []),
         ...(leaveNotice ? [leaveNotice] : []),
         ...(auNotice ? [auNotice] : []),
         element('p', { className: 'ku-hint', text: 'Имя и «другие имена» — как героя зовут в постах: имя, фамилия, клички, прозвища. Через запятую. Английские варианты и знаки сами убираются. Склонения каждого слова пишутся слева в разделе «Имена»: оттуда модель берёт написание и падежи, а карточка узнаёт героя в постах. В одной папке имена не повторяются, в разных можно.' }),
@@ -1182,12 +1190,22 @@ ${add}` : (d.fields[field.id] || add);
     const english = cardIsEnglish(entry);
     const strip = element('div', { className: `ku-cstrip${note?.stale ? ' stale' : ''}` }, [
       element('span', { className: `ku-chip${english ? ' told' : ''}`, text: english ? 'Текст на английском' : 'Текст на русском' }),
-      ...(english ? [] : [button('Перевести на английский', 'btn small', () => attempt(async () => {
-        setStatus('Перевожу карточку по разделам, это может занять минуту…');
+      ...(english ? [] : [Object.assign(button(s.translating?.id === entry.id ? 'Перевожу…' : 'Перевести на английский', 'btn small', () => attempt(async () => {
+        if (s.translating) return;
+        setStatus('Перевожу карточку по разделам, это может занять несколько минут…');
         await persist();
-        await invoke('onLibraryTranslateCard', { cardId: entry.id });
+        const job = s.translating = { id: entry.id, text: 'Начинаю перевод…' };
+        s.translateError = null;
+        render();
+        try {
+          await invoke('onLibraryTranslateCard', { cardId: entry.id, onProgress: (done, total, title) => { job.text = `Перевожу «${title}» (${done + 1} из ${total})…`; render(); } });
+        } catch (error) {
+          // a failed translation stays on the card until the next try: a line in the header is easy to miss
+          s.translateError = { id: entry.id, text: error?.message || String(error) };
+          throw error;
+        } finally { s.translating = null; render(); }
         forget();
-      }, 'Карточка переведена на английский'), 'Каждый раздел переводится моделью один к одному, без добавлений и пропусков')]),
+      }, 'Карточка переведена на английский'), 'Каждый раздел переводится моделью один к одному, без добавлений и пропусков'), { disabled: Boolean(s.translating) })]),
       element('span', { className: 'ku-hint ku-cstrip-note', text: english
         ? (note ? 'Русский оригинал остался в Obsidian. Чтобы перевести заново, загрузите русский текст кнопкой справа.' : 'Это рабочий текст карточки: рассказчик получает его как есть.')
         : (note ? 'Рассказчик читает английский лучше: переведите — русский оригинал останется в Obsidian.' : 'Русский текст в карточке заменится английским, оригинала нигде не останется: сделайте «Копию карточки», если он нужен.') }),
@@ -1439,7 +1457,65 @@ ${add}` : (d.fields[field.id] || add);
     // grows with its text: one scroll (the pane's), not a scroll inside a scroll
     const fitText = () => { text.style.height = 'auto'; text.style.height = `${Math.max(220, text.scrollHeight + 4)}px`; };
     setTimeout(fitText, 0);
-    text.addEventListener('input', () => { section.text = text.value; showCount(); fitText(); });
+    text.addEventListener('input', () => { section.text = text.value; showCount(); fitText(); hideSplit(); });
+
+    // Select a piece of the text: a plaque «Создать раздел» appears; the piece moves into a new section and goes out of this one.
+    const textWrap = element('div', { className: 'ku-textwrap' });
+    const splitPlaque = element('div', { className: 'ku-splitplaque', hidden: true, role: 'status' });
+    let picked = null;
+    function hideSplit() { picked = null; splitPlaque.hidden = true; }
+    function showSplit() {
+      const start = text.selectionStart;
+      const end = text.selectionEnd;
+      if (end - start < 1 || !text.value.slice(start, end).trim()) { hideSplit(); return; }
+      picked = { start, end };
+      splitPlaque.hidden = false;
+      splitPlaque.firstElementChild.textContent = `${text.value.slice(start, end).trim().length} зн.`;
+      placeSplit(end);
+    }
+    /** The plaque stands under the end of the selection: the place of that point in the text is measured on a hidden copy of the field. */
+    function placeSplit(end) {
+      try {
+        const look = getComputedStyle(text);
+        const mirror = element('div');
+        for (const name of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'textTransform', 'tabSize', 'boxSizing', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth']) mirror.style[name] = look[name];
+        Object.assign(mirror.style, { position: 'absolute', visibility: 'hidden', top: '0', left: '0', width: `${text.offsetWidth}px`, whiteSpace: 'pre-wrap', overflowWrap: 'break-word' });
+        const mark = element('span', { text: '​' });
+        mirror.append(document.createTextNode(text.value.slice(0, end)), mark);
+        textWrap.append(mirror);
+        const lineHeight = parseFloat(look.lineHeight) || (parseFloat(look.fontSize) || 14) * 1.4;
+        const top = mark.offsetTop - text.scrollTop + lineHeight + 4;
+        const left = Math.max(0, Math.min(mark.offsetLeft, text.offsetWidth - splitPlaque.offsetWidth - 8));
+        mirror.remove();
+        splitPlaque.style.top = `${top}px`;
+        splitPlaque.style.left = `${left}px`;
+      } catch (error) { splitPlaque.style.top = ''; splitPlaque.style.left = ''; }
+    }
+    const split = element('button', { type: 'button', className: 'btn small primary', text: 'Создать раздел', title: 'Выделенное перенесётся в новый раздел и исчезнет из этого' });
+    split.addEventListener('mousedown', event => event.preventDefault()); // the selection must survive the press
+    split.addEventListener('click', () => {
+      if (!picked) return;
+      const { start, end } = picked;
+      const piece = text.value.slice(start, end).trim();
+      if (!piece) { hideSplit(); return; }
+      const before = text.value.slice(0, start).replace(/[ \t]+$/, '');
+      const after = text.value.slice(end).replace(/^[ \t]+/, '');
+      // the seam closes without a hole: no more than one empty line where the piece was
+      // the LIVE draft of the card, found by the id of the section (not the objects of this drawing)
+      const live = s.draft?.id === entry.id ? s.draft.fields : draft;
+      const source = live.sections.find(item => item.id === section.id) ?? section;
+      source.text = `${before}${after}`.replace(/\n{3,}/g, '\n\n').trim();
+      const created = makeSection({ kind: section.kind, title: 'Новый раздел', text: piece, ...(section.when ? { when: section.when } : {}), ...(section.keys?.length ? { keys: [...section.keys] } : {}) });
+      live.sections.push(created); // at the end of the list
+      s.selSection = created.id;
+      setStatus(`Перенесено в новый раздел: ${piece.length} зн. Назовите его в заголовке. Он отправляется так же, как «${section.title || CARD_SECTION_KINDS[section.kind]}». Уже сохранено.`);
+      render();
+      keepSections(entry, live).catch(error => setStatus(`Перенесено, но не сохранилось: ${error?.message || error}`, true));
+    });
+    splitPlaque.append(element('span', { className: 'ku-small' }), split);
+    textWrap.append(text, splitPlaque);
+    for (const type of ['select', 'mouseup', 'keyup']) text.addEventListener(type, () => setTimeout(showSplit, 0));
+    text.addEventListener('blur', () => setTimeout(() => { if (!splitPlaque.contains(document.activeElement)) hideSplit(); }, 150));
 
     // «When»: two plain choices; the second opens the list of own rules.
     const own_when = Boolean(section.when);
@@ -1533,7 +1609,7 @@ ${add}` : (d.fields[field.id] || add);
         ...(entry && hasPictureOf(entry) && (section.kind === 'visual' || section.kind === 'voice') ? [element('span', { className: 'ku-push' }), button('Описать по картинке…', 'btn small', () => { lookState(entry).open = true; render(); }, 'Модель опишет по картинке то, что не меняется: лицо, глаза, волосы, рост, сложение (и голос, если отметить)')] : [])]),
       ...(trimmedNote ? [trimmedNote] : []),
       ...(entry ? [renderSectionBar({ ...genDeps(entry, draft, genState(entry, draft)), section, openPage: () => { s.selSection = GENERATE; render(); } })] : []),
-      element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', htmlFor: 'ku-card-text', text: 'Текст раздела' }), text, count]),
+      element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', htmlFor: 'ku-card-text', text: 'Текст раздела' }), textWrap, count]),
       ...(personaMode ? [] : [whenBox]),
       ...(personaMode ? [element('p', { className: 'ku-hint', text: 'Разделы персоны уходят модели всегда: ни правил отправки, ни ключевых слов тут не нужно.' })] : []),
       ...(personaMode ? [] : [element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', htmlFor: 'ku-card-keys', text: 'Ключевые слова' }), keys, regexRow, element('p', { className: 'ku-hint', text: byKeys ? 'Раздел попадёт в запрос, только если одно из этих слов встретится в вашем последнем посте или в предыдущем ответе. Каждое слово с новой строки (или через запятую). Без слов такой раздел не уйдёт никогда. Обычное слово находится и внутри других слов («байк» найдёт и «байкер»); «Надеть регекс» делает поиск точнее: только слово с окончаниями, только целиком или любое начинающееся так. Свой регекс можно писать вручную: /байк(а|у)?/i.' : 'Поле работает, когда правило раздела — «по ключевым словам». Сейчас у раздела другое правило, слова не нужны: выберите «Своё правило» → «по ключевым словам» выше.' })])]),
@@ -1825,8 +1901,9 @@ ${add}` : (d.fields[field.id] || add);
       if (!shelfState.openId) continue;
       const entry = (shelf === 'characters' ? library().characters : shelf === 'items' ? library().items : library().locations)?.find(item => item.id === shelfState.openId);
       if (!entry) continue;
-      const running = Boolean(shelfState.gen?.running);
-      return { shelf, windowId, name: shelfState.draft?.fields?.name || entry.name, running, progress: running ? (shelfState.gen.progress || 'пишется…') : '' };
+      const translating = shelfState.translating?.id === entry.id;
+      const running = Boolean(shelfState.gen?.running) || translating;
+      return { shelf, windowId, name: shelfState.draft?.fields?.name || entry.name, running, progress: translating ? shelfState.translating.text : running ? (shelfState.gen.progress || 'пишется…') : '' };
     }
     return null;
   }
@@ -2007,6 +2084,9 @@ export const LIBRARY_STYLE = `
 .ku-refthumb{max-width:100%;max-height:120px;object-fit:contain;cursor:zoom-in;border:1px solid var(--k-line);border-radius:8px;background:var(--k-inset)}
 .ku-refzoom{position:fixed;inset:0;z-index:2147483004;display:grid;place-items:center;padding:16px;background:var(--k-backdrop);cursor:zoom-out}
 .ku-refzoom img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px}
+.ku-textwrap{position:relative}
+.ku-splitplaque{position:absolute;z-index:3;display:flex;align-items:center;gap:8px;padding:4px 6px 4px 10px;border:1px solid var(--k-line);border-radius:10px;background:var(--k-panel);box-shadow:0 4px 14px var(--k-shadow);white-space:nowrap}
+.ku-splitplaque[hidden]{display:none}
 .ku-clearpanel{margin:0 12px 6px}
 .ku-clearlist{display:grid;gap:2px;max-height:150px;overflow:auto}
 .ku-clearrow{display:flex;align-items:center;gap:4px}

@@ -460,7 +460,7 @@ export function createLibraryCallbacks(deps) {
       return { updated, skipped };
     },
     /** A card into English, section by section; the card then holds the translation (the Russian stays in the note). */
-    onLibraryTranslateCard: async ({ cardId }) => {
+    onLibraryTranslateCard: async ({ cardId, onProgress }) => {
       if (!deps.translateSections) throw new Error('Перевод здесь не подключён.');
       const card = (library.get().characters ?? []).find(candidate => candidate.id === cardId);
       if (!card) throw new RangeError('Такой карточки нет');
@@ -470,7 +470,7 @@ export function createLibraryCallbacks(deps) {
         ...card.sections.map(section => ({ id: section.id, title: section.title, text: section.text })),
         ...(card.records ?? []).map((record, index) => ({ id: `record:${record.id}`, title: `Запись ${index + 1}`, text: record.text })),
       ];
-      const translated = new Map((await deps.translateSections(sent)).map(item => [item.id, item.text]));
+      const translated = new Map((await deps.translateSections(sent, onProgress)).map(item => [item.id, item.text]));
       const now = (library.get().characters ?? []).find(candidate => candidate.id === cardId);
       if (!now || now.sections.some(section => sent.find(item => item.id === section.id)?.text !== section.text)
         || (now.records ?? []).some(record => sent.find(item => item.id === `record:${record.id}`)?.text !== record.text)) throw new Error('Карточка изменилась во время перевода — запустите перевод ещё раз.');

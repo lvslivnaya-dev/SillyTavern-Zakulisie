@@ -199,3 +199,110 @@ test('a card folded with «Свернуть»: the window goes, a pill with its 
     assert.equal(pill.hidden, true);
   } finally { studio?.destroy(); place.remove(); }
 });
+
+test('translation of a card: the card shows what is going on, and the pill of a folded window does too', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const card = { id: 'c1', folderId: 'f1', name: 'Судзу', aliases: [], records: [], words: [], sections: [{ id: 'a', kind: 'visual', title: 'Visual', text: 'Высокая.' }] };
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  let studio;
+  try {
+    studio = createRelationshipStudio({
+      store: { getSnapshot: () => snapshot },
+      callbacks: { onLibraryTranslateCard: async payload => { payload.onProgress?.(0, 2, 'Visual'); await gate; } },
+      container: place,
+    });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    root.querySelector('.ku-place-open').click();
+    [...root.querySelectorAll('.ku-cstrip button')].find(node => node.textContent === 'Перевести на английский').click();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.match(root.querySelector('.ku-genbadge')?.textContent ?? '', /Перевожу «Visual» \(1 из 2\)/, 'the card shows the step');
+    root.querySelector('.ku-ctop-tools [aria-label="Свернуть"]').click();
+    assert.match(root.querySelector('.ku-pill').textContent, /Судзу.*Перевожу «Visual»/, 'the pill shows the translation, not just «открыта»');
+    release();
+  } finally { studio?.destroy(); place.remove(); }
+});
+
+test('selected text of a section: a plaque «Создать раздел», the piece moves into a new section and leaves the old one', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const text = 'Первый абзац.\n\nВторой абзац про шрам.\n\nТретий абзац.';
+  const card = { id: 'c1', folderId: 'f1', name: 'Судзу', aliases: [], records: [], words: [], sections: [{ id: 'a', kind: 'other', title: 'Public Info', text }] };
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  let studio;
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    root.querySelector('.ku-place-open').click();
+    const area = root.querySelector('#ku-card-text');
+    assert.equal(root.querySelector('.ku-splitplaque').hidden, true, 'nothing selected: no plaque');
+    const piece = 'Второй абзац про шрам.';
+    area.setSelectionRange(text.indexOf(piece), text.indexOf(piece) + piece.length);
+    area.dispatchEvent(new Event('select', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(root.querySelector('.ku-splitplaque').hidden, false, 'the plaque shows on a selection');
+    [...root.querySelectorAll('.ku-splitplaque button')][0].click();
+    assert.equal(root.querySelector('#ku-card-text').value, piece, 'the new section is open with the piece');
+    assert.equal(root.querySelector('.ku-ctitle-edit').value, 'Новый раздел');
+    const old = [...root.querySelectorAll('.ku-cnav')].find(node => node.textContent.includes('Public Info'));
+    old.click();
+    assert.equal(root.querySelector('#ku-card-text').value, 'Первый абзац.\n\nТретий абзац.', 'the piece is gone from the old section and the seam is closed');
+  } finally { studio?.destroy(); place.remove(); }
+});
+
+test('the section made from a selection stands at the end of the list', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const text = 'Один.\n\nДва.';
+  const card = { id: 'c1', folderId: 'f1', name: 'Судзу', aliases: [], records: [], words: [], sections: [{ id: 'a', kind: 'other', title: 'Первый', text }, { id: 'b', kind: 'other', title: 'Второй', text: 'Тут.' }] };
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  let studio;
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    root.querySelector('.ku-place-open').click();
+    const area = root.querySelector('#ku-card-text');
+    area.setSelectionRange(text.indexOf('Два.'), text.length);
+    area.dispatchEvent(new Event('select', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    root.querySelector('.ku-splitplaque button').click();
+    const titles = [...root.querySelectorAll('.ku-cnav-title')].map(node => node.textContent);
+    assert.deepEqual(titles, ['Первый', 'Второй', 'Новый раздел']);
+  } finally { studio?.destroy(); place.remove(); }
+});
+
+test('split of a section reaches the save: the old section is saved without the piece', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const text = 'Один абзац.\n\nДругой абзац.';
+  const card = { id: 'c1', folderId: 'f1', name: 'Судзу', aliases: [], records: [], words: [], sections: [{ id: 'a', kind: 'other', title: 'Первый', text }] };
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  let saved = null;
+  let studio;
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, callbacks: { onLibraryUpdateCharacter: payload => { saved = payload; } }, container: place });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    root.querySelector('.ku-place-open').click();
+    const area = root.querySelector('#ku-card-text');
+    area.focus();
+    area.setSelectionRange(text.indexOf('Другой'), text.length);
+    area.dispatchEvent(new Event('mouseup', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const button = root.querySelector('.ku-splitplaque button');
+    button.dispatchEvent(new Event('mousedown', { bubbles: true, cancelable: true }));
+    button.click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(saved, 'the split is saved at once, without «Сохранить»');
+    assert.deepEqual(saved.changes.sections.map(section => section.text), ['Один абзац.', 'Другой абзац.']);
+    saved = null;
+    [...root.querySelectorAll('.ku-cfoot button')].find(node => node.textContent === 'Сохранить').click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.deepEqual(saved.changes.sections.map(section => [section.title, section.text]), [['Первый', 'Один абзац.'], ['Новый раздел', 'Другой абзац.']]);
+  } finally { studio?.destroy(); place.remove(); }
+});
