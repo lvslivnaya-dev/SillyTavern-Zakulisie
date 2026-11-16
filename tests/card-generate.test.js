@@ -117,3 +117,11 @@ test('пожелания раздела доходят до запроса эт�
   assert.match(seen[0], /шёпотом/);
   assert.doesNotMatch(seen[1], /шёпотом/);
 });
+
+test('подробность: «обычно» ничего не добавляет, «кратко» и «подробно» дают свой блок [DETAIL]', () => {
+  const ask = detail => buildGenerationPrompt({ card, section: { kind: 'visual', title: 'Visual', text: '' }, origin: { mode: 'original', detail } })[1].content;
+  assert.ok(!ask('normal').includes('[DETAIL]'));
+  assert.ok(!ask(undefined).includes('[DETAIL]'));
+  assert.match(ask('brief'), /\[DETAIL\]\nWrite SHORT/);
+  assert.match(ask('full'), /\[DETAIL\]\nWrite IN DETAIL/);
+});

@@ -140,6 +140,14 @@ export const STRICTNESS = Object.freeze({
 });
 export const DEFAULT_STRICTNESS = 'balanced';
 
+/** How much each section says: the user's dial. `rule` goes into the request; «normal» is the way the sections were always written. */
+export const DETAIL = Object.freeze({
+  brief: { label: 'Кратко', hint: 'Только самое главное: 2–4 предложения или 3–5 пунктов на раздел. Карточка лёгкая, модель получает меньше текста.', rule: 'Write SHORT: only the most important points, about 2-4 sentences or 3-5 list items for the section, roughly 400-700 characters. Skip secondary details and any example lines.' },
+  normal: { label: 'Обычно', hint: 'Как раньше: плотный раздел с конкретными деталями.', rule: '' },
+  full: { label: 'Подробно', hint: 'Развёрнуто: больше деталей, примеров из жизни и привычек, у каждой черты своё действие. Карточка тяжелее.', rule: 'Write IN DETAIL: cover every point the section guide lists, with several concrete details, habits, deeds and short examples for each; about 1800-3000 characters for the section. Still no filler: more facts, not more words.' },
+});
+export const DEFAULT_DETAIL = 'normal';
+
 /** Where the character comes from: { mode: 'canon' | 'original', fandom, frame, au, strictness } → the lines of the prompt. */
 function sourceLines(origin = {}) {
   const fandom = String(origin.fandom ?? '').trim();
@@ -184,6 +192,7 @@ export function buildGenerationPrompt({ card, section, others = [], origin = {},
     '',
     '[SOURCE]',
     ...sourceLines(origin),
+    ...((DETAIL[origin.detail] ?? DETAIL[DEFAULT_DETAIL]).rule ? ['', '[DETAIL]', (DETAIL[origin.detail] ?? DETAIL[DEFAULT_DETAIL]).rule] : []),
     ...(origin.mode !== 'original' ? ['The name and the other names above may be written in Russian letters (a transliteration, a nickname): work out which character of the work they mean and write about THAT character, not about a namesake.'] : []),
     ...(identify && origin.mode !== 'original' ? ['Because of that, the LAST line of your answer must be a NOTE that starts with «Принят за: » and names the character as you understood them (full name, the work, the moment of canon). Write it even if you are sure.'] : []),
     '',

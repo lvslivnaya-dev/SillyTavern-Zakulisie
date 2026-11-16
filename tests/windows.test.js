@@ -97,3 +97,54 @@ test('embedded editor of a persona card: inline in the given place, a gear inste
     assert.match(root.querySelector('.embed-content').textContent, /ещё нет карточки/);
   } finally { studio?.destroy(); place.remove(); }
 });
+
+test('card of the library: closing with unsaved typing asks first; a clean card closes at once', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const card = { id: 'c1', folderId: 'f1', name: 'Судзу', aliases: [], sections: [{ id: 's1', kind: 'visual', title: 'Visual', text: 'Высокая.' }], records: [], words: [] };
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  let studio;
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    const openCard = () => { root.querySelector('.ku-place-open')?.click(); };
+    openCard();
+    const clickClose = () => root.querySelector('.ku-ctop-tools [aria-label="Закрыть"]').click();
+    clickClose(); // nothing typed: closes at once
+    assert.equal(root.querySelector('.ku-ccard'), null, 'a clean card closes without a question');
+    openCard();
+    const name = root.querySelector('.ku-cname');
+    name.value = 'Судзу Новая';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    clickClose();
+    assert.ok(root.querySelector('.ku-ccard'), 'the card stays open');
+    assert.match(root.querySelector('.ku-aunotice[role="alert"]').textContent, /несохранённые правки/);
+    [...root.querySelectorAll('.ku-aunotice button')].find(button => button.textContent === 'Остаться').click();
+    assert.equal(root.querySelector('.ku-aunotice[role="alert"]'), null, 'stay: the question goes, the typing stays');
+    assert.equal(root.querySelector('.ku-cname').value, 'Судзу Новая');
+    clickClose();
+    [...root.querySelectorAll('.ku-aunotice button')].find(button => button.textContent === 'Не сохранять').click();
+    assert.equal(root.querySelector('.ku-ccard'), null, 'leave without saving closes the card');
+  } finally { studio?.destroy(); place.remove(); }
+});
+
+test('reload with an unsaved card: the browser is asked to confirm; with nothing typed it is not', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const card = { id: 'c1', folderId: 'f1', name: 'Судзу', aliases: [], sections: [], records: [], words: [] };
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  let studio;
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    root.querySelector('.ku-place-open').click();
+    const leave = () => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; };
+    assert.equal(leave(), false, 'nothing typed');
+    const name = root.querySelector('.ku-cname');
+    name.value = 'Другое имя';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    assert.equal(leave(), true, 'typed and not saved');
+  } finally { studio?.destroy(); place.remove(); }
+});

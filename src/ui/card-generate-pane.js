@@ -9,7 +9,7 @@
  */
 import { button, element } from './helpers.js';
 import { CARD_SECTION_KINDS, auSummary, makeSection } from '../core/index.js';
-import { DEFAULT_STRICTNESS, STRICTNESS } from '../integration/card-generate.js';
+import { DEFAULT_DETAIL, DEFAULT_STRICTNESS, DETAIL, STRICTNESS } from '../integration/card-generate.js';
 
 /** Sections that are not ticked by themselves: they need a decision of the user. */
 const MANUAL = new Set(['nsfw', 'private']);
@@ -20,6 +20,7 @@ export function freshGeneration(draft, { persona = false, fandom = '', hasPictur
   return {
     mode: persona ? 'original' : 'canon',
     strictness: DEFAULT_STRICTNESS,
+    detail: DEFAULT_DETAIL,
     fandom, frame: '', au: '', wishes: '',
     rewrite: 'edit',
     picture: hasPicture, lookWishes: '', voice: false, voiceWishes: '',
@@ -30,7 +31,7 @@ export function freshGeneration(draft, { persona = false, fandom = '', hasPictur
 }
 
 /** The origin of the character, as the prompt wants it. `where` = { fandom(), folderAu() } of the folder the card is in (what the folder says wins over the typed fandom). */
-const originOf = (gen, where = {}) => ({ mode: gen.mode, fandom: where.fandom?.() || gen.fandom, frame: gen.frame, au: gen.au, strictness: gen.strictness, folderAu: where.folderAu?.() ?? null });
+const originOf = (gen, where = {}) => ({ mode: gen.mode, fandom: where.fandom?.() || gen.fandom, frame: gen.frame, au: gen.au, strictness: gen.strictness, detail: gen.detail, folderAu: where.folderAu?.() ?? null });
 
 /**
  * One run: the picture (if asked), then the sections. `jobs` = [{ section, fresh }]: `fresh` writes from nothing, otherwise a section with
@@ -264,6 +265,15 @@ export function renderGeneratePane({ gen, draft, card, entryId, hasPicture, redr
     ]),
     element('div', { className: 'ku-closet' }, rows),
     element('div', { className: 'ku-copts' }, [
+      element('div', { className: 'ku-clabel', text: 'Насколько подробно писать' }),
+      ...Object.entries(DETAIL).map(([id, item]) => radio('ku-gen-detail', id, gen.detail, item.label, item.hint, value => { gen.detail = value; })),
+    ]),
+    // not the usual: a plaque, so the choice is not forgotten before the button is pressed
+    ...(gen.detail !== DEFAULT_DETAIL && DETAIL[gen.detail] ? [element('div', { className: 'ku-aunotice', role: 'status' }, [
+      element('p', { text: `Выбрано: «${DETAIL[gen.detail].label}». ${gen.detail === 'brief' ? 'Разделы выйдут короче обычного.' : 'Разделы выйдут длиннее обычного, карточка станет тяжелее.'}` }),
+      element('div', { className: 'ku-row' }, [button('Вернуть «Обычно»', 'btn small', () => { gen.detail = DEFAULT_DETAIL; redraw(); })]),
+    ])] : []),
+    element('div', { className: 'ku-copts' }, [
       element('div', { className: 'ku-clabel', text: 'Что делать с разделами, где уже есть текст' }),
       radio('ku-gen-rewrite', 'edit', gen.rewrite, 'Править по пожеланиям', 'Текст берётся за основу, меняется только то, что просят пожелания.', value => { gen.rewrite = value; }),
       radio('ku-gen-rewrite', 'fresh', gen.rewrite, 'Написать с нуля', 'Прежний текст не учитывается, раздел пишется заново (его можно вернуть кнопкой).', value => { gen.rewrite = value; }),
@@ -319,6 +329,7 @@ export function renderSectionBar({ gen, draft, section, card, entryId, redraw, g
   const origin = gen.mode === 'original'
     ? `оригинальный герой${auNote}`
     : `${where.fandom() || gen.fandom || 'фандом не указан'}${gen.frame ? `, ${gen.frame}` : ''} · ${STRICTNESS[gen.strictness]?.label.toLowerCase() ?? ''}${auNote}`;
+  const detailNote = gen.detail !== DEFAULT_DETAIL && DETAIL[gen.detail] ? ` · ${DETAIL[gen.detail].label.toLowerCase()}` : '';
   const wishes = element('input', { type: 'text', value: gen.sectionWishes[section.id] ?? '', placeholder: 'Пожелания к этому разделу (необязательно)', 'aria-label': `Пожелания к разделу ${sectionTitle(section)}`, disabled: gen.running });
   wishes.addEventListener('input', () => { gen.sectionWishes[section.id] = wishes.value; });
   const go = fresh => runGeneration(gen, {
@@ -335,7 +346,7 @@ export function renderSectionBar({ gen, draft, section, card, entryId, redraw, g
       ...(has ? [Object.assign(button('Править по пожеланиям', 'btn small', () => go(false), 'Текст берётся за основу, меняется только то, о чём пожелания'), { disabled: gen.running })] : []),
       ...undoButton(gen, draft, redraw, section.id),
     ]),
-    element('p', { className: 'ku-hint' }, [`Как писать: ${origin}. `, Object.assign(element('a', { href: '#', text: 'Изменить' }), { onclick: event => { event.preventDefault(); openPage(); } })]),
+    element('p', { className: 'ku-hint' }, [`Как писать: ${origin}${detailNote}. `, Object.assign(element('a', { href: '#', text: 'Изменить' }), { onclick: event => { event.preventDefault(); openPage(); } })]),
     line,
   ]);
 }

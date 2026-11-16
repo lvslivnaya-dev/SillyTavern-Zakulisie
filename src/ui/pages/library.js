@@ -788,7 +788,11 @@ ${add}` : (d.fields[field.id] || add);
     gen, draft, entryId: entry.id,
     card: { name: draft.name, aliases: draft.aliases.split(',').map(value => value.trim()).filter(Boolean), gender: draft.gender },
     redraw: render, setStatus,
-    save: () => invoke('onLibraryUpdateCharacter', { cardId: entry.id, changes: { sections: draft.sections } }),
+    save: async () => {
+      await invoke('onLibraryUpdateCharacter', { cardId: entry.id, changes: { sections: draft.sections } });
+      // the sections are saved now: only what is typed after them counts as unsaved
+      if (s.draft?.id === entry.id && s.draft.base !== undefined) { const base = JSON.parse(s.draft.base); base.sections = JSON.parse(JSON.stringify(draft.sections)); s.draft.base = JSON.stringify(base); }
+    },
     generate: request => invoke('onCardGenerate', request),
     describe: request => invoke('onCardDescribe', request),
     where: { fandom: () => fandomOf(draft.folderId), folderAu: () => folderAu(library(), draft.folderId) },
@@ -807,13 +811,17 @@ ${add}` : (d.fields[field.id] || add);
     const emb = embed;
     const layer = element('div', { className: `ku-wlayer${emb ? ' ku-embedded' : ''}` });
     const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; s.gen = null; };
-    const close = () => { s.openId = ''; forget(); render(); };
+    // Typed and not saved: leaving asks first (save / leave without saving / stay), so a card is not lost by a stray click.
+    const dirty = () => Boolean(s.draft && s.draft.id === entry.id && s.draft.base !== undefined && JSON.stringify(s.draft.fields) !== s.draft.base);
+    const leaveWith = action => { if (dirty()) { s.leaving = action; render(); } else action(); };
+    const closeNow = () => { s.leaving = null; s.openId = ''; forget(); render(); };
+    const close = () => leaveWith(closeNow);
     if (!emb) layer.addEventListener('click', event => { if (event.target === layer) close(); });
     const dialog = element('section', { className: 'ku-wcard ku-ccard', role: emb ? 'region' : 'dialog', ...(emb ? {} : { 'aria-modal': 'true' }), 'aria-label': entry.name });
     if (!emb) dialog.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } });
     const siblings = entriesOf().filter(item => item.folderId === entry.folderId);
     const index = siblings.findIndex(item => item.id === entry.id);
-    const go = step => { const next = siblings[index + step]; if (next) { s.openId = next.id; forget(); render(); } };
+    const go = step => { const next = siblings[index + step]; if (next) leaveWith(() => { s.leaving = null; s.openId = next.id; forget(); render(); }); };
 
     // The draft: what the user changed and has not saved yet. Sections are a list of plain objects edited in place.
     if (s.draft?.id !== entry.id) {
@@ -824,11 +832,21 @@ ${add}` : (d.fields[field.id] || add);
         records: recordsToDraft(entry.records),
         closet: { cardIds: [...(entry.closet?.cardIds ?? [])], lookIds: [...(entry.closet?.lookIds ?? [])], ownIds: [...(entry.closet?.ownIds ?? [])] },
       } };
+      s.draft.base = JSON.stringify(s.draft.fields);
       s.selSection = '';
     }
     const draft = s.draft.fields;
     if (s.selSection !== CLOSET && s.selSection !== NAMES && s.selSection !== RECORDS && s.selSection !== GENERATE && !draft.sections.some(section => section.id === s.selSection)) s.selSection = draft.sections[0]?.id ?? '';
     const status = promptStatus(entry.id);
+    const leaveNotice = s.leaving && dirty() ? element('div', { className: 'ku-aunotice', role: 'alert' }, [
+      element('p', { text: 'В карточке есть несохранённые правки. Сохранить перед выходом?' }),
+      element('div', { className: 'ku-row' }, [
+        button('Сохранить', 'btn primary small', () => attempt(async () => { const action = s.leaving; await persist(); action(); }, 'Карточка сохранена')),
+        button('Не сохранять', 'btn small', () => { const action = s.leaving; s.leaving = null; forget(); action(); }),
+        button('Остаться', 'btn small', () => { s.leaving = null; render(); }),
+      ]),
+    ]) : null;
+    if (s.leaving && !leaveNotice) s.leaving = null;
 
     // ---- The strip on top: portrait, name, other names, folder
     const portrait = entry.image
@@ -867,6 +885,7 @@ ${add}` : (d.fields[field.id] || add);
       element('div', { className: 'ku-ctop-main' }, [
         element('div', { className: 'ku-cfields' }, [nameInput, aliasInput, genderPick, ...(folderPick ? [folderPick] : [])]),
         ...(writing ? [writing] : []),
+        ...(leaveNotice ? [leaveNotice] : []),
         ...(auNotice ? [auNotice] : []),
         element('p', { className: 'ku-hint', text: 'Имя и «другие имена» — как героя зовут в постах: имя, фамилия, клички, прозвища. Через запятую. Английские варианты и знаки сами убираются. Склонения каждого слова пишутся слева в разделе «Имена»: оттуда модель берёт написание и падежи, а карточка узнаёт героя в постах. В одной папке имена не повторяются, в разных можно.' }),
       ]),
@@ -1676,6 +1695,10 @@ ${add}` : (d.fields[field.id] || add);
     }
   }
   document.addEventListener('paste', onPaste);
+  // A reload or a closed tab with a card that has unsaved typing: the browser asks first.
+  const unsavedCard = () => Object.values(shelves).some(shelf => shelf.openId && shelf.draft?.base !== undefined && JSON.stringify(shelf.draft.fields) !== shelf.draft.base);
+  function onLeavePage(event) { if (unsavedCard()) { event.preventDefault(); event.returnValue = ''; } }
+  window.addEventListener('beforeunload', onLeavePage);
 
   /**
    * A card that is not on yet finds its character by the exact name. When the chat has SEVERAL characters of that name, the toggle would not know
@@ -1723,7 +1746,7 @@ ${add}` : (d.fields[field.id] || add);
     return view;
   }
 
-  return { renderLibrary, renderCards, renderPersonas, renderEmbeddedCard, openLibraryCard, destroyLibrary: () => document.removeEventListener('paste', onPaste) };
+  return { renderLibrary, renderCards, renderPersonas, renderEmbeddedCard, openLibraryCard, destroyLibrary: () => { document.removeEventListener('paste', onPaste); window.removeEventListener('beforeunload', onLeavePage); } };
 }
 
 /** Styles of the library gallery (the card over the window reuses the wardrobe's). */
