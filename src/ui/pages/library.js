@@ -839,8 +839,16 @@ ${add}` : (d.fields[field.id] || add);
     });
   };
   /** The sections go into the card at once (a text written by the model, a piece moved into a section of its own): nothing waits for «Сохранить». */
+  const saveNoteText = () => (s.autosave?.state === 'saving' ? 'Сохраняю…' : s.autosave?.state === 'saved' ? `✓ Автосохранено ${s.autosave.time}` : s.autosave?.state === 'failed' ? 'Не сохранилось' : '');
+  const paintSaveNote = () => { if (s.saveEl?.isConnected) { s.saveEl.textContent = saveNoteText(); s.saveEl.dataset.state = s.autosave?.state ?? ''; } };
   const keepSections = async (entry, draft) => {
-    await invoke('onLibraryUpdateCharacter', { cardId: entry.id, changes: { sections: draft.sections } });
+    s.autosave = { id: entry.id, state: 'saving', time: '' };
+    paintSaveNote();
+    try {
+      await invoke('onLibraryUpdateCharacter', { cardId: entry.id, changes: { sections: draft.sections } });
+    } catch (error) { s.autosave = { id: entry.id, state: 'failed', time: '' }; paintSaveNote(); throw error; }
+    s.autosave = { id: entry.id, state: 'saved', time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) };
+    paintSaveNote();
     // the sections are saved now: only what is typed after them counts as unsaved
     if (s.draft?.id === entry.id && s.draft.base !== undefined) { const base = JSON.parse(s.draft.base); base.sections = JSON.parse(JSON.stringify(draft.sections)); s.draft.base = JSON.stringify(base); }
   };
@@ -866,7 +874,7 @@ ${add}` : (d.fields[field.id] || add);
     const lib = library();
     const emb = embed;
     const layer = element('div', { className: `ku-wlayer${emb ? ' ku-embedded' : ''}` });
-    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; s.gen = null; s.clearing = null; s.refZoom = false; };
+    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; s.gen = null; s.clearing = null; s.refZoom = false; s.autosave = null; };
     // Typed and not saved: leaving asks first (save / leave without saving / stay), so a card is not lost by a stray click.
     const dirty = () => Boolean(s.draft && s.draft.id === entry.id && s.draft.base !== undefined && JSON.stringify(s.draft.fields) !== s.draft.base);
     const leaveWith = action => { if (dirty()) { s.leaving = action; render(); } else action(); };
@@ -1090,6 +1098,9 @@ ${add}` : (d.fields[field.id] || add);
       } });
       forget();
     };
+    const saveNote = element('span', { className: 'ku-savenote', role: 'status', 'aria-live': 'polite' });
+    s.saveEl = saveNote;
+    if (s.autosave?.id === entry.id) { saveNote.textContent = saveNoteText(); saveNote.dataset.state = s.autosave.state; }
     const linked = linkedSet().has(entry.id);
     const owner = Object.entries(snapshot().cardByEntity ?? {}).find(([, card]) => card.id === entry.id)?.[0];
     const ownerName = owner ? characterName((snapshot().characters ?? []).find(character => characterId(character) === owner), '') : '';
@@ -1175,6 +1186,8 @@ ${add}` : (d.fields[field.id] || add);
       ]),
       ...(linked || personaMode ? [] : [attachChoice(entry)]),
       element('span', { className: 'ku-push' }),
+      // between the tools and the eraser: when the card saves itself (a model wrote a section, a piece moved into a new one), it is told here
+      saveNote,
       footTool('eraser', 'Очистить разделы: выбрать все или некоторые и стереть их тексты', Boolean(s.clearing), () => { s.clearing = s.clearing ? null : { picked: new Set(), confirm: false }; render(); }),
       Object.assign(element('button', { type: 'button', className: 'ku-cfoot-del', 'aria-label': 'Удалить карточку', title: 'Удалить карточку' }, [icon('trash')]), {
         onclick: () => attempt(async () => {
@@ -2084,6 +2097,9 @@ export const LIBRARY_STYLE = `
 .ku-refthumb{max-width:100%;max-height:120px;object-fit:contain;cursor:zoom-in;border:1px solid var(--k-line);border-radius:8px;background:var(--k-inset)}
 .ku-refzoom{position:fixed;inset:0;z-index:2147483004;display:grid;place-items:center;padding:16px;background:var(--k-backdrop);cursor:zoom-out}
 .ku-refzoom img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px}
+.ku-savenote{align-self:center;font-size:12px;color:var(--k-ok);white-space:nowrap}
+.ku-savenote[data-state="saving"]{color:var(--k-muted)}
+.ku-savenote[data-state="failed"]{color:var(--k-danger)}
 .ku-textwrap{position:relative}
 .ku-splitplaque{position:absolute;z-index:3;display:flex;align-items:center;gap:8px;padding:4px 6px 4px 10px;border:1px solid var(--k-line);border-radius:10px;background:var(--k-panel);box-shadow:0 4px 14px var(--k-shadow);white-space:nowrap}
 .ku-splitplaque[hidden]{display:none}

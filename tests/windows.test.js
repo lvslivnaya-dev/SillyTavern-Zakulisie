@@ -299,6 +299,7 @@ test('split of a section reaches the save: the old section is saved without the 
     button.click();
     await new Promise(resolve => setTimeout(resolve, 10));
     assert.ok(saved, 'the split is saved at once, without «Сохранить»');
+    assert.match(root.querySelector('.ku-cfoot .ku-savenote').textContent, /Автосохранено \d\d:\d\d/, 'the footer tells that the card saved itself');
     assert.deepEqual(saved.changes.sections.map(section => section.text), ['Один абзац.', 'Другой абзац.']);
     saved = null;
     [...root.querySelectorAll('.ku-cfoot button')].find(node => node.textContent === 'Сохранить').click();
