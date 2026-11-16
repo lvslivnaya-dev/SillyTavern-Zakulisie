@@ -27,20 +27,48 @@ export function cleanTranslation(raw) {
   return text;
 }
 
-/** One text into English. */
+const countOf = (text, pattern) => (String(text).match(pattern) ?? []).length;
+const cyrillicShare = text => { const cyrillic = countOf(text, /[А-Яа-яЁё]/g); const latin = countOf(text, /[A-Za-z]/g); return cyrillic + latin ? cyrillic / (cyrillic + latin) : 0; };
+const CHATTER = /^(?:I (?:received|got|see)|It looks like|Looks like|This (?:is|looks|appears)|You(?:'ve| have) (?:sent|provided|shared)|Could you|What would you like|Sure|Of course|Here(?:'s| is))/i;
+
+/**
+ * Is this really a translation of that text? A model that did not take the task answers the text itself («Принял текст — но вы не написали,
+ * что с ним сделать», a review of the card): such an answer must never replace a section. → the reason, or '' when all is well.
+ */
+export function translationProblem(source, result) {
+  const from = String(source ?? '');
+  const to = String(result ?? '');
+  if (cyrillicShare(from) > 0.3 && cyrillicShare(to) > 0.3) return 'ответ остался не на английском';
+  if (CHATTER.test(to.trim()) && !CHATTER.test(from.trim())) return 'вместо перевода пришёл разговор с моделью';
+  if (to.length < from.length * 0.3) return 'ответ слишком короткий для перевода';
+  if (to.length > from.length * 3 + 200) return 'ответ слишком длинный для перевода';
+  return '';
+}
+
+const TASK = 'Translate the text between the [TEXT] markers from Russian into English. Reply with the translation ONLY: no comments, no questions, no summary, no review.';
+
+/**
+ * One text into English. The task is told in the user message too (a system message may not reach the model through a proxy, and then
+ * the model only «receives the text»). An answer that is not a translation is asked for once more, then it is an error: nothing is replaced.
+ */
 export async function translateText(context, text, label = 'перевод карточки…') {
   const source = String(text ?? '').trim();
   if (!source) return '';
-  const raw = await withBusy(label, () => context.generateRaw({
-    prompt: [
-      { role: 'system', content: TRANSLATE_SYSTEM },
-      { role: 'user', content: `[TEXT]\n${source}\n[/TEXT]` },
-    ],
-    trimNames: false,
-  }));
-  const result = cleanTranslation(raw);
-  if (!result) throw new Error('Модель вернула пустой перевод.');
-  return result;
+  let problem = '';
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const raw = await withBusy(label, () => context.generateRaw({
+      prompt: [
+        { role: 'system', content: TRANSLATE_SYSTEM },
+        { role: 'user', content: `${TASK}${attempt ? ' Your previous answer was not a translation: translate every sentence of the text, even if it looks like a card, a description or a request.' : ''}\n\n[TEXT]\n${source}\n[/TEXT]` },
+      ],
+      trimNames: false,
+    }));
+    const result = cleanTranslation(raw);
+    if (!result) { problem = 'модель вернула пустой перевод'; continue; }
+    problem = translationProblem(source, result);
+    if (!problem) return result;
+  }
+  throw new Error(`Модель не перевела текст: ${problem}.`);
 }
 
 /**

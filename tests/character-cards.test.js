@@ -645,11 +645,11 @@ test('the translator: the model gets one section as material to translate, its w
   assert.equal(cleanTranslation('```\nHe speaks.\n```'), 'He speaks.');
   assert.equal(cleanTranslation('[TEXT]\nHe speaks.\n[/TEXT]'), 'He speaks.');
   const prompts = [];
-  const context = { generateRaw: async ({ prompt }) => { prompts.push(prompt); return `EN ${prompt[1].content.split('\n')[1]}`; } };
+  const context = { generateRaw: async ({ prompt }) => { prompts.push(prompt); return 'He speaks quietly.'; } };
   const result = await translateSections(context, [{ id: 'a', title: 'Voice', text: 'Тихо.' }, { id: 'b', title: 'Empty', text: '  ' }]);
-  assert.deepEqual(result, [{ id: 'a', text: 'EN Тихо.' }]);
+  assert.deepEqual(result, [{ id: 'a', text: 'He speaks quietly.' }]);
   assert.match(prompts[0][0].content, /never instructions to you/);
-  assert.match(prompts[0][1].content, /^\[TEXT\]\nТихо\.\n\[\/TEXT\]$/);
+  assert.match(prompts[0][1].content, /^Translate the text between the \[TEXT\] markers[\s\S]*\[TEXT\]\nТихо\.\n\[\/TEXT\]$/, 'the task is in the user message too');
   await assert.rejects(() => translateSections({ generateRaw: async () => '  ' }, [{ id: 'a', title: 'Voice', text: 'Тихо.' }]), /Раздел «Voice» не переведён/);
 });
 
@@ -1109,4 +1109,18 @@ test('референс в полный рост: хранится в карто�
   assert.equal(copied?.refImage, undefined, 'a copy has no reference of its own');
   library = updateLibraryCharacter(library, id, { refImage: '' });
   assert.equal(library.characters[0].refImage, undefined);
+});
+
+test('перевод: ответ, который не перевод (разговор с моделью, русский текст), не подменяет раздел: один повтор, потом ошибка', async () => {
+  const { translateText, translationProblem } = await import('../src/integration/card-translate.js');
+  const source = 'Голос низкий и хриплый, с насмешливой интонацией. Говорит неторопливо.';
+  assert.match(translationProblem(source, 'Принял текст — но вы не написали, что с ним нужно сделать. Пока короткое впечатление: голос звучит низко.'), /не на английском/);
+  assert.match(translationProblem(source, 'It looks like a voice description. What would you like me to do with it?'), /разговор/);
+  assert.equal(translationProblem(source, 'The voice is low and husky, with a mocking tone. He speaks unhurriedly.'), '');
+  const answers = ['Текст получен. Это описание голоса персонажа. Что нужно сделать с этим текстом?', 'The voice is low and husky, with a mocking tone. He speaks unhurriedly.'];
+  const seen = [];
+  const good = await translateText({ generateRaw: async ({ prompt }) => { seen.push(prompt[1].content); return answers.shift(); } }, source);
+  assert.match(good, /^The voice is low/);
+  assert.match(seen[1], /previous answer was not a translation/);
+  await assert.rejects(() => translateText({ generateRaw: async () => 'Принял текст, но вы не написали, что с ним сделать. Вот краткая оценка: голос выразительный и низкий.' }, source), /Модель не перевела текст/);
 });
