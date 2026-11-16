@@ -788,6 +788,7 @@ ${add}` : (d.fields[field.id] || add);
     gen, draft, entryId: entry.id,
     card: { name: draft.name, aliases: draft.aliases.split(',').map(value => value.trim()).filter(Boolean), gender: draft.gender },
     redraw: render, setStatus,
+    save: () => invoke('onLibraryUpdateCharacter', { cardId: entry.id, changes: { sections: draft.sections } }),
     generate: request => invoke('onCardGenerate', request),
     describe: request => invoke('onCardDescribe', request),
     where: { fandom: () => fandomOf(draft.folderId), folderAu: () => folderAu(library(), draft.folderId) },

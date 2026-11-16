@@ -37,7 +37,7 @@ const originOf = (gen, where = {}) => ({ mode: gen.mode, fandom: where.fandom?.(
  * text is edited by the wishes. The texts go into the draft sections; what was there is kept in gen.backup.
  * deps: { draft, card, entryId, wishesFor(section) → string, picture: { on, wishes }, generate, describe, setStatus, redraw }
  */
-export async function runGeneration(gen, { draft, card, entryId, jobs, wishes, picture, generate, describe, setStatus, redraw, where, adapt = null }) {
+export async function runGeneration(gen, { draft, card, entryId, jobs, wishes, picture, generate, describe, setStatus, redraw, where, adapt = null, save = null }) {
   if (gen.running) return;
   if (!String(card.name ?? '').trim()) { setStatus('Сначала впишите имя героя наверху карточки.', true); return; }
   const paint = () => {
@@ -115,8 +115,11 @@ export async function runGeneration(gen, { draft, card, entryId, jobs, wishes, p
     failure = error?.message || String(error);
   }
 
+  // What the model wrote goes into the card at once: a long run must not be lost when the card is closed without «Сохранить».
+  let kept = false;
+  if (written && save) { try { await save(); kept = true; } catch (error) { failure = failure || `Написано, но не сохранилось: ${error?.message || error}`; } }
   gen.running = false;
-  const head = written ? `${adapt ? 'Перестроено' : 'Написано'}: ${written}. Это черновик: проверьте и нажмите «Сохранить».` : '';
+  const head = written ? `${adapt ? 'Перестроено' : 'Написано'}: ${written}. ${kept ? 'Сохранено в карточке: проверьте и поправьте.' : 'Это черновик: проверьте и нажмите «Сохранить».'}` : '';
   gen.message = [head, ...lines.filter(line => !line.startsWith('внешность')).map(line => `${line[0].toUpperCase()}${line.slice(1)}.`), failure].filter(Boolean).join(' ');
   if (!written) gen.backup = null;
   setStatus(head || failure || gen.message || 'Ничего не написано', Boolean(failure) && !written);
@@ -136,7 +139,7 @@ function undoButton(gen, draft, redraw, only = null) {
     }
     if (!gen.backup.size) gen.backup = null;
     gen.notes = [];
-    gen.message = 'Прежний текст возвращён.';
+    gen.message = 'Прежний текст возвращён: нажмите «Сохранить», чтобы он остался.';
     redraw();
   }, 'Вернёт тексты такими, какими они были до последней генерации')];
 }
