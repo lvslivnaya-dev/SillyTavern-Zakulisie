@@ -22,7 +22,7 @@ export {
   activeConditions, currentLocation, dayPartOf, emptyWorld, featuresOf, formatTime, itemsOf, knowsItem, locationPath, outfitOf, parseTime, validateWorld,
 } from './world.js';
 export {
-  LIBRARY_EXPORT_KIND, LIBRARY_LIMITS, LIBRARY_VERSION, RESCUE_FOLDER_NAME, addDrafts, addFolder, addItemDrafts, addLibraryItem, addLocation, duplicateLocation, emptyLibrary,
+  LIBRARY_EXPORT_KIND, LIBRARY_LIMITS, cardIsEnglish, cleanAuTemplates, saveAuTemplate, removeAuTemplate, LIBRARY_VERSION, RESCUE_FOLDER_NAME, addDrafts, addFolder, addItemDrafts, addLibraryItem, addLocation, duplicateLocation, emptyLibrary,
   removeLibraryItem, searchLibraryItems, updateLibraryItem,
   addCharacterDrafts, checkCardSources, moveLibraryCharacters, personalPieces, moveLibraryEntries, noteFinder, refreshLibraryCharacter, addLibraryCharacter, duplicateLibraryCharacter, removeLibraryCharacter, searchLibraryCharacters, updateLibraryCharacter, countLatinAliases, stripLatinAliases, isLatinName, tidyAlias, ensurePersonaHome,
   exportLibrary, folderContents, folderPath, importLibrary, listExport, selectFromExport,

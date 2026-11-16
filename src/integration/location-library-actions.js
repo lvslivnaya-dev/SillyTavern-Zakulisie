@@ -7,7 +7,7 @@
  * when they are opened (see syncChat).
  */
 import {
-  LIBRARY_LIMITS, addCharacterDrafts, countLatinAliases, stripLatinAliases, addName, checkCardSources, updateName, moveLibraryCharacters, moveLibraryEntries, noteFinder, refreshLibraryCharacter, addDrafts, addFolder, addItemDrafts, addLibraryCharacter, addLibraryItem, addLocation, duplicateLibraryCharacter, duplicateLocation, emptyLibrary, exportLibrary,
+  LIBRARY_LIMITS, cardIsEnglish, saveAuTemplate, removeAuTemplate, addCharacterDrafts, countLatinAliases, stripLatinAliases, addName, checkCardSources, updateName, moveLibraryCharacters, moveLibraryEntries, noteFinder, refreshLibraryCharacter, addDrafts, addFolder, addItemDrafts, addLibraryCharacter, addLibraryItem, addLocation, duplicateLibraryCharacter, duplicateLocation, emptyLibrary, exportLibrary,
   folderWithDescendants, importLibrary, normalizeLibrary, removeFolder, removeLibraryCharacter, removeLibraryItem, removeLocation, uniqueId, updateFolder, updateLibraryCharacter, updateLibraryItem, updateLocation,
 } from '../core/index.js';
 import { draftFromMarkdown, draftsFromLorebook, draftsFromMarkdownFiles, draftsFromMarkdownNote, listLorebookEntries } from './location-import.js';
@@ -153,7 +153,7 @@ export function createLibraryCallbacks(deps) {
 
   /** Delete pictures from the server that no entry uses any more (a copy of a place shares its picture). */
   async function forgetImages(paths) {
-    const used = new Set([...library.get().locations, ...(library.get().items ?? []), ...(library.get().characters ?? [])].map(entry => entry.image).filter(Boolean));
+    const used = new Set([...library.get().locations, ...(library.get().items ?? []), ...(library.get().characters ?? [])].flatMap(entry => [entry.image, entry.refImage]).filter(Boolean));
     for (const path of new Set(paths.filter(Boolean))) {
       if (used.has(path) || !deps.removeImage) continue;
       try { await deps.removeImage(path); } catch (error) { deps.log?.('warn', 'Старая картинка библиотеки не удалилась с сервера', error); }
@@ -225,6 +225,8 @@ export function createLibraryCallbacks(deps) {
       library.set(next);
       return folder;
     },
+    onLibrarySaveAuTemplate: ({ name, au }) => { library.set(saveAuTemplate(library.get(), { name, au })); },
+    onLibraryRemoveAuTemplate: ({ id }) => { library.set(removeAuTemplate(library.get(), id)); },
     onLibraryUpdateFolder: ({ folderId, changes }) => { library.set(updateFolder(library.get(), folderId, changes)); },
     onLibraryRemoveFolder: async ({ folderId }) => {
       const current = library.get();
@@ -242,7 +244,7 @@ export function createLibraryCallbacks(deps) {
       const keepDescriptions = descriptionsOf(new Set(things.map(item => item.id)));
       library.set(removeFolder(current, folderId, { withContents: true }).library);
       await syncOpenChat(keep, keepDescriptions);
-      await forgetImages([...inside, ...things, ...people].map(entry => entry.image));
+      await forgetImages([...inside, ...things, ...people].flatMap(entry => [entry.image, entry.refImage]));
       return true;
     },
 
@@ -462,7 +464,7 @@ export function createLibraryCallbacks(deps) {
       if (!deps.translateSections) throw new Error('Перевод здесь не подключён.');
       const card = (library.get().characters ?? []).find(candidate => candidate.id === cardId);
       if (!card) throw new RangeError('Такой карточки нет');
-      if (card.lang === 'en') throw new Error('Карточка уже на английском. Чтобы получить новый перевод, сначала загрузите русский текст («Обновить из Obsidian»).');
+      if (cardIsEnglish(card)) throw new Error('Карточка уже на английском. Чтобы получить новый перевод, сначала загрузите русский текст («Обновить из Obsidian»).');
       // The records about a persona are text too: they go with the sections (their ids are told apart by a prefix).
       const sent = [
         ...card.sections.map(section => ({ id: section.id, title: section.title, text: section.text })),
@@ -483,7 +485,7 @@ export function createLibraryCallbacks(deps) {
     },
     /** Several cards into English, one after another; one that fails does not stop the rest. */
     onLibraryTranslateCards: async ({ cardIds }) => {
-      const cards = (library.get().characters ?? []).filter(card => cardIds?.includes(card.id) && card.lang !== 'en');
+      const cards = (library.get().characters ?? []).filter(card => cardIds?.includes(card.id) && !cardIsEnglish(card));
       if (!cards.length) return { done: [], failed: [] };
       const sections = cards.reduce((sum, card) => sum + card.sections.filter(section => section.text.trim()).length, 0);
       if (!await confirm('Перевод карточек', `Перевести на английский карточек: ${cards.length}. Это около ${sections} запросов к модели, по одному на раздел; русский текст в карточках заменится переводом (оригиналы в Obsidian останутся). Продолжить?`)) return { done: [], failed: [] };
@@ -524,7 +526,7 @@ export function createLibraryCallbacks(deps) {
         library.set(next);
         await syncOpenChat(keep);
       }
-      await forgetImages(doomed.map(entry => entry.image));
+      await forgetImages(doomed.flatMap(entry => [entry.image, entry.refImage]));
       return doomed.length;
     },
     /** One place or thing into English; a place takes its parts (rooms) with it, each one by itself. */
@@ -571,7 +573,7 @@ export function createLibraryCallbacks(deps) {
       if (!ok) return false;
       library.set(removeLibraryCharacter(library.get(), cardId));
       await syncOpenChat();
-      await forgetImages([card.image]);
+      await forgetImages([card.image, card.refImage]);
       return true;
     },
 
@@ -692,6 +694,20 @@ export function createLibraryCallbacks(deps) {
         try { await deps.setPersonaAvatar(entry.avatar, imageDataUrl); }
         catch (error) { deps.log?.('warn', `Картинка карточки «${entry.name}» не стала аватаром персоны в таверне`, error); }
       }
+      return entry;
+    },
+    /** The full-length reference of a character card (or a persona's): kept beside the card, shown in its window, not sent to the model. */
+    onLibrarySetRefImage: async ({ id, imageDataUrl }) => {
+      const old = entryOf('characters', id).refImage ?? '';
+      const refImage = await deps.upload(imageDataUrl, uniqueId('ref'), 'characters');
+      const entry = await change('characters', id, { refImage });
+      await forgetImages([old]);
+      return entry;
+    },
+    onLibraryRemoveRefImage: async ({ id }) => {
+      const old = entryOf('characters', id).refImage ?? '';
+      const entry = await change('characters', id, { refImage: '' });
+      await forgetImages([old]);
       return entry;
     },
     onLibraryRemoveImage: async ({ kind = 'places', id }) => {

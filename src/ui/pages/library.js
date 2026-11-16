@@ -1,6 +1,6 @@
 import { button, characterId, characterName, downloadJson, element } from '../helpers.js';
 import { icon } from '../icons.js';
-import { AU_FIELDS, CARD_SECTION_KINDS, CARD_WHEN, auIsEmpty, auPrompt, auSummary, folderAu, normalizeAu, sameAu, KEY_REGEX_MODES, tidyAlias, WARDROBE_CATEGORIES, WARDROBE_GENDERS, WARDROBE_SHELVES, cardLabel, folderPath, personalPieces, folderWithDescendants, keyFromRegex, keyToRegex, listExport, selectFromExport, makeSection, normalizeAlias, searchLibraryCharacters, searchLibraryItems, searchLocations, splitKeys } from '../../core/index.js';
+import { cardIsEnglish, AU_FIELDS, CARD_SECTION_KINDS, CARD_WHEN, auIsEmpty, auPrompt, auSummary, folderAu, normalizeAu, sameAu, KEY_REGEX_MODES, tidyAlias, WARDROBE_CATEGORIES, WARDROBE_GENDERS, WARDROBE_SHELVES, cardLabel, folderPath, personalPieces, folderWithDescendants, keyFromRegex, keyToRegex, listExport, selectFromExport, makeSection, normalizeAlias, searchLibraryCharacters, searchLibraryItems, searchLocations, splitKeys } from '../../core/index.js';
 import { GATE_SECTIONS, GATE_WHEN } from '../../integration/lore-gate.js';
 import { fileToDataUrl, imageUrl } from '../../integration/wardrobe-images.js';
 import { renderNameWords } from '../name-words.js';
@@ -429,6 +429,34 @@ ${add}` : (d.fields[field.id] || add);
       } catch (error) { setStatus(error?.message || String(error), true); }
       finally { d.busy = false; render(); }
     }, 'Модель разложит ваш текст по четырём полям ниже; ничего не сохраняется, пока вы не нажмёте «Сохранить АУ»');
+    // Templates: an AU written once is kept under a name and taken into any folder (nothing changes in the folder until «Сохранить АУ»).
+    const templates = library().auTemplates ?? [];
+    const pick = element('select', { 'aria-label': 'Шаблон АУ', disabled: d.busy }, [
+      element('option', { value: '', text: templates.length ? '— выбрать шаблон —' : '— шаблонов пока нет —' }),
+      ...templates.map(item => element('option', { value: item.id, text: item.name, selected: item.id === d.tplPick })),
+    ]);
+    pick.addEventListener('change', () => { d.tplPick = pick.value; render(); });
+    const chosen = templates.find(item => item.id === d.tplPick);
+    const tplName = element('input', { type: 'text', value: d.tplName ?? '', placeholder: chosen ? chosen.name : 'Название шаблона, например «Универ»', 'aria-label': 'Название шаблона АУ', maxLength: 80, disabled: d.busy });
+    tplName.addEventListener('input', () => { d.tplName = tplName.value; });
+    panel.append(element('div', { className: 'ku-fld ku-autpl' }, [
+      element('label', { className: 'ku-clabel', text: 'Шаблоны АУ' }),
+      element('div', { className: 'ku-row' }, [
+        pick,
+        Object.assign(button('Взять шаблон', 'btn small', () => { if (!chosen) return; d.fields = normalizeAu(chosen.au); d.extra = []; setStatus(`Шаблон «${chosen.name}» подставлен в поля. Проверьте и нажмите «Сохранить АУ».`); render(); }, 'Поля ниже заменятся текстом шаблона; в папке ничего не меняется, пока вы не нажмёте «Сохранить АУ»'), { disabled: !chosen || d.busy }),
+        Object.assign(button('Удалить шаблон', 'btn small', () => attempt(async () => { await invoke('onLibraryRemoveAuTemplate', { id: chosen.id }); d.tplPick = ''; }, 'Шаблон удалён'), 'Удалить выбранный шаблон (папки, где он уже сохранён, не меняются)'), { disabled: !chosen || d.busy }),
+      ]),
+      element('div', { className: 'ku-row' }, [
+        tplName,
+        Object.assign(button('Сохранить как шаблон', 'btn small', () => attempt(async () => {
+          const name = (d.tplName ?? '').trim() || chosen?.name || '';
+          if (!name) throw new Error('Впишите название шаблона.');
+          await invoke('onLibrarySaveAuTemplate', { name, au: d.fields });
+          d.tplName = '';
+          d.tplPick = (library().auTemplates ?? []).find(item => item.name.toLocaleLowerCase('ru-RU') === name.toLocaleLowerCase('ru-RU'))?.id ?? '';
+        }, 'Шаблон сохранён'), 'Сохранить то, что написано в полях ниже. Такое же название заменит старый шаблон'), { disabled: d.busy }),
+      ]),
+    ]));
     panel.append(
       element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', text: 'Своими словами' }), raw]),
       element('div', { className: 'ku-row' }, [sort]),
@@ -496,7 +524,7 @@ ${add}` : (d.fields[field.id] || add);
     const on = linked.has(entry.id);
     const card = element('div', { className: `ku-place-card ku-ltile${s.openId === entry.id ? ' on' : ''}` });
     const sub = cards()
-      ? `${(entry.sections ?? []).filter(section => section.text.trim()).length} из ${(entry.sections ?? []).length} разделов заполнено${entry.lang === 'en' ? ' · English' : ''}`
+      ? `${(entry.sections ?? []).filter(section => section.text.trim()).length} из ${(entry.sections ?? []).length} разделов заполнено${cardIsEnglish(entry) ? ' · English' : ''}`
       : things()
         ? (entry.ownerName ? `обычно у: ${entry.ownerName}` : 'без хозяина')
         : (() => {
@@ -760,6 +788,31 @@ ${add}` : (d.fields[field.id] || add);
     return element('div', { className: 'ku-cport-wrap' }, nodes);
   }
 
+  /** The full-length reference of a character or a persona card: a small picture under the portrait (a click makes it big), a button to attach or change it. */
+  function refBox(entry) {
+    const input = element('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': 'Референс в полный рост' });
+    input.addEventListener('change', () => {
+      const files = [...(input.files ?? [])];
+      input.value = '';
+      if (files.length) attempt(async () => invoke('onLibrarySetRefImage', { id: entry.id, imageDataUrl: await fileToDataUrl(files[0]) }), 'Референс сохранён');
+    });
+    if (!entry.refImage) {
+      return element('div', { className: 'ku-refbox' }, [
+        Object.assign(button('+ Референс', 'btn small', () => input.click(), 'Прикрепить картинку в полный рост: чтобы всегда была перед глазами. Модели она не отправляется'), { type: 'button' }), input,
+      ]);
+    }
+    const thumb = element('img', { className: 'ku-refthumb', src: imageUrl(entry.refImage), alt: `Референс: ${entry.name}`, title: 'Нажмите, чтобы открыть крупно' });
+    thumb.addEventListener('click', () => { s.refZoom = true; render(); });
+    return element('div', { className: 'ku-refbox' }, [
+      thumb,
+      element('div', { className: 'ku-row' }, [
+        button('Заменить', 'btn small', () => input.click(), 'Другая картинка в полный рост'),
+        button('×', 'btn icon small', () => attempt(() => invoke('onLibraryRemoveRefImage', { id: entry.id }), 'Референс убран'), 'Убрать референс'),
+      ]),
+      input,
+    ]);
+  }
+
   /**
    * The sheet of a card, laid out as: who (a strip on top), the sections (a list on the left), one section at a time (on the right).
    * What was typed lives in `s.draft` until «Сохранить» or the card is closed, so any redraw keeps it.
@@ -811,7 +864,7 @@ ${add}` : (d.fields[field.id] || add);
     const lib = library();
     const emb = embed;
     const layer = element('div', { className: `ku-wlayer${emb ? ' ku-embedded' : ''}` });
-    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; s.gen = null; s.clearing = null; };
+    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; s.gen = null; s.clearing = null; s.refZoom = false; };
     // Typed and not saved: leaving asks first (save / leave without saving / stay), so a card is not lost by a stray click.
     const dirty = () => Boolean(s.draft && s.draft.id === entry.id && s.draft.base !== undefined && JSON.stringify(s.draft.fields) !== s.draft.base);
     const leaveWith = action => { if (dirty()) { s.leaving = action; render(); } else action(); };
@@ -918,7 +971,7 @@ ${add}` : (d.fields[field.id] || add);
     ]) : null;
     if (writing) s.gen.badgeEl = writing.lastChild;
     const top = element('header', { className: 'ku-ctop' }, [
-      element('div', { className: 'ku-cport-box' }, [portraitFrame(entry, portrait)]),
+      element('div', { className: 'ku-cport-box' }, [portraitFrame(entry, portrait), refBox(entry)]),
       element('div', { className: 'ku-ctop-main' }, [
         element('div', { className: 'ku-cfields' }, [nameInput, aliasInput, genderPick, ...(folderPick ? [folderPick] : [])]),
         ...(writing ? [writing] : []),
@@ -1126,7 +1179,7 @@ ${add}` : (d.fields[field.id] || add);
 
     // ---- Language and the note the card came from
     const note = entry.source;
-    const english = entry.lang === 'en';
+    const english = cardIsEnglish(entry);
     const strip = element('div', { className: `ku-cstrip${note?.stale ? ' stale' : ''}` }, [
       element('span', { className: `ku-chip${english ? ' told' : ''}`, text: english ? 'Текст на английском' : 'Текст на русском' }),
       ...(english ? [] : [button('Перевести на английский', 'btn small', () => attempt(async () => {
@@ -1161,6 +1214,11 @@ ${add}` : (d.fields[field.id] || add);
     queueMicrotask(restore);
     setTimeout(restore, 0);
     layer.append(dialog);
+    if (s.refZoom && entry.refImage) {
+      const zoom = element('div', { className: 'ku-refzoom', role: 'dialog', 'aria-label': `Референс: ${entry.name}` }, [element('img', { src: imageUrl(entry.refImage), alt: `Референс: ${entry.name}` })]);
+      zoom.addEventListener('click', () => { s.refZoom = false; render(); });
+      layer.append(zoom);
+    }
     if (lookState(entry).open) layer.append(renderLook(entry, draft));
     if (s.focusedId !== entry.id) {
       s.focusedId = entry.id;
@@ -1427,6 +1485,10 @@ ${add}` : (d.fields[field.id] || add);
     const title = element('input', { type: 'text', value: section.title, 'aria-label': 'Название раздела' });
     title.addEventListener('input', () => { section.title = title.value; });
     title.addEventListener('change', () => render());
+    // The same name, right in the heading: a click and type (the list on the left follows when the field is left).
+    const titleHead = element('input', { type: 'text', className: 'ku-ctitle ku-ctitle-edit', value: section.title || CARD_SECTION_KINDS[section.kind], 'aria-label': 'Название раздела (можно переименовать)', title: 'Название раздела: нажмите и впишите своё', maxLength: 80 });
+    titleHead.addEventListener('input', () => { section.title = titleHead.value; title.value = titleHead.value; });
+    titleHead.addEventListener('change', () => { if (!titleHead.value.trim()) { section.title = CARD_SECTION_KINDS[section.kind] ?? 'Раздел'; } render(); });
     const kindSelect = element('select', { 'aria-label': 'Вид раздела' }, Object.keys(CARD_SECTION_KINDS).filter(key => key !== 'private' || section.kind === 'private').map(key => element('option', { value: key, text: kindLabel(key), selected: key === section.kind })));
     kindSelect.addEventListener('change', () => { section.kind = kindSelect.value; render(); });
     const more = element('details', { className: 'ku-cmore' });
@@ -1465,7 +1527,7 @@ ${add}` : (d.fields[field.id] || add);
 
     if (auButtonHere) tools.append(auButtonHere);
     return element('div', { className: 'ku-cpane' }, [
-      element('div', { className: 'ku-ctitlerow' }, [element('h3', { className: 'ku-ctitle', text: section.title || CARD_SECTION_KINDS[section.kind] }), ...(chip ? [chip] : []),
+      element('div', { className: 'ku-ctitlerow' }, [titleHead, ...(chip ? [chip] : []),
         ...(section.kind === 'private' ? [] : [element('label', { className: 'ku-inline ku-secoff', title: 'Выключенный раздел остаётся в карточке, но рассказчик его не получает' }, [toggle(!section.off, `Раздел «${section.title || CARD_SECTION_KINDS[section.kind]}» включён`, on => { if (on) delete section.off; else section.off = true; render(); }), element('span', { className: 'ku-small', text: section.off ? 'Выключен' : 'Включён' })])]),
         ...(section.kind === 'voice' ? [button('Заготовка досье голоса', 'btn small', () => { const template = ['Манера речи: темп, громкость, длина фраз, любимые обороты', 'Фирменные фразы: ', 'Ласковые обращения: ', 'Грубости и ругательства: ', 'Как говорит, когда злится: ', 'Как говорит, когда нежничает: ', 'Как говорит, когда смущается: ', 'Привычки в речи (слова-паразиты, междометия, смех): '].join('\n'); section.text = section.text?.trim() ? `${section.text.trim()}\n\n${template}` : template; render(); }, 'Вставляет в текст раздела готовые строки для голоса героя (манера, фирменные фразы, обращения, грубости, речь в гневе, нежности и смущении). Остаётся заполнить.')] : []),
         ...(entry && hasPictureOf(entry) && (section.kind === 'visual' || section.kind === 'voice') ? [element('span', { className: 'ku-push' }), button('Описать по картинке…', 'btn small', () => { lookState(entry).open = true; render(); }, 'Модель опишет по картинке то, что не меняется: лицо, глаза, волосы, рост, сложение (и голос, если отметить)')] : [])]),
@@ -1547,7 +1609,7 @@ ${add}` : (d.fields[field.id] || add);
     const mine = (library().characters ?? []).filter(card => Boolean(card.persona) === personaMode);
     const withNote = mine.filter(card => card.source);
     const stale = withNote.filter(card => card.source.stale);
-    const russian = mine.filter(card => card.lang !== 'en' && (card.sections.some(section => section.text.trim()) || (card.records ?? []).length));
+    const russian = mine.filter(card => !cardIsEnglish(card) && (card.sections.some(section => section.text.trim()) || (card.records ?? []).length));
     if (!s.looked) { s.looked = true; if (withNote.length) lookAtNotesQuietly(); }
     const check = canRememberFolder()
       ? button('Проверить Obsidian', 'btn small', () => checkNotes(), 'Сверить анкеты в библиотеке с заметками в выбранной папке: изменённые будут подсвечены')
@@ -1941,6 +2003,10 @@ export const LIBRARY_STYLE = `
 .ku-pill[hidden]{display:none}
 .ku-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ku-pill.busy{border-color:var(--k-ok)}
+.ku-refbox{display:grid;gap:6px;margin-top:8px;justify-items:start}
+.ku-refthumb{max-width:100%;max-height:120px;object-fit:contain;cursor:zoom-in;border:1px solid var(--k-line);border-radius:8px;background:var(--k-inset)}
+.ku-refzoom{position:fixed;inset:0;z-index:2147483004;display:grid;place-items:center;padding:16px;background:var(--k-backdrop);cursor:zoom-out}
+.ku-refzoom img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px}
 .ku-clearpanel{margin:0 12px 6px}
 .ku-clearlist{display:grid;gap:2px;max-height:150px;overflow:auto}
 .ku-clearrow{display:flex;align-items:center;gap:4px}
@@ -1963,6 +2029,8 @@ export const LIBRARY_STYLE = `
 .ku-plook-opt{padding:10px 12px;border:1px solid var(--k-line);border-radius:10px;background:var(--k-inset)}
 .ku-plook-layer{z-index:2147483004}
 .ku-ctitle{margin:0;font-size:22px}
+.ku-ctitle-edit{flex:1 1 220px;min-width:0;font-weight:700;color:inherit;background:transparent;border:1px solid transparent;border-radius:8px;padding:2px 6px}
+.ku-ctitle-edit:hover,.ku-ctitle-edit:focus{border-color:var(--k-line);background:var(--k-inset)}
 .ku-fld{display:flex;flex-direction:column;gap:6px}
 .ku-clabel{font-size:13px;font-weight:700}
 .ku-hint{margin:0;font-size:12.5px;line-height:1.5;color:var(--k-muted)}

@@ -426,7 +426,7 @@ test('translation: a card goes into English section by section, the language is 
     replaceState: async next => { state = importState(next); },
     confirm: async () => true,
     notify: text => told.push(text),
-    translateSections: async sections => { sent.push(sections.map(section => section.title)); return sections.map(section => ({ id: section.id, text: `EN: ${section.text}` })); },
+    translateSections: async sections => { sent.push(sections.map(section => section.title)); return sections.map(section => ({ id: section.id, text: `EN: ${section.text}${' english'.repeat(20)}` })); },
   });
   const folder = callbacks.onLibraryAddFolder({ name: 'МБ' });
   const imported = callbacks.onLibraryImportMarkdown({ files: [{ path: `Анкеты/МБ/Годжо.md`, text: NOTE }], folderId: folder.id, kind: 'characters' });
@@ -441,7 +441,7 @@ test('translation: a card goes into English section by section, the language is 
   assert.deepEqual(sent, [['Basic Info', 'Voice']]);
   const done = store.get().characters[0];
   assert.equal(done.lang, 'en');
-  assert.deepEqual(done.sections.filter(section => section.text).map(section => section.text), ['EN: - Имя: Сатору Годжо, сильнейший.', 'EN: Говорит легко и насмешливо.']);
+  assert.deepEqual(done.sections.filter(section => section.text).map(section => section.text), ['EN: - Имя: Сатору Годжо, сильнейший.', 'EN: Говорит легко и насмешливо.'].map(text => text + ' english'.repeat(20)));
   assert.equal(done.source.path, 'МБ/Годжо.md');
   await assert.rejects(() => callbacks.onLibraryTranslateCard({ cardId: card.id }), /уже на английском/);
 
@@ -600,7 +600,8 @@ test('«Мир → Карточки»: a gallery with a switch per card; the she
     assert.equal(navs().length, 9); // nine sections; the names and the closet are small buttons in the footer
     assert.equal(shadow.querySelectorAll('.ku-cfoot-tool').length, 5, 'names, the closet, the sizes, the AU and the eraser: square buttons of the footer');
     assert.equal(shadow.querySelector('.ku-cnav.on .ku-cnav-title').textContent, 'Basic Info', 'the first section is open');
-    assert.match(shadow.querySelector('.ku-ctitlerow').textContent, /Basic Info[\s\S]*сейчас уходит в запрос/);
+    assert.equal(shadow.querySelector('.ku-ctitlerow .ku-ctitle-edit').value, 'Basic Info', 'the heading is the name of the section and can be typed over');
+    assert.match(shadow.querySelector('.ku-ctitlerow').textContent, /сейчас уходит в запрос/);
     nav('Skills').click();
     assert.match(shadow.querySelector('.ku-ctitlerow').textContent, /сейчас придержан: не бой/);
     nav('Voice').click();
@@ -1052,4 +1053,60 @@ test('выключенный раздел карточки остаётся в �
   assert.deepEqual(filledSections(card).map(section => section.kind), ['visual']);
   delete card.sections[0].off;
   assert.equal(filledSections(card).length, 2);
+});
+
+test('после перевода и нового текста по-русски карточка снова русская: метка English сама сбрасывается', async () => {
+  const { cardIsEnglish } = await import('../src/core/index.js');
+  const settings = {};
+  const store = createLocationLibraryStore({ settings: () => settings, save: () => {} });
+  let state = chat();
+  const callbacks = createLibraryCallbacks({
+    library: store, getState: () => state,
+    commitOperations: async operations => { state = applyOperations(state, operations); },
+    replaceState: async next => { state = importState(next); },
+    confirm: async () => true, notify: () => {},
+    translateSections: async sections => sections.map(section => ({ id: section.id, text: `Tall and calm, with dark hair. ${section.id}` })),
+  });
+  const folder = callbacks.onLibraryAddFolder({ name: 'Папка' });
+  const card = callbacks.onLibraryAddCharacter({ folderId: folder.id, name: 'Судзу' });
+  const id = card.id ?? store.get().characters[0].id;
+  callbacks.onLibraryUpdateCharacter({ cardId: id, changes: { sections: [{ kind: 'visual', title: 'Visual', text: 'Высокая, спокойная.' }] } });
+  await callbacks.onLibraryTranslateCard({ cardId: id });
+  assert.equal(store.get().characters[0].lang, 'en');
+  assert.equal(cardIsEnglish(store.get().characters[0]), true);
+  const section = store.get().characters[0].sections[0];
+  callbacks.onLibraryUpdateCharacter({ cardId: id, changes: { sections: [{ ...section, text: 'Высокая, тёмные волосы.' }] } });
+  assert.equal(store.get().characters[0].lang, undefined, 'the text is Russian again: the mark is gone');
+  await callbacks.onLibraryTranslateCard({ cardId: id }); // and it can be translated again, no «уже на английском»
+  assert.equal(store.get().characters[0].lang, 'en');
+  assert.equal(cardIsEnglish({ lang: 'en', sections: [{ text: 'Высокая, тёмная.' }] }), false, 'a mark left on Russian text does not count');
+});
+
+test('шаблоны АУ: сохраняются под названием, то же название заменяет, удаляются, переживают нормализацию библиотеки', async () => {
+  const { emptyLibrary, normalizeLibrary, saveAuTemplate, removeAuTemplate, cleanAuTemplates } = await import('../src/core/index.js');
+  let library = saveAuTemplate(emptyLibrary(), { name: 'Универ', au: { world: 'современный город', changes: 'все студенты' } });
+  assert.equal(library.auTemplates.length, 1);
+  library = saveAuTemplate(library, { name: ' универ ', au: { world: 'другой мир' } });
+  assert.equal(library.auTemplates.length, 1, 'the same name (any case) replaces');
+  assert.equal(library.auTemplates[0].au.world, 'другой мир');
+  assert.throws(() => saveAuTemplate(library, { name: 'Пусто', au: {} }), /нечего|ничего/);
+  assert.equal(normalizeLibrary(library).auTemplates.length, 1, 'the templates stay when the library is normalized');
+  assert.deepEqual(cleanAuTemplates([{ id: 'x', name: '', au: { world: 'a' } }]), []);
+  library = removeAuTemplate(library, library.auTemplates[0].id);
+  assert.equal(library.auTemplates, undefined);
+});
+
+test('референс в полный рост: хранится в карточке, снимается, не попадает в копию', async () => {
+  const { addLibraryCharacter, updateLibraryCharacter, duplicateLibraryCharacter, normalizeLibrary } = await import('../src/core/index.js');
+  let library = addLibraryCharacter({ version: 1, folders: [], locations: [], items: [], characters: [] }, { name: 'Судзу' });
+  library = library.library ?? library;
+  const id = library.characters[0].id;
+  library = updateLibraryCharacter(library, id, { refImage: 'user/images/kulisy/ref1.png' });
+  assert.equal(library.characters[0].refImage, 'user/images/kulisy/ref1.png');
+  assert.equal(normalizeLibrary(library).characters[0].refImage, 'user/images/kulisy/ref1.png', 'survives normalization');
+  const copy = duplicateLibraryCharacter(library, id);
+  const copied = (copy.library ?? copy).characters.find(card => card.id !== id);
+  assert.equal(copied?.refImage, undefined, 'a copy has no reference of its own');
+  library = updateLibraryCharacter(library, id, { refImage: '' });
+  assert.equal(library.characters[0].refImage, undefined);
 });

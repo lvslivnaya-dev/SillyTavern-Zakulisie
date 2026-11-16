@@ -8,7 +8,7 @@
  *   folders:   [{ id, name, parentId? }]                      folders may nest
  *   locations: [{ id, folderId, name, aliases[], description, traits[], parentId?, image?, autoName? }]
  *   items:     [{ id, folderId, name, aliases[], description, importance, ownerName?, image?, autoName? }]
- *   characters:[{ id, folderId, name, aliases[], sections[], image? }]   cards, see character-cards.js
+ *   characters:[{ id, folderId, name, aliases[], sections[], image?, refImage? }]   cards, see character-cards.js (refImage: a full-length reference, only for the eye)
  *
  * `image` is a picture on the SillyTavern server (user/images/…), like a wardrobe card's;
  * `autoName`: the name came from the model, so describing the picture again may rename it.
@@ -94,6 +94,8 @@ function noLoop(list, startId, forbiddenId) {
 export function normalizeLibrary(input) {
   const library = emptyLibrary();
   if (!input || typeof input !== 'object') return library;
+  library.auTemplates = cleanAuTemplates(input.auTemplates);
+  if (!library.auTemplates.length) delete library.auTemplates;
   const folderIds = new Set();
   for (const raw of Array.isArray(input.folders) ? input.folders : []) {
     const id = String(raw?.id ?? '');
@@ -245,6 +247,7 @@ function characterEntry(id, folderId, name, raw) {
     ...(cleanText(raw?.nameId, 80) ? { nameId: cleanText(raw.nameId, 80) } : {}),
     ...(cleanCloset(raw?.closet) ? { closet: cleanCloset(raw.closet) } : {}),
     ...(cleanSource(raw?.source) ? { source: cleanSource(raw.source) } : {}),
+    ...(cleanImagePath(raw?.refImage) ? { refImage: cleanImagePath(raw.refImage) } : {}),
     ...picture(raw),
   };
 }
@@ -299,6 +302,41 @@ export function addFolder(library, { name, parentId = '', persona = false } = {}
   const folder = { id: uniqueId('folder'), name: requireName(name), ...(parentId ? { parentId } : {}), ...(persona ? { persona: true } : {}) };
   next.folders.push(folder);
   return { library: next, folder };
+}
+
+/** Saved AU («шаблоны АУ»): { id, name, au }, shared by all folders; the name is what the user sees in the list. */
+export function cleanAuTemplates(raw) {
+  const seen = new Set();
+  const list = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const id = String(item?.id ?? '');
+    const name = cleanText(item?.name, LIBRARY_LIMITS.name);
+    const au = normalizeAu(item?.au);
+    if (!id || !name || seen.has(id) || auIsEmpty(au) || list.length >= 60) continue;
+    seen.add(id);
+    list.push({ id, name, au });
+  }
+  return list;
+}
+
+/** Save an AU under a name. The same name (any case) replaces the older template, so «Универ» is not kept twice. */
+export function saveAuTemplate(library, { name, au }) {
+  const next = clone(library);
+  const title = requireName(name);
+  const clean = normalizeAu(au);
+  if (auIsEmpty(clean)) throw new RangeError('В АУ пока ничего не написано: сохранять нечего');
+  const list = cleanAuTemplates(next.auTemplates);
+  const same = list.find(item => item.name.toLocaleLowerCase('ru-RU') === title.toLocaleLowerCase('ru-RU'));
+  if (same) { same.au = clean; same.name = title; } else list.push({ id: uniqueId('au'), name: title, au: clean });
+  next.auTemplates = list;
+  return next;
+}
+
+export function removeAuTemplate(library, id) {
+  const next = clone(library);
+  const list = cleanAuTemplates(next.auTemplates).filter(item => item.id !== id);
+  if (list.length) next.auTemplates = list; else delete next.auTemplates;
+  return next;
 }
 
 export function updateFolder(library, folderId, changes = {}) {
@@ -364,6 +402,7 @@ function applyLocationFields(next, location, fields) {
   if (fields.description != null) location.description = cleanProse(fields.description, LIBRARY_LIMITS.description);
   if (fields.traits != null) location.traits = cleanList(fields.traits, LIBRARY_LIMITS.traits, LIBRARY_LIMITS.trait);
   if (fields.lang !== undefined) { if (fields.lang === 'en') location.lang = 'en'; else delete location.lang; }
+  else if (location.lang === 'en' && fields.description !== undefined && writtenInRussian(location.description)) delete location.lang;
   if (fields.parentId !== undefined) {
     const parentId = String(fields.parentId ?? '');
     if (parentId && !next.locations.some(candidate => candidate.id === parentId)) throw new RangeError('Такой локации нет');
@@ -419,6 +458,7 @@ function applyItemFields(next, item, fields) {
   if (fields.aliases != null) item.aliases = cleanList(fields.aliases, LIBRARY_LIMITS.aliases, LIBRARY_LIMITS.alias);
   if (fields.description != null) item.description = cleanProse(fields.description, LIBRARY_LIMITS.itemDescription);
   if (fields.lang !== undefined) { if (fields.lang === 'en') item.lang = 'en'; else delete item.lang; }
+  else if (item.lang === 'en' && fields.description !== undefined && writtenInRussian(item.description)) delete item.lang;
   if (fields.importance != null) item.importance = ITEM_IMPORTANCE.includes(fields.importance) ? fields.importance : 'normal';
   if (fields.ownerName !== undefined) {
     const ownerName = cleanText(fields.ownerName, LIBRARY_LIMITS.name);
@@ -492,9 +532,32 @@ function applyCharacterFields(next, card, fields) {
   if (fields.nameId !== undefined) { const nameId = cleanText(fields.nameId, 80); if (nameId) card.nameId = nameId; else delete card.nameId; }
   if (fields.gender !== undefined) { if (fields.gender === 'male' || fields.gender === 'female') card.gender = fields.gender; else delete card.gender; }
   if (fields.lang !== undefined) { if (fields.lang === 'en') card.lang = 'en'; else delete card.lang; }
+  // the texts were written again in Russian: the old mark «English» goes
+  else if (card.lang === 'en' && fields.sections !== undefined && !cardIsEnglish(card)) delete card.lang;
   if (fields.source !== undefined) { const source = cleanSource(fields.source); if (source) card.source = source; else delete card.source; }
+  // the full-length reference picture: kept with the card, never sent to the model
+  if (fields.refImage !== undefined) { const refImage = cleanImagePath(fields.refImage); if (refImage) card.refImage = refImage; else delete card.refImage; }
   applyPicture(card, fields, oldName);
   assertNameFree(next, card);
+}
+
+/** A description typed again in Russian (more Cyrillic than Latin letters): the mark «English» of a place or a thing no longer fits. */
+function writtenInRussian(text) {
+  const cyrillic = (String(text ?? '').match(/[А-Яа-яЁё]/g) ?? []).length;
+  const latin = (String(text ?? '').match(/[A-Za-z]/g) ?? []).length;
+  return cyrillic > latin;
+}
+
+/**
+ * Is the text of the card English NOW? The mark `lang: 'en'` is put by the translation and could stay when the user wrote the card
+ * in Russian again; so the letters decide: the mark counts only while the Latin ones are most of the text.
+ */
+export function cardIsEnglish(card) {
+  if (card?.lang !== 'en') return false;
+  const text = (card.sections ?? []).map(section => section.text ?? '').join(' ');
+  const cyrillic = (text.match(/[А-Яа-яЁё]/g) ?? []).length;
+  const latin = (text.match(/[A-Za-z]/g) ?? []).length;
+  return !cyrillic || latin > cyrillic;
 }
 
 /** Add a character card (the template's sections, empty, unless `sections` is given). It must sit in an existing folder. */
@@ -598,7 +661,7 @@ export function removeLibraryCharacter(library, cardId) {
 export function duplicateLibraryCharacter(library, cardId, { folderId } = {}) {
   const source = (library.characters ?? []).find(candidate => candidate.id === cardId);
   if (!source) throw new RangeError('Такой карточки нет');
-  const { id, image, autoName, source: _note, ...fields } = clone(source);
+  const { id, image, refImage: _ref, autoName, source: _note, ...fields } = clone(source);
   const sections = fields.sections.map(({ id: sectionId, ...rest }) => rest);
   const target = folderId ?? source.folderId;
   const taken = new Set((library.characters ?? []).filter(card => card.folderId === target).map(card => card.name.toLocaleLowerCase('ru-RU')));
