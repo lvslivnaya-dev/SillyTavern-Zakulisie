@@ -182,3 +182,21 @@ test('the names of a card: words are cleaned of remarks and marks, Latin ones st
   assert.match(mentioned, /Изана — род\. Изаны/);
   assert.doesNotMatch(mentioned, /Изана-сан — /, 'only mentioned: the main name and what was said');
 });
+
+test('кличка из нескольких слов склоняется целиком; старые формы по словам склеиваются; инициал «Д.» не строка', async () => {
+  const { syncNameWords, recognitionForms, wordsFor } = await import('../src/core/name-library.js');
+  assert.deepEqual(wordsFor('Монки Д. Луффи', ['Мугивара', 'Соломенная шляпа']), ['Монки', 'Луффи', 'Мугивара', 'Соломенная шляпа']);
+  const old = [
+    { word: 'Соломенная', same: false, gen: 'Соломенной', dat: 'Соломенной', acc: 'Соломенную', ins: 'Соломенной', pre: 'Соломенной' },
+    { word: 'Шляпа', same: false, gen: 'Шляпы', dat: 'Шляпе', acc: 'Шляпу', ins: 'Шляпой', pre: 'Шляпе' },
+  ];
+  const words = syncNameWords('Луффи', ['Соломенная шляпа'], old);
+  const phrase = words.find(item => item.word === 'Соломенная шляпа');
+  assert.equal(phrase.gen, 'Соломенной шляпы', 'the forms written word by word are joined, the case of the letters follows the phrase');
+  assert.equal(phrase.ins, 'Соломенной шляпой');
+  const forms = recognitionForms({ name: 'Луффи', aliases: ['Соломенная шляпа'], words });
+  assert.ok(forms.includes('Соломенной шляпы') && forms.includes('Соломенную шляпу'));
+  assert.ok(!forms.includes('шляпа Соломенная') && !forms.some(form => /^Шляпы /.test(form)), 'a nickname is not turned round');
+  // a phrase that was never filled stays a row to fill
+  assert.equal(syncNameWords('Луффи', ['Рыжий демон'], []).find(item => item.word === 'Рыжий демон').gen, '');
+});

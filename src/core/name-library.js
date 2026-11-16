@@ -47,6 +47,13 @@ export function recognitionForms(entry) {
   for (const name of [entry?.name, ...(entry?.aliases ?? [])]) {
     const words = splitWords(name);
     if (!words.length) continue;
+    // A nickname of several words is declined as a whole phrase (its own row): «Соломенная шляпа» → «Соломенной шляпы»… (not in the other order)
+    const phrase = name === entry?.name ? '' : phraseOf(name);
+    const unit = phrase ? byWord.get(wordKey(phrase)) : null;
+    if (unit) {
+      for (const [key] of NAME_CASES) forms.add(unit.same ? phrase : (unit[key] || phrase));
+      continue;
+    }
     for (const [key] of NAME_CASES) {
       const parts = words.map(word => { const item = byWord.get(wordKey(word)); return item && !item.same && item[key] ? item[key] : word; });
       forms.add(parts.join(' '));
@@ -57,17 +64,30 @@ export function recognitionForms(entry) {
   return [...forms].filter(form => form && !own.has(wordKey(form)));
 }
 
-/** The words of the name and its aliases, once each, in reading order. */
+/** A nickname of several words as one phrase: «Соломенная  шляпа (кличка)» → «Соломенная шляпа»; '' for one word. */
+export function phraseOf(alias) {
+  const words = splitWords(alias);
+  return words.length > 1 ? words.join(' ') : '';
+}
+
+/**
+ * What declines, once each, in reading order: every word of the name (an initial like «Д.» is left out: nothing to decline) and every
+ * nickname: a nickname of one word is a word, a nickname of several words is one phrase («Соломенная шляпа») with forms of its own.
+ */
 export function wordsFor(name, aliases = []) {
   const seen = new Set();
   const list = [];
-  for (const source of [name, ...aliases]) {
-    for (const word of splitWords(source)) {
-      const key = wordKey(word);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      list.push(word);
-    }
+  const add = word => {
+    const key = wordKey(word);
+    if (!word || seen.has(key)) return;
+    seen.add(key);
+    list.push(word);
+  };
+  for (const word of splitWords(name)) if ([...word].length > 1) add(word);
+  for (const alias of aliases) {
+    const phrase = phraseOf(alias);
+    if (phrase) add(phrase);
+    else for (const word of splitWords(alias)) add(word);
   }
   return list;
 }
@@ -81,7 +101,24 @@ function cleanWord(item, word) {
 /** Keep the forms already written for words that are still there; new words start empty. */
 function syncWords(name, aliases, previous = []) {
   const known = new Map(previous.map(item => [wordKey(item.word), item]));
-  return wordsFor(name, aliases).map(word => cleanWord(known.get(wordKey(word)), word));
+  return wordsFor(name, aliases).map(word => cleanWord(known.get(wordKey(word)) ?? phraseFromWords(word, known), word));
+}
+
+/** A phrase that is new as a row but whose words were written one by one before: their forms are joined (nothing the user typed is lost). */
+function phraseFromWords(phrase, known) {
+  const parts = splitWords(phrase);
+  if (parts.length < 2) return undefined;
+  const items = parts.map(part => known.get(wordKey(part)));
+  if (items.some(item => !item)) return undefined;
+  if (items.every(item => item.same)) return { same: true };
+  const out = {};
+  for (const [key] of NAME_CASES) {
+    if (items.some(item => !item.same && !item[key])) return undefined;
+    // the case of the first letter follows the phrase as written («Соломенная шляпа»: «Шляпы» → «шляпы»)
+    const follow = (form, original) => ([...original][0] === [...original][0]?.toLocaleLowerCase('ru-RU') ? form.charAt(0).toLocaleLowerCase('ru-RU') + form.slice(1) : form);
+    out[key] = items.map((item, index) => (item.same ? parts[index] : follow(item[key], parts[index]))).join(' ');
+  }
+  return out;
 }
 
 function cleanEntry(raw) {
@@ -307,7 +344,7 @@ function neededOnly(entry, text) {
   const body = String(text ?? '').toLocaleLowerCase('ru-RU');
   const said = word => Boolean(body) && saidIn(body, word);
   const aliases = entry.aliases.filter(alias => splitWords(alias).some(word => said(word)));
-  const keep = new Set([...splitWords(entry.name), ...aliases.flatMap(splitWords), ...entry.words.filter(item => formsOf(item).some(said)).map(item => item.word)].map(wordKey));
+  const keep = new Set([...splitWords(entry.name), ...aliases.flatMap(splitWords), ...aliases.map(phraseOf).filter(Boolean), ...entry.words.filter(item => formsOf(item).some(said)).map(item => item.word)].map(wordKey));
   return { ...entry, aliases, words: entry.words.filter(item => keep.has(wordKey(item.word))) };
 }
 

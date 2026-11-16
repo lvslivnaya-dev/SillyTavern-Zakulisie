@@ -10,7 +10,7 @@ const BATCH = 12;
 
 const SYSTEM = `You decline names for Russian roleplay text. You get a list of names (id, full name, aliases, gender: m / f / unknown) and for each the words that need forms. Output ONLY valid JSON:
 {"entries":[{"id":"…","words":[{"word":"Рён","same":false,"gen":"Рёна","dat":"Рёну","acc":"Рёна","ins":"Рёном","pre":"Рёне"}]}]}
-- word: exactly as given. Give each requested word once.
+- word: exactly as given. Give each requested word once. A «word» may be a PHRASE of several words (a nickname like «Соломенная шляпа»): then give the forms of the WHOLE phrase, every word agreeing in case, number and gender («Соломенной шляпы»); same: true only if the whole phrase never changes.
 - Cases: gen (кого? родительный), dat (кому? дательный), acc (кого? винительный), ins (кем? творительный), pre (о ком? предложный).
 - Forms are Russian forms of the word as written. Keep the writing system: a Cyrillic word gets Cyrillic forms.
 - same: true when the word does not decline (a surname ending in -о, -их, -ых, -ко or in a vowel like «Сано», «Хайтани», «Мацуно»; a feminine surname ending in a consonant; a name that Russian leaves unchanged). Then leave all five forms empty.
