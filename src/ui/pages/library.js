@@ -880,13 +880,13 @@ ${add}` : (d.fields[field.id] || add);
     const leaveWith = action => { if (dirty()) { s.leaving = action; render(); } else action(); };
     const closeNow = () => { s.leaving = null; s.openId = ''; forget(); render(); };
     // A model is writing: closing would hide it, so the window is folded to the pill instead (the card stays, the work goes on).
-    const close = () => { if (s.gen?.running || s.translating?.id === entry.id) { ctx.minimize?.(); return; } leaveWith(closeNow); };
+    const close = () => { if (s.gen?.running || s.translating?.id === entry.id || s.working?.id === entry.id) { ctx.minimize?.(); return; } leaveWith(closeNow); };
     if (!emb) layer.addEventListener('click', event => { if (event.target === layer) close(); });
     const dialog = element('section', { className: 'ku-wcard ku-ccard', role: emb ? 'region' : 'dialog', ...(emb ? {} : { 'aria-modal': 'true' }), 'aria-label': entry.name });
     if (!emb) dialog.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } });
     const siblings = entriesOf().filter(item => item.folderId === entry.folderId);
     const index = siblings.findIndex(item => item.id === entry.id);
-    const go = step => { if (s.gen?.running || s.translating?.id === entry.id) { setStatus('Идёт запись: дождитесь конца или откройте другую карточку позже.', true); return; } const next = siblings[index + step]; if (next) leaveWith(() => { s.leaving = null; s.openId = next.id; forget(); render(); }); };
+    const go = step => { if (s.gen?.running || s.translating?.id === entry.id || s.working?.id === entry.id) { setStatus('Идёт запись: дождитесь конца или откройте другую карточку позже.', true); return; } const next = siblings[index + step]; if (next) leaveWith(() => { s.leaving = null; s.openId = next.id; forget(); render(); }); };
 
     // The draft: what the user changed and has not saved yet. Sections are a list of plain objects edited in place.
     if (s.draft?.id !== entry.id) {
@@ -979,12 +979,13 @@ ${add}` : (d.fields[field.id] || add);
       ]),
     ]) : null;
     // A sign that the model is writing: seen on every page of the card, with the step it is on.
-    const translatingHere = s.translating?.id === entry.id;
-    const writing = s.gen?.running || translatingHere ? element('div', { className: 'ku-genbadge', role: 'status' }, [
+    // anything the model is doing for this card (writing sections, translating, the forms of the names) is told here, on every page of the card
+    const jobHere = s.translating?.id === entry.id ? s.translating : s.working?.id === entry.id ? s.working : null;
+    const writing = s.gen?.running || jobHere ? element('div', { className: 'ku-genbadge', role: 'status' }, [
       element('span', { className: 'ku-genspin', 'aria-hidden': 'true' }),
-      element('span', { text: translatingHere ? s.translating.text : (s.gen.progress || 'Модель пишет карточку…') }),
+      element('span', { text: jobHere ? jobHere.text : (s.gen.progress || 'Модель пишет карточку…') }),
     ]) : null;
-    if (writing && !translatingHere) s.gen.badgeEl = writing.lastChild;
+    if (writing && !jobHere) s.gen.badgeEl = writing.lastChild;
     const top = element('header', { className: 'ku-ctop' }, [
       element('div', { className: 'ku-cport-box' }, [portraitFrame(entry, portrait), refBox(entry)]),
       element('div', { className: 'ku-ctop-main' }, [
@@ -1086,7 +1087,11 @@ ${add}` : (d.fields[field.id] || add);
         return renderGeneratePane({ ...genDeps(entry, draft, gen), hasPicture: hasPictureOf(entry), modelField });
       })()
       : s.selSection === NAMES
-      ? renderNameWords({ name: draft.name, aliases: draft.aliases.split(','), words: draft.words, redraw: render, setStatus, fill: payload => invoke('onCardNamesFill', payload) })
+      ? renderNameWords({ name: draft.name, aliases: draft.aliases.split(','), words: draft.words, redraw: render, setStatus, working: s.working?.id === entry.id, fill: async payload => {
+        s.working = { id: entry.id, text: 'Подбираю склонения имён…' };
+        render();
+        try { return await invoke('onCardNamesFill', payload); } finally { s.working = null; }
+      } })
       : s.selSection === CLOSET ? renderClosetPane(entry, draft.closet) : position < 0
       ? element('div', { className: 'ku-cpane' }, [element('p', { className: 'ku-hint', text: 'В карточке нет разделов. Добавьте свой слева внизу.' })])
       : renderSectionPane(draft.sections[position], position, status, entry);
@@ -1914,9 +1919,9 @@ ${add}` : (d.fields[field.id] || add);
       if (!shelfState.openId) continue;
       const entry = (shelf === 'characters' ? library().characters : shelf === 'items' ? library().items : library().locations)?.find(item => item.id === shelfState.openId);
       if (!entry) continue;
-      const translating = shelfState.translating?.id === entry.id;
-      const running = Boolean(shelfState.gen?.running) || translating;
-      return { shelf, windowId, name: shelfState.draft?.fields?.name || entry.name, running, progress: translating ? shelfState.translating.text : running ? (shelfState.gen.progress || 'пишется…') : '' };
+      const job = shelfState.translating?.id === entry.id ? shelfState.translating : shelfState.working?.id === entry.id ? shelfState.working : null;
+      const running = Boolean(shelfState.gen?.running) || Boolean(job);
+      return { shelf, windowId, name: shelfState.draft?.fields?.name || entry.name, running, progress: job ? job.text : running ? (shelfState.gen.progress || 'пишется…') : '' };
     }
     return null;
   }

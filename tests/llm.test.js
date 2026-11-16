@@ -32,7 +32,8 @@ test('custom mode goes through the SillyTavern custom backend with the key as a 
   assert.equal(body.custom_url, 'https://example.test/v1');
   assert.deepEqual(JSON.parse(body.custom_include_headers), { Authorization: 'Bearer sk-1' });
   assert.equal(body.model, 'cheap');
-  assert.deepEqual(body.messages.map(message => message.role), ['system', 'user']);
+  assert.deepEqual(body.messages.map(message => message.role), ['user'], 'the rules go into the user message: a model may ignore the system role');
+  assert.equal(body.messages[0].content, 'S\n\n---\n\nU');
   assert.deepEqual(routedContext(mainContext(), custom(), 'analysis').chat, [1, 2], 'остальной контекст не тронут');
 });
 

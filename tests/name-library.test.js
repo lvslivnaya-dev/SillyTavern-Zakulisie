@@ -100,7 +100,7 @@ test('fillNameForms asks only for empty words and survives a failed batch', asyn
   assert.equal(result.patches[0].words.length, 2);
   assert.equal(calls, 1);
   const done = updateName(library, entry.id, { words: [{ word: 'Рён', same: true }, { word: 'Хайтани', same: true }] }).entries[0];
-  assert.deepEqual(await fillNameForms(good, [done]), { patches: [], asked: 0, failed: 0 });
+  assert.deepEqual(await fillNameForms(good, [done]), { patches: [], asked: 0, failed: 0, error: '' });
   assert.equal(calls, 1, 'nothing to fill: no request');
   const bad = { generateRaw: async () => 'не json' };
   const failed = await fillNameForms(bad, [entry]);

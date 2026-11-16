@@ -6,7 +6,7 @@ import { NAME_CASES, syncNameWords, wordsToFill } from '../core/name-library.js'
  * `words` is the draft's own array (it is edited in place and saved with the card); it follows the name and the nicknames typed above.
  * `fill({ name, aliases, words })` asks the model for the forms of the empty words → [{ word, same, gen… }].
  */
-export function renderNameWords({ name, aliases, words, fill, redraw, setStatus }) {
+export function renderNameWords({ name, aliases, words, fill, redraw, setStatus, working = false }) {
   const list = syncNameWords(name, aliases, words);
   words.splice(0, words.length, ...list);
   const missing = wordsToFill({ words });
@@ -49,7 +49,8 @@ export function renderNameWords({ name, aliases, words, fill, redraw, setStatus 
       setStatus?.(error?.message || String(error), true);
     } finally { busy = false; redraw(); }
   }, 'Модель предложит формы для слов, где они ещё пусты. Проверьте их: она может ошибиться');
-  ask.disabled = !missing.length;
+  ask.disabled = !missing.length || working;
+  if (working) ask.textContent = 'Подбираю…';
 
   return element('div', { className: 'ku-cpane' }, [
     element('div', { className: 'ku-ctitlerow' }, [element('h3', { className: 'ku-ctitle', text: 'Имена и склонения' }), ask]),

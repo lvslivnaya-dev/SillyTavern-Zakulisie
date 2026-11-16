@@ -36,10 +36,25 @@ function toMessages(prompt) {
   return Array.isArray(prompt) ? prompt.map(({ role, content }) => ({ role, content: String(content ?? '') })) : [{ role: 'user', content: String(prompt ?? '') }];
 }
 
+/**
+ * The rules are put at the head of the first user message instead of a message of their own. Some cheap models and proxies ignore the
+ * system role: the model then does not know the task and answers the text itself (echoes the JSON, «Принял текст, что с ним сделать?»).
+ * The same words in the user message work everywhere.
+ */
+export function foldSystem(messages) {
+  const rules = messages.filter(message => message.role === 'system').map(message => message.content.trim()).filter(Boolean);
+  const rest = messages.filter(message => message.role !== 'system');
+  if (!rules.length) return messages;
+  const head = rules.join('\n\n');
+  const first = rest.findIndex(message => message.role === 'user');
+  if (first < 0) return [{ role: 'user', content: head }, ...rest];
+  return rest.map((message, index) => (index === first ? { ...message, content: `${head}\n\n---\n\n${message.content}` } : message));
+}
+
 async function routedGenerate(context, settings, options, purpose) {
   const aux = settings.aux;
   try {
-    return await auxGenerate(context, aux, toMessages(options.prompt));
+    return await auxGenerate(context, aux, foldSystem(toMessages(options.prompt)));
   } catch (error) {
     if (!aux.fallbackToMain) throw error;
     logEvent('warn', `Вспомогательный API не ответил (${AUX_PURPOSES[purpose] ?? purpose}) — запрос ушёл в основной API`, error);

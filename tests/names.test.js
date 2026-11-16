@@ -118,3 +118,11 @@ test('«Персонажи»: a maybe pair asks «Это один» / «Разн
     assert.ok(shadow.querySelector('select[aria-label="Главное имя"]'));
   } finally { studio.destroy(); }
 });
+
+test('склонения: упавший запрос возвращается с причиной, пустой ответ тоже не молчит', async () => {
+  const { fillNameForms } = await import('../src/integration/name-forms.js');
+  const entry = { id: 'draft', name: 'Ганрид', aliases: [], words: [{ word: 'Ганрид', same: false }] };
+  const failed = await fillNameForms({ generateRaw: async () => { throw new Error('нет связи'); } }, [entry]);
+  assert.equal(failed.patches.length, 0);
+  assert.match(failed.error, /нет связи/);
+});

@@ -49,6 +49,7 @@ export async function fillNameForms(context, entries) {
   const todo = entries.map(entry => ({ entry, words: wordsToFill(entry) })).filter(item => item.words.length);
   const patches = [];
   let failed = 0;
+  let error = '';
   for (let start = 0; start < todo.length; start += BATCH) {
     const batch = todo.slice(start, start + BATCH);
     const requested = new Map(batch.map(item => [item.entry.id, new Set(item.words.map(word => word.word))]));
@@ -66,10 +67,11 @@ export async function fillNameForms(context, entries) {
         busyLabel: 'имена: подбираю склонения…',
       }, raw => parseNameForms(raw, requested));
       for (const [id, words] of Object.entries(answer)) patches.push({ id, words: Object.entries(words).map(([word, forms]) => ({ word, ...forms })) });
-    } catch (error) {
+    } catch (caught) {
       failed += batch.length;
-      console.warn('[Kulisy] Name forms failed.', error);
+      error = String(caught?.message ?? caught);
+      console.warn('[Kulisy] Name forms failed.', caught);
     }
   }
-  return { patches, asked: todo.length, failed };
+  return { patches, asked: todo.length, failed, error };
 }

@@ -307,3 +307,27 @@ test('split of a section reaches the save: the old section is saved without the 
     assert.deepEqual(saved.changes.sections.map(section => [section.title, section.text]), [['Первый', 'Один абзац.'], ['Новый раздел', 'Другой абзац.']]);
   } finally { studio?.destroy(); place.remove(); }
 });
+
+test('names of a card: while the model picks the forms, the card says so (badge, button, pill)', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const card = { id: 'c1', folderId: 'f1', name: 'Ганрид', aliases: ['Ган'], records: [], words: [], sections: [{ id: 'a', kind: 'other', title: 'Первый', text: 'Тут.' }] };
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  let studio;
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, callbacks: { onCardNamesFill: async () => { await gate; return []; } }, container: place });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    root.querySelector('.ku-place-open').click();
+    root.querySelector('.ku-cfoot-tool[aria-label^="Имена"]').click();
+    [...root.querySelectorAll('.ku-cpane button')].find(node => node.textContent.startsWith('Подобрать склонения')).click();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(root.querySelector('.ku-genbadge')?.textContent ?? '', /Подбираю склонения/, 'the card shows the model works');
+    assert.equal([...root.querySelectorAll('.ku-cpane button')].find(node => node.textContent === 'Подбираю…')?.disabled, true, 'the button cannot be pressed twice');
+    root.querySelector('.ku-ctop-tools [aria-label="Свернуть"]').click();
+    assert.match(root.querySelector('.ku-pill').textContent, /склонения/, 'the pill of the folded window says it too');
+    release();
+  } finally { studio?.destroy(); place.remove(); }
+});

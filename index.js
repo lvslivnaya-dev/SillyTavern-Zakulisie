@@ -3530,6 +3530,8 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       const entry = cardNameEntry({ id: 'draft', name, aliases: (aliases ?? []).map(alias => String(alias).trim()).filter(Boolean), words });
       if (!wordsToFill(entry).length) return [];
       const result = await fillNameForms(routedContext(SillyTavern.getContext(), settings, 'generation'), [entry]);
+      // a failed request is told with its reason, not as «не получилось»
+      if (!result.patches.length) throw new Error(result.error ? `Склонения не подобраны: ${result.error}` : 'Модель не вернула склонения. Попробуйте ещё раз или впишите формы вручную.');
       return result.patches[0]?.words ?? [];
     },
     onSetPersonaPrivate: ({ text }) => {
