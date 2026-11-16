@@ -598,7 +598,7 @@ test('«Мир → Карточки»: a gallery with a switch per card; the she
     const navs = () => [...shadow.querySelectorAll('.ku-cnav')];
     const nav = title => navs().find(node => node.querySelector('.ku-cnav-title').textContent === title);
     assert.equal(navs().length, 9); // nine sections; the names and the closet are small buttons in the footer
-    assert.equal(shadow.querySelectorAll('.ku-cfoot-tool').length, 4, 'names, the closet, the sizes and the AU: buttons beside the switch');
+    assert.equal(shadow.querySelectorAll('.ku-cfoot-tool').length, 5, 'names, the closet, the sizes, the AU and the eraser: square buttons of the footer');
     assert.equal(shadow.querySelector('.ku-cnav.on .ku-cnav-title').textContent, 'Basic Info', 'the first section is open');
     assert.match(shadow.querySelector('.ku-ctitlerow').textContent, /Basic Info[\s\S]*сейчас уходит в запрос/);
     nav('Skills').click();

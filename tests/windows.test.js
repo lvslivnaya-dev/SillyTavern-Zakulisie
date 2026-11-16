@@ -148,3 +148,54 @@ test('reload with an unsaved card: the browser is asked to confirm; with nothing
     assert.equal(leave(), true, 'typed and not saved');
   } finally { studio?.destroy(); place.remove(); }
 });
+
+test('card of the library: «очистить разделы» in the footer: tick some or all, two presses, the texts go', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const card = { id: 'c1', folderId: 'f1', name: 'Судзу', aliases: [], records: [], words: [], sections: [
+    { id: 'a', kind: 'visual', title: 'Visual', text: 'Высокая.' }, { id: 'b', kind: 'voice', title: 'Voice', text: 'Тихо.' }, { id: 'c', kind: 'other', title: 'Public Info', text: 'Известна.' }] };
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  let studio;
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    root.querySelector('.ku-place-open').click();
+    root.querySelector('.ku-cfoot-tool[aria-label^="Очистить разделы"]').click();
+    const boxes = () => [...root.querySelectorAll('.ku-clearrow input')];
+    assert.equal(boxes().length, 3, 'every section with text is listed');
+    boxes()[0].click(); boxes()[1].click();
+    const press = label => [...root.querySelectorAll('.ku-clearpanel button')].find(node => node.textContent.startsWith(label)).click();
+    press('Очистить (2)');
+    assert.ok(root.querySelector('.ku-clearpanel'), 'the first press only asks');
+    press('Да, очистить 2');
+    assert.equal(root.querySelector('.ku-clearpanel'), null);
+    // the third text is still there: the panel lists only it now
+    root.querySelector('.ku-cfoot-tool[aria-label^="Очистить разделы"]').click();
+    assert.equal(boxes().length, 1, 'what is left is the one with text');
+  } finally { studio?.destroy(); place.remove(); }
+});
+
+test('a card folded with «Свернуть»: the window goes, a pill with its name stays, a click brings the card back', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const card = { id: 'c1', folderId: 'f1', name: 'Судзу', aliases: [], records: [], words: [], sections: [{ id: 'a', kind: 'visual', title: 'Visual', text: 'Высокая.' }] };
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  let studio;
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    const pill = root.querySelector('.ku-pill');
+    assert.equal(pill.hidden, true, 'nothing folded yet');
+    root.querySelector('.ku-place-open').click();
+    root.querySelector('.ku-ctop-tools [aria-label="Свернуть"]').click();
+    assert.equal(studio.isOpen(), false, 'the window is folded');
+    assert.equal(pill.hidden, false);
+    assert.match(pill.textContent, /Судзу/);
+    pill.click();
+    assert.equal(studio.isOpen(), true);
+    assert.ok(root.querySelector('.ku-ccard'), 'the same card is open again');
+    assert.equal(pill.hidden, true);
+  } finally { studio?.destroy(); place.remove(); }
+});

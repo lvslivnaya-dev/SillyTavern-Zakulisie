@@ -330,20 +330,24 @@ export function renderSectionBar({ gen, draft, section, card, entryId, redraw, g
     ? `оригинальный герой${auNote}`
     : `${where.fandom() || gen.fandom || 'фандом не указан'}${gen.frame ? `, ${gen.frame}` : ''} · ${STRICTNESS[gen.strictness]?.label.toLowerCase() ?? ''}${auNote}`;
   const detailNote = gen.detail !== DEFAULT_DETAIL && DETAIL[gen.detail] ? ` · ${DETAIL[gen.detail].label.toLowerCase()}` : '';
-  const wishes = element('input', { type: 'text', value: gen.sectionWishes[section.id] ?? '', placeholder: 'Пожелания к этому разделу (необязательно)', 'aria-label': `Пожелания к разделу ${sectionTitle(section)}`, disabled: gen.running });
+  const wishes = element('input', { type: 'text', value: gen.sectionWishes[section.id] ?? '', placeholder: 'Что поправить или каким написать этот раздел', 'aria-label': `Пожелания к разделу ${sectionTitle(section)}`, disabled: gen.running });
   wishes.addEventListener('input', () => { gen.sectionWishes[section.id] = wishes.value; });
-  const go = fresh => runGeneration(gen, {
+  const go = fresh => {
+    // fixing a text needs to be told what to fix: without wishes the model would change it at random
+    if (!fresh && !String(gen.sectionWishes[section.id] ?? '').trim() && !String(gen.wishes ?? '').trim()) { setStatus('Впишите, что поправить, в строку пожеланий. Без них править нечего.', true); wishes.focus(); return Promise.resolve(); }
+    return runGeneration(gen, {
     draft, card, entryId, jobs: [{ section, fresh, manualVisual: true }],
     wishes: item => gen.sectionWishes[item.id] ?? '',
     picture: { on: false }, generate, describe, setStatus, redraw, where,
-  });
+    });
+  };
   const line = element('p', { className: 'ku-hint', role: 'status', text: gen.running ? gen.progress : gen.message });
   gen.progressEl = line;
   return element('div', { className: 'ku-gbar' }, [
     element('div', { className: 'ku-row' }, [
       wishes,
-      Object.assign(button(has ? 'Написать с нуля' : 'Написать', 'btn small primary', () => go(true), 'Модель напишет раздел заново, не глядя на текущий'), { disabled: gen.running }),
-      ...(has ? [Object.assign(button('Править по пожеланиям', 'btn small', () => go(false), 'Текст берётся за основу, меняется только то, о чём пожелания'), { disabled: gen.running })] : []),
+      Object.assign(button(has ? 'Переписать заново' : 'Написать', has ? 'btn small' : 'btn small primary', () => go(true), 'Модель напишет раздел заново, не глядя на текущий текст (по пожеланиям, если они есть)'), { disabled: gen.running }),
+      ...(has ? [Object.assign(button('Исправить по пожеланиям', 'btn small primary', () => go(false), 'Текст берётся за основу, меняется только то, о чём пожелания; остальное остаётся'), { disabled: gen.running })] : []),
       ...undoButton(gen, draft, redraw, section.id),
     ]),
     element('p', { className: 'ku-hint' }, [`Как писать: ${origin}${detailNote}. `, Object.assign(element('a', { href: '#', text: 'Изменить' }), { onclick: event => { event.preventDefault(); openPage(); } })]),

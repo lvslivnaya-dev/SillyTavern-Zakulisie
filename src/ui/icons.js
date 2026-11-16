@@ -29,6 +29,8 @@ const PATHS = {
   play: '<path d="M7 4l13 8-13 8z"/>',
   music: '<path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
   image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-5 4 4 3-3 4 4"/>',
+  eraser: '<path d="M20 20H8.5l-4.3-4.3a2 2 0 0 1 0-2.8l8.7-8.7a2 2 0 0 1 2.8 0l4.3 4.3a2 2 0 0 1 0 2.8L12 20"/><path d="M7 10.5l6.5 6.5"/>',
+  minimize: '<path d="M5 19h14"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
   scan: '<path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/>',
   check: '<path d="M4 12l5 5L20 6"/>',

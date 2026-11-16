@@ -677,6 +677,7 @@ ${add}` : (d.fields[field.id] || add);
         ...(upTo ? [button(`↑ ${upTo.name}`, 'btn small', () => { s.openId = upTo.id; s.draft = null; s.askReplace = false; render(); }, 'К месту, в котором это находится')] : []),
         element('span', { className: 'muted ku-small', text: `${KIND().many} · ${pathText(entry.folderId)}` }),
         element('span', { className: 'ku-push' }),
+        Object.assign(element('button', { type: 'button', className: 'ku-ib', 'aria-label': 'Свернуть', title: 'Свернуть окно: запись останется открытой' }, [icon('minimize')]), { onclick: () => ctx.minimize?.() }),
         Object.assign(element('button', { type: 'button', className: 'ku-ib', 'aria-label': 'Закрыть', title: 'Закрыть' }, [icon('close')]), { onclick: close }),
       ]),
       field('Название', controls.name),
@@ -810,18 +811,19 @@ ${add}` : (d.fields[field.id] || add);
     const lib = library();
     const emb = embed;
     const layer = element('div', { className: `ku-wlayer${emb ? ' ku-embedded' : ''}` });
-    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; s.gen = null; };
+    const forget = () => { s.draft = null; s.selSection = ''; s.closetFirst = null; s.selRecord = 0; s.gen = null; s.clearing = null; };
     // Typed and not saved: leaving asks first (save / leave without saving / stay), so a card is not lost by a stray click.
     const dirty = () => Boolean(s.draft && s.draft.id === entry.id && s.draft.base !== undefined && JSON.stringify(s.draft.fields) !== s.draft.base);
     const leaveWith = action => { if (dirty()) { s.leaving = action; render(); } else action(); };
     const closeNow = () => { s.leaving = null; s.openId = ''; forget(); render(); };
-    const close = () => leaveWith(closeNow);
+    // A model is writing: closing would hide it, so the window is folded to the pill instead (the card stays, the work goes on).
+    const close = () => { if (s.gen?.running) { ctx.minimize?.(); return; } leaveWith(closeNow); };
     if (!emb) layer.addEventListener('click', event => { if (event.target === layer) close(); });
     const dialog = element('section', { className: 'ku-wcard ku-ccard', role: emb ? 'region' : 'dialog', ...(emb ? {} : { 'aria-modal': 'true' }), 'aria-label': entry.name });
     if (!emb) dialog.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } });
     const siblings = entriesOf().filter(item => item.folderId === entry.folderId);
     const index = siblings.findIndex(item => item.id === entry.id);
-    const go = step => { const next = siblings[index + step]; if (next) leaveWith(() => { s.leaving = null; s.openId = next.id; forget(); render(); }); };
+    const go = step => { if (s.gen?.running) { setStatus('Идёт запись: дождитесь конца или откройте другую карточку позже.', true); return; } const next = siblings[index + step]; if (next) leaveWith(() => { s.leaving = null; s.openId = next.id; forget(); render(); }); };
 
     // The draft: what the user changed and has not saved yet. Sections are a list of plain objects edited in place.
     if (s.draft?.id !== entry.id) {
@@ -838,6 +840,41 @@ ${add}` : (d.fields[field.id] || add);
     const draft = s.draft.fields;
     if (s.selSection !== CLOSET && s.selSection !== NAMES && s.selSection !== RECORDS && s.selSection !== GENERATE && !draft.sections.some(section => section.id === s.selSection)) s.selSection = draft.sections[0]?.id ?? '';
     const status = promptStatus(entry.id);
+    // «Очистить разделы»: the footer button opens a list of the sections that have text; tick some or all, empty them in one go.
+    const clearPanel = (() => {
+      if (!s.clearing) return null;
+      const list = draft.sections.filter(section => section.text.trim());
+      if (!list.length) { s.clearing = null; return null; }
+      const picked = s.clearing.picked;
+      for (const id of [...picked]) if (!list.some(section => section.id === id)) picked.delete(id);
+      const chosen = list.filter(section => picked.has(section.id));
+      const rows = list.map(section => {
+        const box = element('input', { type: 'checkbox', checked: picked.has(section.id), 'aria-label': `Очистить раздел ${section.title || CARD_SECTION_KINDS[section.kind] || ''}` });
+        box.addEventListener('change', () => { if (box.checked) picked.add(section.id); else picked.delete(section.id); s.clearing.confirm = false; render(); });
+        return element('label', { className: 'ku-inline ku-clearrow' }, [box, element('span', { text: ` ${section.title || CARD_SECTION_KINDS[section.kind] || 'Раздел'} ` }), element('span', { className: 'muted ku-small', text: `${section.text.length} зн.` })]);
+      });
+      const run = () => {
+        if (!s.clearing.confirm) { s.clearing.confirm = true; render(); return; }
+        const gen = genState(entry, draft);
+        gen.backup = gen.backup ?? new Map();
+        for (const section of chosen) { if (!gen.backup.has(section.id)) gen.backup.set(section.id, section.text); section.text = ''; }
+        s.clearing = null;
+        setStatus(`Очищено разделов: ${chosen.length}. Нажмите «Сохранить», чтобы это осталось; вернуть тексты можно на странице «Написать разделы» кнопкой «Вернуть прежние тексты».`);
+        render();
+      };
+      return element('div', { className: 'ku-aunotice ku-clearpanel', role: 'group', 'aria-label': 'Очистить разделы' }, [
+        element('p', {}, [element('strong', { text: 'Какие разделы очистить?' }), ' Сами разделы останутся, сотрутся только их тексты.']),
+        element('div', { className: 'ku-row' }, [
+          button('Все', 'btn small', () => { for (const section of list) picked.add(section.id); s.clearing.confirm = false; render(); }),
+          button('Снять все', 'btn small', () => { picked.clear(); s.clearing.confirm = false; render(); }),
+        ]),
+        element('div', { className: 'ku-clearlist' }, rows),
+        element('div', { className: 'ku-row' }, [
+          Object.assign(button(s.clearing.confirm ? `Да, очистить ${chosen.length}` : `Очистить${chosen.length ? ` (${chosen.length})` : ''}`, `btn small${s.clearing.confirm ? ' primary' : ''}`, run), { disabled: !chosen.length }),
+          button('Закрыть', 'btn small', () => { s.clearing = null; render(); }),
+        ]),
+      ]);
+    })();
     const leaveNotice = s.leaving && dirty() ? element('div', { className: 'ku-aunotice', role: 'alert' }, [
       element('p', { text: 'В карточке есть несохранённые правки. Сохранить перед выходом?' }),
       element('div', { className: 'ku-row' }, [
@@ -890,6 +927,7 @@ ${add}` : (d.fields[field.id] || add);
         element('p', { className: 'ku-hint', text: 'Имя и «другие имена» — как героя зовут в постах: имя, фамилия, клички, прозвища. Через запятую. Английские варианты и знаки сами убираются. Склонения каждого слова пишутся слева в разделе «Имена»: оттуда модель берёт написание и падежи, а карточка узнаёт героя в постах. В одной папке имена не повторяются, в разных можно.' }),
       ]),
       element('div', { className: 'ku-ctop-tools' }, emb ? (emb.onGear ? [Object.assign(element('button', { type: 'button', className: 'ku-ib ku-gear', 'aria-label': 'Настройки персоны в таверне', title: 'Настройки персоны в таверне' }, [icon('gear')]), { onclick: emb.onGear })] : []) : [
+        Object.assign(element('button', { type: 'button', className: 'ku-ib', 'aria-label': 'Свернуть', title: 'Свернуть окно: карточка останется открытой, а запись (если идёт) продолжится' }, [icon('minimize')]), { onclick: () => ctx.minimize?.() }),
         Object.assign(button('‹', 'btn small', () => go(-1), 'Предыдущая карточка'), { disabled: index <= 0 }),
         Object.assign(button('›', 'btn small', () => go(1), 'Следующая карточка'), { disabled: index < 0 || index >= siblings.length - 1 }),
         Object.assign(element('button', { type: 'button', className: 'ku-ib', 'aria-label': 'Закрыть', title: 'Закрыть' }, [icon('close')]), { onclick: close }),
@@ -1076,6 +1114,7 @@ ${add}` : (d.fields[field.id] || add);
       ]),
       ...(linked || personaMode ? [] : [attachChoice(entry)]),
       element('span', { className: 'ku-push' }),
+      footTool('eraser', 'Очистить разделы: выбрать все или некоторые и стереть их тексты', Boolean(s.clearing), () => { s.clearing = s.clearing ? null : { picked: new Set(), confirm: false }; render(); }),
       Object.assign(element('button', { type: 'button', className: 'ku-cfoot-del', 'aria-label': 'Удалить карточку', title: 'Удалить карточку' }, [icon('trash')]), {
         onclick: () => attempt(async () => {
           const removed = await invoke('onLibraryRemoveCharacter', { cardId: entry.id });
@@ -1117,7 +1156,7 @@ ${add}` : (d.fields[field.id] || add);
     if (wearLabel) wearLabel.title = wearLabel.textContent.replace(/\s+/g, ' ').trim();
     const stripNote = strip.querySelector('.ku-cstrip-note');
     if (stripNote && strip.firstElementChild) strip.firstElementChild.title = stripNote.textContent;
-    dialog.append(top, strip, element('div', { className: 'ku-cbodybox' }, [nav, pane]), foot);
+    dialog.append(top, strip, element('div', { className: 'ku-cbodybox' }, [nav, pane]), ...(clearPanel ? [clearPanel] : []), foot);
     if (s.auOpen) foot.append(auWindow());
     queueMicrotask(restore);
     setTimeout(restore, 0);
@@ -1431,7 +1470,7 @@ ${add}` : (d.fields[field.id] || add);
         ...(section.kind === 'voice' ? [button('Заготовка досье голоса', 'btn small', () => { const template = ['Манера речи: темп, громкость, длина фраз, любимые обороты', 'Фирменные фразы: ', 'Ласковые обращения: ', 'Грубости и ругательства: ', 'Как говорит, когда злится: ', 'Как говорит, когда нежничает: ', 'Как говорит, когда смущается: ', 'Привычки в речи (слова-паразиты, междометия, смех): '].join('\n'); section.text = section.text?.trim() ? `${section.text.trim()}\n\n${template}` : template; render(); }, 'Вставляет в текст раздела готовые строки для голоса героя (манера, фирменные фразы, обращения, грубости, речь в гневе, нежности и смущении). Остаётся заполнить.')] : []),
         ...(entry && hasPictureOf(entry) && (section.kind === 'visual' || section.kind === 'voice') ? [element('span', { className: 'ku-push' }), button('Описать по картинке…', 'btn small', () => { lookState(entry).open = true; render(); }, 'Модель опишет по картинке то, что не меняется: лицо, глаза, волосы, рост, сложение (и голос, если отметить)')] : [])]),
       ...(trimmedNote ? [trimmedNote] : []),
-      ...(entry && section.kind !== 'private' ? [renderSectionBar({ ...genDeps(entry, draft, genState(entry, draft)), section, openPage: () => { s.selSection = GENERATE; render(); } })] : []),
+      ...(entry ? [renderSectionBar({ ...genDeps(entry, draft, genState(entry, draft)), section, openPage: () => { s.selSection = GENERATE; render(); } })] : []),
       element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', htmlFor: 'ku-card-text', text: 'Текст раздела' }), text, count]),
       ...(personaMode ? [] : [whenBox]),
       ...(personaMode ? [element('p', { className: 'ku-hint', text: 'Разделы персоны уходят модели всегда: ни правил отправки, ни ключевых слов тут не нужно.' })] : []),
@@ -1717,6 +1756,19 @@ ${add}` : (d.fields[field.id] || add);
     ]);
   }
 
+  /** What is open and could be lost from sight when the window is closed: for the pill that stands in for the folded window. */
+  function libraryPending() {
+    for (const [shelf, windowId] of [['characters', 'cards'], ['places', 'places'], ['items', 'wardrobe']]) {
+      const shelfState = shelves[shelf];
+      if (!shelfState.openId) continue;
+      const entry = (shelf === 'characters' ? library().characters : shelf === 'items' ? library().items : library().locations)?.find(item => item.id === shelfState.openId);
+      if (!entry) continue;
+      const running = Boolean(shelfState.gen?.running);
+      return { shelf, windowId, name: shelfState.draft?.fields?.name || entry.name, running, progress: running ? (shelfState.gen.progress || 'пишется…') : '' };
+    }
+    return null;
+  }
+
   /** Open a card of the library (from another page): it shows when the cards page is drawn. */
   const openLibraryCard = id => { shelves.characters.openId = id; shelves.characters.draft = null; shelves.characters.selSection = ''; };
 
@@ -1746,7 +1798,7 @@ ${add}` : (d.fields[field.id] || add);
     return view;
   }
 
-  return { renderLibrary, renderCards, renderPersonas, renderEmbeddedCard, openLibraryCard, destroyLibrary: () => { document.removeEventListener('paste', onPaste); window.removeEventListener('beforeunload', onLeavePage); } };
+  return { renderLibrary, renderCards, renderPersonas, renderEmbeddedCard, openLibraryCard, libraryPending, destroyLibrary: () => { document.removeEventListener('paste', onPaste); window.removeEventListener('beforeunload', onLeavePage); } };
 }
 
 /** Styles of the library gallery (the card over the window reuses the wardrobe's). */
@@ -1885,6 +1937,13 @@ export const LIBRARY_STYLE = `
 .ku-cfolder{max-width:100%}
 .ku-aunotice{display:grid;gap:6px;margin-top:8px;padding:8px 10px;border:1px solid var(--k-warn);border-radius:10px;background:var(--k-warn-soft)}
 .ku-aunotice p{margin:0;font-size:12.5px}
+.ku-pill{position:fixed;left:14px;bottom:14px;z-index:2147483003;display:flex;align-items:center;gap:8px;max-width:min(420px,calc(100vw - 28px));padding:9px 14px;border:1px solid var(--k-line);border-radius:999px;background:var(--k-panel);color:var(--k-text);font:inherit;font-size:13px;cursor:pointer;box-shadow:0 4px 18px var(--k-shadow)}
+.ku-pill[hidden]{display:none}
+.ku-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ku-pill.busy{border-color:var(--k-ok)}
+.ku-clearpanel{margin:0 12px 6px}
+.ku-clearlist{display:grid;gap:2px;max-height:150px;overflow:auto}
+.ku-clearrow{display:flex;align-items:center;gap:4px}
 .ku-aupanel{display:grid;gap:10px;margin:8px 0 14px;padding:12px 14px;border:1px solid var(--k-line);border-radius:12px}
 .ku-aupanel textarea{min-height:60px}
 .ku-gbar{display:grid;gap:4px;margin:6px 0 10px;padding:8px 10px;border:1px solid var(--k-line);border-radius:10px}

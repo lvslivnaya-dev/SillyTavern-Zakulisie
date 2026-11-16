@@ -104,7 +104,7 @@ test('страница и полоса раздела рисуются; у ра�
   gen.mode = 'original';
   assert.doesNotMatch(renderGeneratePane(d).textContent, /Насколько держаться канона/);
   const filled = [...renderSectionBar({ ...d, section: draft.sections[1], openPage: () => {} }).querySelectorAll('button')].map(node => node.textContent);
-  assert.ok(filled.includes('Написать с нуля') && filled.includes('Править по пожеланиям'));
+  assert.ok(filled.includes('Переписать заново') && filled.includes('Исправить по пожеланиям'));
   const empty = [...renderSectionBar({ ...d, section: draft.sections[0], openPage: () => {} }).querySelectorAll('button')].map(node => node.textContent);
   assert.deepEqual(empty, ['Написать']);
 });

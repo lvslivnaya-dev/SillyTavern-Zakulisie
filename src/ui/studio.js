@@ -368,7 +368,9 @@ export function createRelationshipStudio(options = {}) {
   const resizeHandle = createResizeHandle();
   const factorsLayer = element('div', { className: 'factors-layer', hidden: true });
   factorsLayer.addEventListener('click', event => { if (event.target === factorsLayer) closeFactors(); });
-  shadow.append(style, backdrop, factorsLayer);
+  // The pill: what stands in for a card (or a place) that is open and writing while the window is folded or closed.
+  const pill = element('button', { type: 'button', className: 'ku-pill', hidden: true });
+  shadow.append(style, backdrop, factorsLayer, pill);
   ensureContainer(options.container).append(host);
 
   function emit(name, detail) {
@@ -797,6 +799,24 @@ export function createRelationshipStudio(options = {}) {
     return content;
   }
 
+  function refreshPill() {
+    if (embedded) return;
+    const job = isOpen ? null : ctx.libraryPending?.() ?? null;
+    pill.hidden = !job;
+    if (!job) return;
+    pill.classList.toggle('busy', job.running);
+    pill.dataset.window = job.windowId;
+    pill.replaceChildren(element('span', { text: job.running ? `✨ ${job.name}: ${job.progress}` : `▤ ${job.name}: открыта, нажмите, чтобы вернуться` }));
+    pill.title = job.running ? 'Модель пишет. Нажмите, чтобы вернуться к карточке' : 'Вернуться к открытой карточке';
+  }
+  pill.addEventListener('click', () => {
+    const target = WINDOWS.find(item => item.id === pill.dataset.window) ?? scope;
+    scope = target;
+    tab = target.tabs.includes(tab) ? tab : target.tabs[0];
+    saveLayout();
+    open();
+  });
+
   function open() {
     if (isOpen) return;
     isOpen = true;
@@ -808,6 +828,7 @@ export function createRelationshipStudio(options = {}) {
     render();
     requestAnimationFrame(() => panel.focus());
     saveLayout();
+    refreshPill();
     emit('open', { pairId: selectedPairId });
   }
 
@@ -820,6 +841,7 @@ export function createRelationshipStudio(options = {}) {
     if (returnFocus?.isConnected) returnFocus.focus();
     returnFocus = null;
     saveLayout();
+    refreshPill();
     emit('close', {});
   }
 
@@ -843,7 +865,7 @@ export function createRelationshipStudio(options = {}) {
   // objects, plus the frame state they read or change, through getters/setters.
   const ctx = {
     facade, options, shadow, factorsLayer, headerTools,
-    act, emit, render, setStatus, setTab, openPersonasWindow: avatar => options.onOpenPersonas?.(avatar ?? ''), closeFactors, openFactors, openTriangleSetup, fitFactorsToViewport, characterSelect,
+    act, emit, render, setStatus, setTab, minimize: () => close(), openPersonasWindow: avatar => options.onOpenPersonas?.(avatar ?? ''), closeFactors, openFactors, openTriangleSetup, fitFactorsToViewport, characterSelect,
     get snapshot() { return snapshot; },
     get tab() { return tab; },
     get factorsPairId() { return factorsPairId; },
@@ -853,6 +875,9 @@ export function createRelationshipStudio(options = {}) {
   };
   for (const create of [createDialogs, createCharactersPage, createOverviewPage, createRecordsPage, createHeadcanonsPage, createTrianglesPage, createSystemPages, createKnowledgePages, createWorldPages, createWardrobePages, createLibraryPages, createCalendarPages, createNamesPages, createSongsPages, createMediaPages, createSetupPage, createPersonaCardPage, createBondsPage, createWeatherPages, createDicePages, createQuestsPages]) Object.assign(ctx, create(ctx));
   cleanups.push(() => ctx.destroyWardrobe?.(), () => ctx.destroyLibrary?.());
+  const pillTimer = setInterval(refreshPill, 700);
+  pillTimer?.unref?.(); // a test process may end while the page is still «open»
+  cleanups.push(() => clearInterval(pillTimer));
   const {
     renderFactorsDialog, renderTriangleDialog, renderAllRelationships, renderCollection, renderJournal,
     renderLorebooks, renderTriangles, renderHeadcanons, renderSettings,
