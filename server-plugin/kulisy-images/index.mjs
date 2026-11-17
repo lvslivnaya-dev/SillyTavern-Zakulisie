@@ -276,7 +276,7 @@ export function createHandlers({ platform = process.platform, browse = browseWin
         const root = path.join(folder, tree.root);
         const target = path.join(root, ...parts);
         if (!isInside(root, target) || !fs.existsSync(target)) return response.sendStatus(404);
-        response.sendFile(parts.at(-1), { root: path.dirname(target), dotfiles: 'deny', headers: { 'Cache-Control': 'private, max-age=3600' } });
+        response.sendFile(parts.at(-1), { root: path.dirname(target), dotfiles: 'deny', headers: { 'Cache-Control': 'private, no-cache' } });
       } catch (error) {
         console.warn(`[${PLUGIN_ID}] tree picture could not be sent:`, error?.message ?? error);
         if (!response.headersSent) response.sendStatus(500);
@@ -479,7 +479,7 @@ export function createHandlers({ platform = process.platform, browse = browseWin
         if (!folder) return response.sendStatus(404);
         const target = path.join(folder, parsed.sub, parsed.name);
         if (!isInside(folder, target) || !fs.existsSync(target)) return response.sendStatus(404);
-        response.sendFile(parsed.name, { root: path.join(folder, parsed.sub), dotfiles: 'deny', headers: { 'Cache-Control': 'private, max-age=86400' } });
+        response.sendFile(parsed.name, { root: path.join(folder, parsed.sub), dotfiles: 'deny', headers: { 'Cache-Control': 'private, no-cache' } });
       } catch (error) {
         console.warn(`[${PLUGIN_ID}] picture could not be sent:`, error?.message ?? error);
         if (!response.headersSent) response.sendStatus(500);

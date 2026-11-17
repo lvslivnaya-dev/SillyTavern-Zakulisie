@@ -43,7 +43,7 @@ function meta(reason) {
  * deps: { store, getState(), commitOperations(ops), confirm(title, text) → boolean,
  *         things?: { pending(files) → files for the library's things, import(files, { describe, onProgress }) → { added, described, failed, undescribed } },
  *         upload(dataUrl, name) → path, removeImage(path), imageForModel(path) → dataUrl,
- *         ask(dataUrl, prompt) → model text, log(level, text, error) }
+ *         ask(dataUrl, prompt) → model text, translateSections(sections, onProgress) → English texts, log(level, text, error) }
  */
 export function createWardrobeCallbacks(deps) {
   const { store, getState, commitOperations } = deps;
@@ -220,6 +220,42 @@ export function createWardrobeCallbacks(deps) {
         try { onProgress(index + 1, withPicture.length); } catch { /* the page may be gone */ }
       }
       return { done, failed, skipped: cards.length - withPicture.length };
+    },
+    /**
+     * «Check for translation and translate what is not translated», for the cards given (the ones the page shows: the shelf, the gender
+     * and the section that are open). A card is English when its description is mostly Latin letters. The description (and the place of a tattoo)
+     * goes through the model; the name stays as it is. One question first; a card that fails does not stop the rest.
+     * onProgress(done, total, name). → { checked, missing, done, failed } or null when declined.
+     */
+    onWardrobeTranslateMissing: async ({ cardIds = [], onProgress = () => {} }) => {
+      if (!deps.translateSections) throw new Error('Перевод здесь не подключён.');
+      const cards = cardIds.map(id => store.get().cards.find(card => card.id === id)).filter(Boolean);
+      const russian = text => (String(text ?? '').match(/[А-Яа-яЁё]/g) ?? []).length > (String(text ?? '').match(/[A-Za-z]/g) ?? []).length;
+      const missing = cards.filter(card => card.description.trim() && russian(card.description));
+      const result = { checked: cards.length, missing: missing.length, done: 0, failed: 0 };
+      if (!missing.length) return result;
+      const ok = await deps.confirm('Перевод карточек гардероба',
+        `Проверено карточек: ${cards.length}, на английском уже ${cards.length - missing.length}. Перевести на английский: ${missing.length} (описание, у татуировок ещё и место; названия остаются). Русский текст заменится переводом. Продолжить?`);
+      if (!ok) return null;
+      const failures = [];
+      for (const [index, card] of missing.entries()) {
+        try { onProgress(index, missing.length, card.name || 'без названия'); } catch { /* the page may be gone */ }
+        try {
+          const parts = [{ id: 'description', title: 'Описание', text: card.description }];
+          if (card.placement && russian(card.placement)) parts.push({ id: 'placement', title: 'Место', text: card.placement });
+          const done = new Map((await deps.translateSections(parts)).map(item => [item.id, item.text]));
+          const now = cardOf(card.id);
+          if (now.description !== card.description) throw new Error('карточка изменилась во время перевода');
+          store.set(updateCard(store.get(), card.id, { description: done.get('description') ?? card.description, ...(done.has('placement') ? { placement: done.get('placement') } : {}) }));
+          result.done += 1;
+        } catch (error) {
+          result.failed += 1;
+          failures.push(`${card.name || 'без названия'} (${error?.message ?? error})`);
+          deps.log?.('warn', `Карточка гардероба «${card.name || 'без названия'}» не переведена`, error);
+        }
+      }
+      if (failures.length) throw new Error(`Переведено: ${result.done}. Не удалось: ${failures.join('; ')}`);
+      return result;
     },
     /** Remove a card everywhere: from looks, from whoever wears it in the open chat, its picture from the server. */
     onWardrobeRemoveCard: async ({ cardId }) => {

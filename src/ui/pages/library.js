@@ -1,6 +1,6 @@
 import { button, characterId, characterName, downloadJson, element } from '../helpers.js';
 import { icon } from '../icons.js';
-import { cardIsEnglish, AU_FIELDS, CARD_SECTION_KINDS, CARD_WHEN, auIsEmpty, auPrompt, auSummary, folderAu, normalizeAu, sameAu, KEY_REGEX_MODES, tidyAlias, WARDROBE_CATEGORIES, WARDROBE_GENDERS, WARDROBE_SHELVES, cardLabel, folderPath, personalPieces, folderWithDescendants, keyFromRegex, keyToRegex, listExport, selectFromExport, makeSection, normalizeAlias, searchLibraryCharacters, searchLibraryItems, searchLocations, splitKeys } from '../../core/index.js';
+import { cardIsEnglish, cardRussianSections, textIsRussian, AU_FIELDS, CARD_SECTION_KINDS, CARD_WHEN, auIsEmpty, auPrompt, auSummary, folderAu, normalizeAu, sameAu, KEY_REGEX_MODES, tidyAlias, WARDROBE_CATEGORIES, WARDROBE_GENDERS, WARDROBE_SHELVES, cardLabel, folderPath, personalPieces, folderWithDescendants, keyFromRegex, keyToRegex, listExport, selectFromExport, makeSection, normalizeAlias, searchLibraryCharacters, searchLibraryItems, searchLocations, splitKeys } from '../../core/index.js';
 import { GATE_SECTIONS, GATE_WHEN } from '../../integration/lore-gate.js';
 import { fileToDataUrl, imageUrl } from '../../integration/wardrobe-images.js';
 import { renderNameWords } from '../name-words.js';
@@ -18,6 +18,18 @@ import { access, canRememberFolder, pickFolder, readNotes, recallFolder, remembe
  */
 export function createLibraryPages(ctx) {
   const render = (...args) => ctx.render(...args);
+  /**
+   * The sign that the model is translating: a plate on top of the shelf (places, things and cards alike) with the step it is on.
+   * `work(progress)` gets a function that changes the text; the plate goes away when the work ends, whatever the end.
+   */
+  async function withJob(text, work) {
+    const owner = s;
+    if (owner.job) return undefined;
+    const job = owner.job = { text };
+    render();
+    try { return await work(next => { job.text = next; render(); }); }
+    finally { if (owner.job === job) owner.job = null; render(); }
+  }
   const setStatus = (...args) => ctx.setStatus(...args);
   const invoke = (name, payload = {}) => ctx.facade.invoke(name, payload);
   const act = (...args) => ctx.act(...args);
@@ -170,6 +182,7 @@ export function createLibraryPages(ctx) {
     if (s.folderId && !lib.folders.some(folder => folder.id === s.folderId)) { s.folderId = ''; s.renaming = false; }
     if (s.openId && !entriesOf().some(entry => entry.id === s.openId)) { s.openId = ''; s.draft = null; }
     const view = element('div', { className: 'ku-library ku-lib' });
+    if (s.job) view.append(element('div', { className: 'ku-genbadge ku-joblane', role: 'status' }, [element('span', { className: 'ku-genspin', 'aria-hidden': 'true' }), element('span', { text: s.job.text })]));
 
     const search = element('input', { type: 'search', value: s.query, placeholder: 'Поиск', 'aria-label': cards() ? 'Поиск карточки' : things() ? 'Поиск вещи' : 'Поиск локации', className: 'ku-search' });
     search.addEventListener('change', () => { s.query = search.value; render(); });
@@ -210,6 +223,10 @@ export function createLibraryPages(ctx) {
       ...(!cards() && !personaMode && snapshot().libraryInbox?.available ? [button(inboxBusy ? 'Забираю…' : 'Из папки', 'btn small', importInbox, 'Забрать картинки, которые вы положили в папку «Библиотека» на компьютере (Места / Вещи → папки библиотеки)')] : []),
       button(s.selecting ? 'Готово' : 'Выбрать', s.selecting ? 'btn primary small' : 'btn small', () => { s.selecting = !s.selecting; s.picked.clear(); render(); }, `Отметить несколько: ${cards() ? 'карточки' : things() ? 'вещи' : 'локации'}, чтобы перенести их в другую папку, перевести на английский или удалить`),
       ...(personaMode ? [button('Из таверны', 'btn small', () => attempt(() => act('onPersonaTavernImport', {}, 'persona-tavern-import'), result => `Персон из таверны: добавлено ${result?.added ?? 0}, уже были ${result?.skipped ?? 0}`), 'Сделать карточки из персон таверны: имя, картинка и описание (в Public Info). Описание в самой таверне остаётся, его можно очистить на странице «Персона»')] : []),
+      // Always on the page (not only when something is Russian): it checks the whole shelf and translates what is left.
+      Object.assign(button(s.job ? 'Идёт перевод…' : 'Проверить записи на перевод и перевести непереведённое', 'btn small', () => attempt(() => withJob('Проверяю записи…', progress => invoke('onLibraryTranslateMissing', { kind: cards() ? 'characters' : things() ? 'items' : 'places', persona: personaMode, folderId: s.folderId, onProgress: progress })),
+        result => (result && result.done?.length ? `Проверено записей: ${result.checked}, переведено: ${result.done.length}${result.failed?.length ? `, не удалось: ${result.failed.length}` : ''}` : '')),
+      (s.folderId ? 'Работает на открытую папку (и папки внутри неё). ' : 'Папка не открыта: работает на всю полку. ') + 'Просмотреть записи: что уже на английском, оставить как есть; всё, что ещё на русском (разделы карточек, описание и черты локаций вместе с подлокациями), перевести моделью. Перед переводом будет один вопрос'), { disabled: Boolean(s.job) }),
       importMenu,
       exportButton,
       ...(cards() ? [] : [element('label', { className: 'ku-inline ku-small', title: 'Сразу просить модель описать новые картинки (тратит запрос на каждую)' }, [auto, 'описывать сразу'])]),
@@ -324,7 +341,7 @@ export function createLibraryPages(ctx) {
       return removed;
     }, removed => (removed ? `Удалено: ${removed}` : ''))), { disabled: !s.picked.size });
     const translate = Object.assign(button('Перевести на английский', 'btn small', () => attempt(async () => {
-      const result = await invoke('onLibraryTranslateEntries', { kind, ids: [...s.picked] });
+      const result = await withJob('Перевожу отмеченные…', progress => invoke('onLibraryTranslateEntries', { kind, ids: [...s.picked], onProgress: progress }));
       if (result?.done?.length) s.picked.clear();
       return result;
     }, result => (result?.done?.length ? `Переведено: ${result.done.length}` : 'Переводить нечего: уже на английском или нет текста'))), { disabled: !s.picked.size });
@@ -693,7 +710,7 @@ ${add}` : (d.fields[field.id] || add);
       const run = () => attempt(async () => {
         setStatus('Перевожу…');
         await save();
-        await invoke('onLibraryTranslateEntry', { kind, id: entry.id });
+        await withJob(`Перевожу «${entry.name}»…`, progress => invoke('onLibraryTranslateEntry', { kind, id: entry.id, onProgress: progress }));
       }, 'Переведено на английский');
       if (entry.lang === 'en' && !russianParts.length) return [element('span', { className: 'ku-chip told', title: 'Описание' + (isThing ? '' : ' и черты') + ' переведены на английский', text: 'English' })];
       if (entry.lang === 'en') return [button(`Перевести подлокации (${russianParts.length})`, 'btn small', run, 'Само место уже на английском; модель переведёт его подлокации, которые ещё на русском')];
@@ -1103,6 +1120,7 @@ ${add}` : (d.fields[field.id] || add);
       } });
       forget();
     };
+    s.persistCard = persist; // the pane of a section saves the card the same way before it translates
     const saveNote = element('span', { className: 'ku-savenote', role: 'status', 'aria-live': 'polite' });
     s.saveEl = saveNote;
     if (s.autosave?.id === entry.id) { saveNote.textContent = saveNoteText(); saveNote.dataset.state = s.autosave.state; }
@@ -1206,8 +1224,24 @@ ${add}` : (d.fields[field.id] || add);
     // ---- Language and the note the card came from
     const note = entry.source;
     const english = cardIsEnglish(entry);
+    const leftRussian = cardRussianSections({ sections: draft.sections }).length;
     const strip = element('div', { className: `ku-cstrip${note?.stale ? ' stale' : ''}` }, [
       element('span', { className: `ku-chip${english ? ' told' : ''}`, text: english ? 'Текст на английском' : 'Текст на русском' }),
+      // A section added (or loaded again) after the translation is Russian in an English card: it is translated by itself.
+      ...(english && leftRussian ? [Object.assign(button(s.translating?.id === entry.id ? 'Перевожу…' : `Перевести русские разделы (${leftRussian})`, 'btn small primary', () => attempt(async () => {
+        if (s.translating) return;
+        await persist();
+        const job = s.translating = { id: entry.id, text: 'Начинаю перевод…' };
+        s.translateError = null;
+        render();
+        try {
+          await invoke('onLibraryTranslateSections', { cardId: entry.id, onProgress: (done, total, title) => { job.text = `Перевожу «${title}» (${done + 1} из ${total})…`; render(); } });
+        } catch (error) {
+          s.translateError = { id: entry.id, text: error?.message || String(error) };
+          throw error;
+        } finally { s.translating = null; render(); }
+        forget();
+      }, 'Русские разделы переведены'), 'Карточка уже на английском, но в ней есть разделы на русском: переведутся только они, остальное не трогается'), { disabled: Boolean(s.translating) })] : []),
       ...(english ? [] : [Object.assign(button(s.translating?.id === entry.id ? 'Перевожу…' : 'Перевести на английский', 'btn small', () => attempt(async () => {
         if (s.translating) return;
         setStatus('Перевожу карточку по разделам, это может занять несколько минут…');
@@ -1468,6 +1502,24 @@ ${add}` : (d.fields[field.id] || add);
       ? element('p', { className: 'ku-hint', text: `Сейчас этот раздел не уходит рассказчику: все карточки вместе упёрлись в лимит ${snapshot().settings?.cardsPromptCharacters ?? 12000} знаков (в запрос идут те, кто в сцене, и только нужные разделы). Лимит меняется в «Настройки → Знания и сцена → Карточки → Объём карточек, символов» (до 60000). Английский текст короче русского, а целая анкета — около 10 000 знаков.` })
       : null;
 
+    // This section alone into English, even when the rest of the card is translated already.
+    const translateRow = entry && section.text.trim() ? element('div', { className: 'ku-row ku-sectrans' }, [
+      textIsRussian(section.text)
+        ? Object.assign(button(s.translating?.id === entry.id ? 'Перевожу…' : 'Перевести этот раздел на английский', 'btn small', () => attempt(async () => {
+          if (s.translating) return;
+          const keep = s.selSection;
+          await s.persistCard?.();
+          s.selSection = keep;
+          const job = s.translating = { id: entry.id, text: `Перевожу «${section.title}»…` };
+          s.translateError = null;
+          render();
+          try { await invoke('onLibraryTranslateSections', { cardId: entry.id, sectionIds: [section.id] }); }
+          catch (error) { s.translateError = { id: entry.id, text: error?.message || String(error) }; throw error; }
+          finally { s.translating = null; render(); }
+          s.draft = null;
+        }, 'Раздел переведён на английский'), 'Модель переведёт только этот раздел, остальные разделы не меняются. Русский текст раздела заменится переводом'), { disabled: Boolean(s.translating) })
+        : element('span', { className: 'ku-chip told', text: 'Раздел на английском' }),
+    ]) : null;
     const count = element('p', { className: 'ku-hint' });
     const showCount = () => { count.textContent = `Что рассказчик должен знать об этом: факты, привычки, как говорит. Пустой раздел в запрос не уходит. Сейчас ${section.text.trim().length} зн.`; };
     showCount();
@@ -1627,7 +1679,7 @@ ${add}` : (d.fields[field.id] || add);
         ...(entry && hasPictureOf(entry) && (section.kind === 'visual' || section.kind === 'voice') ? [element('span', { className: 'ku-push' }), button('Описать по картинке…', 'btn small', () => { lookState(entry).open = true; render(); }, 'Модель опишет по картинке то, что не меняется: лицо, глаза, волосы, рост, сложение (и голос, если отметить)')] : [])]),
       ...(trimmedNote ? [trimmedNote] : []),
       ...(entry ? [renderSectionBar({ ...genDeps(entry, draft, genState(entry, draft)), section, openPage: () => { s.selSection = GENERATE; render(); } })] : []),
-      element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', htmlFor: 'ku-card-text', text: 'Текст раздела' }), textWrap, count]),
+      element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', htmlFor: 'ku-card-text', text: 'Текст раздела' }), ...(translateRow ? [translateRow] : []), textWrap, count]),
       ...(personaMode ? [] : [whenBox]),
       ...(personaMode ? [element('p', { className: 'ku-hint', text: 'Разделы персоны уходят модели всегда: ни правил отправки, ни ключевых слов тут не нужно.' })] : []),
       ...(personaMode ? [] : [element('div', { className: 'ku-fld' }, [element('label', { className: 'ku-clabel', htmlFor: 'ku-card-keys', text: 'Ключевые слова' }), keys, regexRow, element('p', { className: 'ku-hint', text: byKeys ? 'Раздел попадёт в запрос, только если одно из этих слов встретится в вашем последнем посте или в предыдущем ответе. Каждое слово с новой строки (или через запятую). Без слов такой раздел не уйдёт никогда. Обычное слово находится и внутри других слов («байк» найдёт и «байкер»); «Надеть регекс» делает поиск точнее: только слово с окончаниями, только целиком или любое начинающееся так. Свой регекс можно писать вручную: /байк(а|у)?/i.' : 'Поле работает, когда правило раздела — «по ключевым словам». Сейчас у раздела другое правило, слова не нужны: выберите «Своё правило» → «по ключевым словам» выше.' })])]),
@@ -1717,7 +1769,7 @@ ${add}` : (d.fields[field.id] || add);
       ...(stale.length ? [canRememberFolder()
         ? button(`Обновить изменённые (${stale.length})`, 'btn primary small', () => refreshFromNotes(null), 'Загрузить русский текст изменённых анкет заново')
         : filePicker(`Обновить изменённые (${stale.length})`, { accept: '', directory: true, className: 'btn primary small', onFiles: async picked => refreshFromNotes(null, null, await notesFromPicked(picked)) })] : []),
-      ...(russian.length ? [button(`Перевести русские (${russian.length})`, 'btn small', () => attempt(() => invoke('onLibraryTranslateCards', { cardIds: russian.map(card => card.id) }), result => `Переведено карточек: ${result?.done?.length ?? 0}${result?.failed?.length ? `, не удалось: ${result.failed.length}` : ''}`), 'Перевести на английский все карточки, которые ещё на русском')] : []),
+      ...(russian.length ? [button(`Перевести русские (${russian.length})`, 'btn small', () => attempt(() => withJob('Перевожу карточки…', progress => invoke('onLibraryTranslateCards', { cardIds: russian.map(card => card.id), onProgress: progress })), result => `Переведено карточек: ${result?.done?.length ?? 0}${result?.failed?.length ? `, не удалось: ${result.failed.length}` : ''}`), 'Перевести на английский все карточки, которые ещё на русском')] : []),
     ]);
   }
 

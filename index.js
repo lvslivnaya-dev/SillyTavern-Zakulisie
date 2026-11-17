@@ -160,6 +160,7 @@ import { mountExtensionShell, mountWindowButtons } from './src/integration/shell
 import { WINDOWS, normalizeLayout, reopenOnLoad, windowOf } from './src/ui/layout.js';
 import { mountMessageButtons } from './src/integration/message-buttons.js';
 import { mountChatOverlay, extraPanes, extraPaneHooks, mediaSection } from './src/integration/chat-overlay.js';
+import { registerWardrobeRooms } from './src/integration/overlay-wardrobe.js';
 import { scanAcquaintances } from './src/integration/acquaintance-scan.js';
 import { scanLoreSecrets } from './src/integration/secret-scan.js';
 import { guessGenders } from './src/integration/genders.js';
@@ -3093,6 +3094,7 @@ ${replyText}` });
     removeImage: path => deleteWardrobeImage(SillyTavern.getContext(), path),
     imageForModel: path => storedImageForModel(path),
     ask: (dataUrl, prompt) => askPicture(dataUrl, prompt),
+    translateSections: (sections, onProgress) => translateSections(routedContext(SillyTavern.getContext(), settings, 'translation'), sections, onProgress),
     log: (level, text, error) => logEvent(level, text, error),
   });
 
@@ -4894,6 +4896,37 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     describe: describeForDirector,
     eventIdeas: eventIdeasForDirector,
   });
+  // The clothes' room of the drawer: two tabs of the rail (the persona's and the heroes'), the same wardrobe and wearing as the page «Мир → Гардероб».
+  const stopWardrobeRooms = registerWardrobeRooms({
+    panes: extraPanes,
+    rerender: () => { try { extraPaneHooks.rerender?.(); } catch { /* the drawer is not drawn yet */ } },
+    getState: () => state,
+    wardrobe: () => wardrobeStore.get(),
+    persona: () => {
+      const id = state.ui?.personaId || '';
+      return id && state.entities[id] ? { id, name: state.entities[id].name } : null;
+    },
+    heroes: () => {
+      const personaId = state.ui?.personaId || '';
+      const here = new Set(presentIds(state));
+      return Object.values(state.entities)
+        .filter(entity => entity.id !== personaId && !isDead(state, entity.id))
+        .map(entity => ({ id: entity.id, name: entity.name, here: here.has(entity.id) }))
+        .sort((left, right) => Number(right.here) - Number(left.here) || left.name.localeCompare(right.name, 'ru'));
+    },
+    // The closet of the card the person has: the wardrobe pieces chosen there, and the pieces of the outfits chosen there.
+    closetOf: id => {
+      const library = locationLibrary.get();
+      const cardId = cardOfEntity().get(id);
+      const card = cardId ? (library.characters ?? []).find(item => item.id === cardId) : null;
+      const lookIds = card?.closet?.lookIds ?? [];
+      const looks = wardrobeStore.get().looks.filter(look => lookIds.includes(look.id));
+      return { hasCard: Boolean(card), cardIds: [...new Set([...(card?.closet?.cardIds ?? []), ...looks.flatMap(look => look.cardIds)])], lookIds };
+    },
+    wear: payload => wardrobeCallbacks.onWear(payload),
+    takeOff: payload => wardrobeCallbacks.onTakeOff(payload),
+    notify: (text, isError = false) => (isError ? globalThis.toastr?.error?.(text, 'Закулисье') : globalThis.toastr?.success?.(text, 'Закулисье')),
+  });
   // Several changes follow one reply (the analysis, the chronicle, the redraw of the messages): the strip is built once for the burst.
   let overlayTimer = 0;
   refreshChatOverlay = () => {
@@ -4973,6 +5006,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       messageButtons.unmount();
       selectionChip.unmount();
       clearTimeout(overlayTimer);
+      stopWardrobeRooms();
       chatOverlay.unmount();
       unmountShell();
       topBar.unmount();

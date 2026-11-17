@@ -213,3 +213,25 @@ test('«Сейчас в сцене»: what the hero holds is a small mark with a
     assert.doesNotMatch(studio.element.shadowRoot.querySelector('.ku-schip').title, /пистолет/);
   } finally { studio.destroy(); }
 });
+
+test('Ctrl+V of a picture: with a card open it takes the picture (the old one goes), with none open it is a new card', async () => {
+  const { studio, shadow, byText, calls, jacket } = open();
+  try {
+    byText('Мужское').click();
+    const paste = () => {
+      const event = new window.Event('paste', { bubbles: true, cancelable: true, composed: true });
+      const file = new window.File([new Uint8Array([137, 80, 78, 71])], 'clip.png', { type: 'image/png' });
+      Object.defineProperty(event, 'clipboardData', { value: { files: [file] } });
+      shadow.querySelector('.ku-wardrobe, .studio').dispatchEvent(event);
+      return event;
+    };
+    [...shadow.querySelectorAll('.ku-tile:not(.ku-drop)')][1].click();
+    assert.ok(shadow.querySelector('.ku-wcard'), 'a card is open');
+    paste();
+    await flush(); await flush();
+    const set = calls.find(([name]) => name === 'onWardrobeSetImage');
+    assert.ok(set, 'the open card takes the pasted picture as its own');
+    assert.equal(set[1].cardId, jacket.id);
+    assert.ok(!calls.some(([name]) => name === 'onWardrobeAddCard'), 'no new card is made behind the open one');
+  } finally { studio.destroy(); }
+});

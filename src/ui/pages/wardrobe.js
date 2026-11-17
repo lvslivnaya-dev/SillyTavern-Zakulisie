@@ -45,6 +45,7 @@ export function createWardrobePages(ctx) {
   let askReplace = false;
   let describeOnUpload = false;
   let redescribing = false;
+  let translating = null; // { text } while the model translates the shown cards
   let importing = false;
   // What was typed into the open card: kept through any redraw until saved or closed.
   let draft = null; // { cardId, fields }
@@ -381,9 +382,21 @@ export function createWardrobePages(ctx) {
     const gallery = element('div', { className: 'ku-wgal' });
     const list = visibleCards();
     const title = element('p', { className: 'section-title', text: `${query.trim() ? 'Найдено' : (section ? SECTION[section] : 'Всё')} · ${list.length}` });
-    if (list.some(card => card.image)) {
+    // The translation of what is shown here (the open shelf, gender and section): always on the page, even for cards without pictures.
+    const translate = Object.assign(button(translating ? 'Перевожу…' : 'Проверить на перевод и перевести непереведённые', 'btn small', () => {
+      if (translating || !list.length) return;
+      translating = { text: 'Проверяю карточки…' };
+      render();
+      attempt(() => act('onWardrobeTranslateMissing', {
+        cardIds: list.map(card => card.id),
+        onProgress: (done, total, name) => { if (translating) { translating.text = `Перевожу «${name}» (${done + 1} из ${total})…`; render(); } },
+      }, 'wardrobe-translate'), result => (result === null ? '' : result?.missing
+        ? `Проверено карточек: ${result.checked}, переведено: ${result.done}`
+        : `Проверено карточек: ${result?.checked ?? 0}. Всё уже на английском, переводить нечего.`)).finally(() => { translating = null; render(); });
+    }, `Работает на то, что открыто сейчас: ${shelf === 'persona' ? 'полка персоны' : 'полка героев'}, ${query.trim() ? 'найденное' : section ? `раздел «${SECTION[section]}»` : 'все разделы'} (${list.length}). Что уже на английском, остаётся; русские описания переводит модель, названия не трогает`), { disabled: Boolean(translating) || !list.length });
+    const redo = list.some(card => card.image) ? (() => {
       // Every card shown here, described again from its picture: the description only.
-      const redo = button(redescribing ? 'Переписываю…' : 'Переписать описания', 'btn small', () => {
+      const node = button(redescribing ? 'Переписываю…' : 'Переписать описания', 'btn small', () => {
         redescribing = true;
         attempt(() => act('onWardrobeRedescribe', {
           cardIds: list.map(card => card.id),
@@ -392,9 +405,11 @@ export function createWardrobePages(ctx) {
           ? `Описания переписаны: ${result.done}${result.failed ? `, не вышло: ${result.failed}` : ''}${result.skipped ? `, без картинки пропущено: ${result.skipped}` : ''}`
           : '')).finally(() => { redescribing = false; render(); });
       }, 'Модель заново опишет по картинкам все карточки, которые сейчас видны. Меняется только описание.');
-      redo.disabled = redescribing;
-      gallery.append(element('div', { className: 'ku-row' }, [title, element('span', { className: 'ku-push' }), redo]));
-    } else gallery.append(title);
+      node.disabled = redescribing;
+      return node;
+    })() : null;
+    if (translating) gallery.append(element('div', { className: 'ku-genbadge ku-joblane', role: 'status' }, [element('span', { className: 'ku-genspin', 'aria-hidden': 'true' }), element('span', { text: translating.text })]));
+    gallery.append(element('div', { className: 'ku-row' }, [title, element('span', { className: 'ku-push' }), translate, ...(redo ? [redo] : [])]));
     const grid = element('div', { className: 'ku-tiles' }, list.map(tile));
     const drop = filePicker('Перетащите картинки сюда или нажмите', { className: 'ku-tile ku-drop', onFiles: files => addPictures(files) });
     grid.append(drop);
@@ -666,12 +681,14 @@ export function createWardrobePages(ctx) {
   function onPaste(event) {
     try {
       if (ctx.tab !== 'wardrobe' || !ctx.shadow?.host?.isConnected) return;
-      const target = event.composedPath?.()[0];
-      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName) && target.type !== 'file') return;
       const files = [...(event.clipboardData?.files ?? [])].filter(file => /^image\//.test(file.type));
-      if (!files.length) return;
+      if (!files.length) return; // text pasted into a field is the field's own business (a picture cannot go into a text field, so it is taken here)
       event.preventDefault();
-      addPictures(files);
+      // An open card takes the picture as its own (the old one goes); with none open, every picture is a new card.
+      const open = openId ? wardrobe().cards.find(card => card.id === openId) : null;
+      if (open) {
+        attempt(async () => act('onWardrobeSetImage', { cardId: open.id, imageDataUrl: await fileToDataUrl(files[0]) }, 'wardrobe-image'), 'Картинка карточки заменена на вставленную');
+      } else addPictures(files);
     } catch (error) {
       console.error('[Kulisy] Paste into the wardrobe failed.', error);
     }

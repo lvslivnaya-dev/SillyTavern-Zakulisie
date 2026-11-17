@@ -7,7 +7,7 @@
  * when they are opened (see syncChat).
  */
 import {
-  LIBRARY_LIMITS, cardIsEnglish, saveAuTemplate, removeAuTemplate, addCharacterDrafts, countLatinAliases, stripLatinAliases, addName, checkCardSources, updateName, moveLibraryCharacters, moveLibraryEntries, noteFinder, refreshLibraryCharacter, addDrafts, addFolder, addItemDrafts, addLibraryCharacter, addLibraryItem, addLocation, duplicateLibraryCharacter, duplicateLocation, emptyLibrary, exportLibrary,
+  LIBRARY_LIMITS, cardIsEnglish, cardRussianSections, saveAuTemplate, removeAuTemplate, addCharacterDrafts, countLatinAliases, stripLatinAliases, addName, checkCardSources, updateName, moveLibraryCharacters, moveLibraryEntries, noteFinder, refreshLibraryCharacter, addDrafts, addFolder, addItemDrafts, addLibraryCharacter, addLibraryItem, addLocation, duplicateLibraryCharacter, duplicateLocation, emptyLibrary, exportLibrary,
   folderWithDescendants, importLibrary, normalizeLibrary, removeFolder, removeLibraryCharacter, removeLibraryItem, removeLocation, uniqueId, updateFolder, updateLibraryCharacter, updateLibraryItem, updateLocation,
 } from '../core/index.js';
 import { draftFromMarkdown, draftsFromLorebook, draftsFromMarkdownFiles, draftsFromMarkdownNote, listLorebookEntries } from './location-import.js';
@@ -107,14 +107,15 @@ export function createLibraryCallbacks(deps) {
     return [...all];
   }
   /** Translate entries one by one after one question; one that fails does not stop the rest, the failures are reported at the end. */
-  async function translateMany(kind, ids, lead = '') {
+  async function translateMany(kind, ids, lead = '', onProgress) {
     const wanted = new Set(ids);
     const todo = entriesOf(kind).filter(entry => wanted.has(entry.id) && entry.lang !== 'en' && (entry.description.trim() || (entry.traits ?? []).length));
     if (!todo.length) return { done: [], failed: [] };
     if (!await confirm('Перевод на английский', `${lead ? `${lead}. ` : ''}Перевести на английский: ${todo.length}. Это запросы к модели (описание и черты), текст в библиотеке заменится переводом. Продолжить?`)) return { done: [], failed: [] };
     const done = [];
     const failed = [];
-    for (const entry of todo) {
+    for (const [index, entry] of todo.entries()) {
+      onProgress?.(`Перевожу «${entry.name}» (${index + 1} из ${todo.length})…`);
       try { await translateEntry(kind, entry.id); done.push(entry.id); }
       catch (error) { failed.push({ id: entry.id, name: entry.name, why: error?.message ?? String(error) }); deps.log?.('warn', `«${entry.name}» не переведена`, error); }
     }
@@ -483,16 +484,40 @@ export function createLibraryCallbacks(deps) {
       deps.notify?.(`Карточка «${card.name}» переведена на английский`);
       return { translated: translated.size };
     },
-    /** Several cards into English, one after another; one that fails does not stop the rest. */
-    onLibraryTranslateCards: async ({ cardIds }) => {
-      const cards = (library.get().characters ?? []).filter(card => cardIds?.includes(card.id) && !cardIsEnglish(card));
+    /**
+     * Some sections of a card into English, WHATEVER language the card is in: a section added to a translated card stays Russian until this.
+     * `sectionIds` = which ones; none = every section still written in Russian. The other sections are left as they are.
+     * The card is marked English when no Russian section is left.
+     */
+    onLibraryTranslateSections: async ({ cardId, sectionIds = null, onProgress }) => {
+      if (!deps.translateSections) throw new Error('Перевод здесь не подключён.');
+      const card = (library.get().characters ?? []).find(candidate => candidate.id === cardId);
+      if (!card) throw new RangeError('Такой карточки нет');
+      const wanted = sectionIds ? new Set(sectionIds) : null;
+      const sent = (wanted ? card.sections.filter(section => wanted.has(section.id) && section.text.trim()) : cardRussianSections(card))
+        .map(section => ({ id: section.id, title: section.title, text: section.text }));
+      if (!sent.length) throw new Error(wanted ? 'В этом разделе нечего переводить: он пустой.' : 'Русских разделов нет: всё уже на английском.');
+      const translated = new Map((await deps.translateSections(sent, onProgress)).map(item => [item.id, item.text]));
+      const now = (library.get().characters ?? []).find(candidate => candidate.id === cardId);
+      if (!now || now.sections.some(section => sent.some(item => item.id === section.id && item.text !== section.text))) throw new Error('Раздел изменился во время перевода — запустите перевод ещё раз.');
+      const sections = now.sections.map(section => ({ ...section, text: translated.get(section.id) ?? section.text }));
+      library.set(updateLibraryCharacter(library.get(), cardId, { sections, ...(cardRussianSections({ sections }).length ? {} : { lang: 'en' }) }));
+      await syncOpenChat();
+      deps.notify?.(`«${card.name}»: переведено разделов ${translated.size}`);
+      return { translated: translated.size };
+    },
+    /** Several cards into English, one after another; one that fails does not stop the rest. A card that is English but has Russian sections gets just those. */
+    onLibraryTranslateCards: async ({ cardIds, onProgress }) => {
+      const cards = (library.get().characters ?? []).filter(card => cardIds?.includes(card.id) && (!cardIsEnglish(card) || cardRussianSections(card).length));
       if (!cards.length) return { done: [], failed: [] };
       const sections = cards.reduce((sum, card) => sum + card.sections.filter(section => section.text.trim()).length, 0);
       if (!await confirm('Перевод карточек', `Перевести на английский карточек: ${cards.length}. Это около ${sections} запросов к модели, по одному на раздел; русский текст в карточках заменится переводом (оригиналы в Obsidian останутся). Продолжить?`)) return { done: [], failed: [] };
       const done = [];
       const failed = [];
-      for (const card of cards) {
-        try { await callbacks.onLibraryTranslateCard({ cardId: card.id }); done.push(card.id); }
+      for (const [index, card] of cards.entries()) {
+        onProgress?.(`Перевожу «${card.name}» (${index + 1} из ${cards.length})…`);
+        const step = (at, total, title) => onProgress?.(`Перевожу «${card.name}» (${index + 1} из ${cards.length}): ${title}, ${at + 1} из ${total}…`);
+        try { await (cardIsEnglish(card) ? callbacks.onLibraryTranslateSections({ cardId: card.id, onProgress: step }) : callbacks.onLibraryTranslateCard({ cardId: card.id, onProgress: step })); done.push(card.id); }
         catch (error) { failed.push({ id: card.id, name: card.name, why: error?.message ?? String(error) }); deps.log?.('warn', `Карточка «${card.name}» не переведена`, error); }
       }
       if (failed.length) throw new Error(`Переведено: ${done.length}. Не удалось: ${failed.map(item => `${item.name} (${item.why})`).join('; ')}`);
@@ -530,20 +555,50 @@ export function createLibraryCallbacks(deps) {
       return doomed.length;
     },
     /** One place or thing into English; a place takes its parts (rooms) with it, each one by itself. */
-    onLibraryTranslateEntry: async ({ kind = 'places', id }) => {
+    onLibraryTranslateEntry: async ({ kind = 'places', id, onProgress }) => {
       const ids = withParts(kind, [id]);
       if (ids.length === 1) {
+        onProgress?.('Перевожу описание и черты…');
         await translateEntry(kind, id);
         deps.notify?.('Переведено на английский');
         return true;
       }
-      const result = await translateMany(kind, ids, `Переведено будет ${ids.length}: само место и его подлокации`);
+      const result = await translateMany(kind, ids, `Переведено будет ${ids.length}: само место и его подлокации`, onProgress);
       return result.done.length > 0;
     },
     /** Several at once (cards go the card way; places bring their parts); one that fails does not stop the rest. */
-    onLibraryTranslateEntries: async ({ kind = 'places', ids }) => {
-      if (kind === 'characters') return callbacks.onLibraryTranslateCards({ cardIds: ids });
-      return translateMany(kind, withParts(kind, ids ?? []));
+    onLibraryTranslateEntries: async ({ kind = 'places', ids, onProgress }) => {
+      if (kind === 'characters') return callbacks.onLibraryTranslateCards({ cardIds: ids, onProgress });
+      return translateMany(kind, withParts(kind, ids ?? []), '', onProgress);
+    },
+    /**
+     * «Check the entries and translate what is not translated»: looks over the whole shelf (cards: the persona ones or the others, as the
+     * page shows them), tells how many are English already, and sends the rest to the same translation as the «Перевести» buttons
+     * (one question first; a failed one does not stop the rest). Nothing is left to translate: it says so and asks nothing.
+     */
+    onLibraryTranslateMissing: async ({ kind = 'places', persona = false, folderId = '', onProgress } = {}) => {
+      // With a folder open only that folder (and the folders inside it) is looked over; with none, the whole shelf.
+      const inFolder = folderId ? folderWithDescendants(library.get(), folderId) : null;
+      const shelf = kind === 'characters'
+        ? (library.get().characters ?? []).filter(card => Boolean(card.persona) === Boolean(persona))
+        : entriesOf(kind);
+      const mine = inFolder ? shelf.filter(entry => inFolder.has(entry.folderId)) : shelf;
+      const hasText = kind === 'characters'
+        ? entry => entry.sections.some(section => section.text.trim()) || (entry.records ?? []).length > 0
+        : entry => Boolean(entry.description.trim() || (entry.traits ?? []).length);
+      const filled = mine.filter(hasText);
+      const missing = filled.filter(entry => kind === 'characters' ? (!cardIsEnglish(entry) || cardRussianSections(entry).length > 0) : entry.lang !== 'en');
+      const empty = mine.length - filled.length;
+      const summary = `${inFolder ? 'В этой папке проверено' : 'Проверено'} записей: ${mine.length}. На английском: ${filled.length - missing.length}${missing.length ? `, ещё не переведено: ${missing.length}` : ''}${empty ? `, пустых (нечего переводить): ${empty}` : ''}.`;
+      if (!missing.length) {
+        deps.notify?.(`${summary} Переводить нечего.`);
+        return { checked: mine.length, done: [], failed: [] };
+      }
+      const ids = missing.map(entry => entry.id);
+      const result = kind === 'characters'
+        ? await callbacks.onLibraryTranslateCards({ cardIds: ids, onProgress })
+        : await translateMany(kind, withParts(kind, ids), summary.replace(/\.$/, ''), onProgress);
+      return { checked: mine.length, ...result };
     },
     /** Several cards into another folder; the ones whose name is taken there stay and are reported. */
     onLibraryMoveCards: ({ cardIds, folderId }) => {

@@ -155,3 +155,20 @@ test('client: deleting picks the right endpoint; a missing plugin is reported as
     assert.deepEqual(await folderStorageStatus(), { installed: false });
   } finally { globalThis.fetch = original; }
 });
+
+test('a picture that took the address of a deleted one is fetched afresh: the browser must not show the old file under it', async () => {
+  const { moveTreeImage } = await import('../src/integration/wardrobe-images.js');
+  const calls = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true, status: 200, json: async () => ({ path: 'user/images/Гардероб/Мужское/Верх/Китель.png' }), text: async () => '{}' };
+  };
+  try {
+    const stored = await moveTreeImage({ getRequestHeaders: () => ({}) }, 'user/images/Гардероб/Мужское/Китель.png', 'Гардероб/Мужское/Верх');
+    assert.match(stored, /Китель\.png$/);
+    const fresh = calls.find(call => call.init?.cache === 'reload');
+    assert.ok(fresh, 'the new address is read once with cache: reload');
+    assert.match(decodeURIComponent(fresh.url), /Китель\.png$/);
+  } finally { globalThis.fetch = original; }
+});

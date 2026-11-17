@@ -31,8 +31,12 @@ export function fileToDataUrl(file) {
   });
 }
 
-/** Scale a picture down so its longest side is at most `maxSide` (never up). JPEG unless it has transparency. */
-export async function shrinkDataUrl(dataUrl, maxSide, { jpeg = false } = {}) {
+/**
+ * Scale a picture down so its longest side is at most `maxSide` (never up). JPEG unless it has transparency.
+ * `force`: draw it anew even when it is small enough — for a model: a gateway silently dropped some original files (progressive JPEG, odd
+ * headers, Exif) from the request, and the model then described a picture it had never seen.
+ */
+export async function shrinkDataUrl(dataUrl, maxSide, { jpeg = false, force = false } = {}) {
   const image = await new Promise((resolve, reject) => {
     const node = new Image();
     node.onload = () => resolve(node);
@@ -41,7 +45,7 @@ export async function shrinkDataUrl(dataUrl, maxSide, { jpeg = false } = {}) {
   });
   const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
   const keepAlpha = !jpeg && /^data:image\/(png|webp|gif)/.test(dataUrl);
-  if (scale === 1 && (jpeg ? /^data:image\/jpeg/ : /^data:image\/(png|jpeg|webp)/).test(dataUrl)) return dataUrl;
+  if (!force && scale === 1 && (jpeg ? /^data:image\/jpeg/ : /^data:image\/(png|jpeg|webp)/).test(dataUrl)) return dataUrl;
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
   canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
@@ -112,13 +116,23 @@ async function sendImage(context, storage, base64, format, fileName, folder) {
   return String(data.path).replace(/\\/g, '/');
 }
 
+/**
+ * A picture is named after its card, and a path is free again when the old picture is deleted: a new picture then gets the address the old one
+ * had, and the browser keeps the old file under it (the plugin lets it keep it for an hour). So a replaced picture came back as the old one,
+ * on the card and in «Описать по картинке» (that one reads the picture through the same address). A fresh fetch puts the new file into the cache.
+ */
+async function freshen(path) {
+  try { await globalThis.fetch?.(imageUrl(path), { cache: 'reload' }); } catch { /* the picture is stored all the same */ }
+  return path;
+}
+
 /** Store a picture for a card (or, with `folder`, for the library); returns the stored path. */
 export async function uploadWardrobeImage(context, dataUrl, fileName, folder = WARDROBE_IMAGE_FOLDER, storage = 'server') {
   const small = await shrinkDataUrl(dataUrl, STORED_MAX_SIDE);
   const mime = small.slice(5, small.indexOf(';'));
   const format = FORMATS[mime];
   if (!format) throw new TypeError('Этот формат картинки не поддерживается: нужен PNG, JPEG, WebP или GIF.');
-  return sendImage(context, storage === 'folder' ? 'folder' : 'server', small.slice(small.indexOf(',') + 1), format, fileName, folder);
+  return freshen(await sendImage(context, storage === 'folder' ? 'folder' : 'server', small.slice(small.indexOf(',') + 1), format, fileName, folder));
 }
 
 /** Save a wardrobe picture into a folder of the tree ('Персона/Женское/Платья'); returns its path. */
@@ -126,7 +140,7 @@ export async function uploadToTree(context, dataUrl, dir, fileName) {
   const small = await shrinkDataUrl(dataUrl, STORED_MAX_SIDE);
   const format = FORMATS[small.slice(5, small.indexOf(';'))];
   if (!format) throw new TypeError('Этот формат картинки не поддерживается: нужен PNG, JPEG, WebP или GIF.');
-  return sendTree(context, small.slice(small.indexOf(',') + 1), format, dir, fileName);
+  return freshen(await sendTree(context, small.slice(small.indexOf(',') + 1), format, dir, fileName));
 }
 
 async function sendTree(context, base64, format, dir, fileName) {
@@ -140,7 +154,7 @@ async function sendTree(context, base64, format, dir, fileName) {
 export async function moveTreeImage(context, path, dir) {
   const { response, data } = await postJson(context, `${FOLDER_PLUGIN_BASE}/tree/move`, { path: String(path).replace(/^\//, ''), dir });
   if (!response.ok || !data?.path) throw new Error(`Картинка не переложилась в папку «${dir}»${data?.error ? `: ${data.error}` : ` (HTTP ${response.status})`}.`);
-  return String(data.path);
+  return freshen(String(data.path));
 }
 
 /** Delete a stored picture, wherever it lives. A missing file is fine (already gone). */
@@ -239,5 +253,5 @@ export async function storedImageForModel(path) {
   if (!response.ok) throw new Error('Картинка карточки не найдена на сервере.');
   const blob = await response.blob();
   const dataUrl = await fileToDataUrl(new File([blob], 'card', { type: blob.type || 'image/png' }));
-  return shrinkDataUrl(dataUrl, VISION_MAX_SIDE);
+  return shrinkDataUrl(dataUrl, VISION_MAX_SIDE, { jpeg: true, force: true });
 }

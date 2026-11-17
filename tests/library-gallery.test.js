@@ -341,6 +341,31 @@ test('«Переписать описания»: every card with a picture gets 
   assert.equal(cards.find(card => card.id === b.id).description, 'Как было.');
 });
 
+test('«Проверить на перевод»: в гардеробе переводятся только русские описания из переданных карточек', async () => {
+  const settings = {};
+  const store = createWardrobeStore({ settings: () => settings, save: () => {} });
+  const sent = [];
+  const callbacks = createWardrobeCallbacks({
+    store, getState: () => createDefaultState(), commitOperations: async () => {}, confirm: async () => true,
+    upload: async () => '', removeImage: async () => {}, imageForModel: async () => '', ask: async () => '',
+    translateSections: async parts => { sent.push(parts.map(part => part.id)); return parts.map(part => ({ id: part.id, text: `EN ${part.text.length}` })); },
+  });
+  const ru = await callbacks.onWardrobeAddCard({ name: 'Платье', category: 'top', description: 'Чёрное шёлковое платье.' });
+  const tattoo = await callbacks.onWardrobeAddCard({ name: 'Змея', category: 'tattoos', description: 'Змея вокруг руки.', placement: 'левое предплечье' });
+  const en = await callbacks.onWardrobeAddCard({ name: 'Shirt', category: 'top', description: 'A white cotton shirt.' });
+  const outside = await callbacks.onWardrobeAddCard({ name: 'Юбка', category: 'bottom', description: 'Красная юбка.' });
+  const result = await callbacks.onWardrobeTranslateMissing({ cardIds: [ru.id, tattoo.id, en.id] });
+  assert.deepEqual([result.checked, result.missing, result.done, result.failed], [3, 2, 2, 0]);
+  assert.deepEqual(sent, [['description'], ['description', 'placement']]);
+  const byId = id => store.get().cards.find(card => card.id === id);
+  assert.match(byId(ru.id).description, /^EN /);
+  assert.equal(byId(ru.id).name, 'Платье', 'the name stays');
+  assert.equal(byId(en.id).description, 'A white cotton shirt.');
+  assert.equal(byId(outside.id).description, 'Красная юбка.', 'a card that was not given is not touched');
+  const again = await callbacks.onWardrobeTranslateMissing({ cardIds: [ru.id, tattoo.id, en.id] });
+  assert.deepEqual([again.checked, again.missing, again.done], [3, 0, 0]);
+});
+
 test('«Локации»: комнаты дома лежат в карточке дома своей галереей, а в общей галерее показан только дом', async () => {
   const tr = addFolder(emptyLibrary(), { name: 'Бесстыжие' });
   let lib = addLocation(tr.library, { folderId: tr.folder.id, name: 'Дом', description: 'Двухэтажный дом.' });

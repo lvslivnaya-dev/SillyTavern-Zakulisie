@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import {
-  CARD_SECTION_KINDS, addCharacterDrafts, checkCardSources, refreshLibraryCharacter, addFolder, addLibraryCharacter, applyOperations, cardPlainText, createDefaultState, createOperation, duplicateLibraryCharacter,
+  CARD_SECTION_KINDS, cardRussianSections, addCharacterDrafts, checkCardSources, refreshLibraryCharacter, addFolder, addLibraryCharacter, applyOperations, cardPlainText, createDefaultState, createOperation, duplicateLibraryCharacter,
   emptyLibrary, exportLibrary, folderContents, importLibrary, importState, normalizeLibrary, removeFolder, removeLibraryCharacter, searchLibraryCharacters, templateSections, updateLibraryCharacter,
 } from '../src/core/index.js';
 import { GATE_SECTIONS, splitGateTitle } from '../src/integration/lore-gate.js';
@@ -456,6 +456,40 @@ test('translation: a card goes into English section by section, the language is 
   assert.equal(again.sections.find(section => section.title === 'Voice').text, 'Говорит тихо и устало.');
   assert.deepEqual((await callbacks.onLibraryRefreshCards({ files, cardIds: [] })).updated, [], 'nothing is marked now: nothing to load');
   await callbacks.onLibraryTranslateCards({ cardIds: [card.id] });
+  assert.equal(store.get().characters[0].lang, 'en');
+
+  // A section added to the translated card is Russian: it is translated by itself (the card is English, the others are not sent again).
+  const english = store.get().characters[0];
+  const extra = english.sections.find(section => section.title === 'Voice');
+  callbacks.onLibraryUpdateCharacter({ cardId: card.id, changes: { sections: english.sections.map(section => (section.id === extra.id ? { ...section, text: 'Умеет делать вид, что ему всё равно.' } : section)) } });
+  assert.deepEqual(cardRussianSections(store.get().characters[0]).map(section => section.id), [extra.id]);
+  sent.length = 0;
+  const part = await callbacks.onLibraryTranslateSections({ cardId: card.id });
+  assert.equal(part.translated, 1);
+  assert.equal(sent.length, 1, 'one call');
+  assert.equal(sent[0].length, 1, 'only the Russian section is sent');
+  assert.deepEqual(cardRussianSections(store.get().characters[0]), [], 'nothing Russian is left');
+  assert.equal(store.get().characters[0].lang, 'en');
+  await assert.rejects(() => callbacks.onLibraryTranslateSections({ cardId: card.id }), /Русских разделов нет/);
+  // One chosen section, even an English one's neighbour: the others stay.
+  callbacks.onLibraryUpdateCharacter({ cardId: card.id, changes: { sections: store.get().characters[0].sections.map(section => (section.id === extra.id ? { ...section, text: 'Другое. Ещё одно русское предложение.' } : section)) } });
+  const others = store.get().characters[0].sections.filter(section => section.id !== extra.id).map(section => section.text);
+  await callbacks.onLibraryTranslateSections({ cardId: card.id, sectionIds: [extra.id] });
+  assert.deepEqual(store.get().characters[0].sections.filter(section => section.id !== extra.id).map(section => section.text), others);
+  assert.match(store.get().characters[0].sections.find(section => section.id === extra.id).text, /^EN: Другое/);
+  // «Check and translate» picks up such a card, and then there is nothing left.
+  callbacks.onLibraryUpdateCharacter({ cardId: card.id, changes: { sections: store.get().characters[0].sections.map(section => (section.id === extra.id ? { ...section, text: 'Снова по-русски.' } : section)) } });
+  const swept = await callbacks.onLibraryTranslateMissing({ kind: 'characters' });
+  assert.deepEqual(swept.done, [card.id]);
+  assert.deepEqual(cardRussianSections(store.get().characters[0]), []);
+
+  // «Check the entries and translate what is left»: all English → nothing to do; after loading Russian again only that card goes.
+  const quiet = await callbacks.onLibraryTranslateMissing({ kind: 'characters' });
+  assert.deepEqual([quiet.checked, quiet.done.length], [1, 0]);
+  await callbacks.onLibraryRefreshCards({ files, cardIds: [card.id] });
+  assert.equal(store.get().characters[0].lang, undefined);
+  const rest = await callbacks.onLibraryTranslateMissing({ kind: 'characters' });
+  assert.deepEqual(rest.done, [card.id]);
   assert.equal(store.get().characters[0].lang, 'en');
 
   // A failure stops the card where it is: nothing is half-translated.

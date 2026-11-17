@@ -232,3 +232,10 @@ test('a personal piece («только у него»): only its owner has it in 
   const ranLine = block.split('\n').find(line => line.startsWith('- Ран') && line.includes('pieces ['));
   assert.ok(ranLine && !ranLine.includes(jacket.id) && ranLine.includes(band.id));
 });
+
+test('an answer of a model that never got the picture is an error, not a description', () => {
+  assert.throws(() => parseDescription('{"name":"Неизвестно","gender":"unisex","description":"Изображение не удалось обработать: данные неполные или повреждены."}'), /не увидела картинку/);
+  assert.throws(() => parseDescription('{"name":"x","description":"Изображение недоступно, комплект одежды не виден."}'), /не увидела картинку/);
+  assert.throws(() => parseDescription("I can't see the image — the base64 data appears truncated."), /не увидела картинку/);
+  assert.equal(parseDescription('{"name":"Худи","description":"Серое худи с капюшоном и карманом-кенгуру."}').description, 'Серое худи с капюшоном и карманом-кенгуру.');
+});

@@ -1216,3 +1216,25 @@ test('headcanons page, the library: records of the library with a type, cards an
     assert.deepEqual([saved.fields.type, saved.fields.text, saved.fields.cardIds], ['headcanon', 'Ран провожает её домой', ['c1']]);
   } finally { studio?.destroy(); }
 });
+
+test('a redraw keeps where every scrolled list was (the content, and a list inside it)', async () => {
+  let studio;
+  const snapshot = sampleState();
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, open: true, layout: { mode: 'window', tab: 'overview' } });
+    const shadow = studio.element.shadowRoot;
+    const content = shadow.querySelector('.content');
+    const list = document.createElement('div');
+    list.className = 'inner-list';
+    content.append(list);
+    content.scrollTop = 240;
+    studio.update(snapshot);
+    const again = shadow.querySelector('.content');
+    assert.notEqual(again, content, 'the page was rebuilt');
+    assert.equal(again.scrollTop, 240, 'the page stays where it was');
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(shadow.querySelector('.content').scrollTop, 240, 'and after the next frames');
+  } finally {
+    studio?.destroy();
+  }
+});

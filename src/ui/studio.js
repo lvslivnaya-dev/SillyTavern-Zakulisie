@@ -495,8 +495,88 @@ export function createRelationshipStudio(options = {}) {
     return node;
   }
 
+  /**
+   * Every redraw rebuilds the DOM, which would snap each scrolled list back to
+   * the top (ticking a box in a long list threw the reader to its start).
+   * This remembers the scroll of every scrolled element inside the panel, and of the
+   * panel's ancestors, by its place in the tree, and puts it back after `redraw`.
+   */
+  function keepScroll(redraw) {
+    const saved = [];
+    const outer = [];
+    try {
+      const path = (node) => {
+        const steps = [];
+        for (let cur = node; cur && cur !== panel; cur = cur.parentElement) {
+          const parent = cur.parentElement;
+          if (!parent) return null;
+          steps.unshift({ sig: `${cur.tagName}.${cur.className}`, index: [...parent.children].indexOf(cur) });
+        }
+        return steps;
+      };
+      for (const node of [panel, ...panel.querySelectorAll('*')]) {
+        if (!(node.scrollTop > 0 || node.scrollLeft > 0)) continue;
+        const steps = path(node);
+        if (steps) saved.push({ steps, top: node.scrollTop, left: node.scrollLeft });
+      }
+      // Ancestors (the page or a settings drawer) are not rebuilt, but keep them too.
+      for (let cur = panel.parentElement; cur; cur = cur.parentElement) if (cur.scrollTop > 0 || cur.scrollLeft > 0) outer.push({ node: cur, top: cur.scrollTop, left: cur.scrollLeft });
+    } catch (error) {
+      console.warn('[Kulisy] scroll position was not read', error);
+    }
+    redraw();
+    // Put each position back. A page may have `scroll-behavior: smooth` (the list would glide up from the top), so the jump is instant;
+    // and images that finish loading a moment later can make the page taller, so it is put back once more on the next frames.
+    const jump = (node, top, left) => {
+      try { node.scrollTo({ top, left, behavior: 'instant' }); } catch { /* an old browser */ }
+      if (node.scrollTop !== top) node.scrollTop = top;
+      if (node.scrollLeft !== left) node.scrollLeft = left;
+    };
+    const restore = () => {
+      const moves = [];
+      for (const item of saved) {
+        let node = panel;
+        for (const step of item.steps) {
+          const next = node?.children?.[step.index];
+          node = next && `${next.tagName}.${next.className}` === step.sig ? next : null;
+          if (!node) break;
+        }
+        if (node) moves.push([node, item.top, item.left]);
+      }
+      for (const item of outer) moves.push([item.node, item.top, item.left]);
+      for (const [node, top, left] of moves) jump(node, top, left);
+      return moves;
+    };
+    let moves = [];
+    try { moves = restore(); } catch (error) { console.warn('[Kulisy] scroll position was not kept', error); }
+    // Later frames only repair what the layout moved; a reader who has scrolled by themselves in the meantime is left alone.
+    if (moves.length && typeof requestAnimationFrame === 'function') {
+      const touched = new Set();
+      const onTouch = event => touched.add(event.target);
+      panel.addEventListener('wheel', onTouch, { capture: true, passive: true });
+      panel.addEventListener('touchmove', onTouch, { capture: true, passive: true });
+      let frames = 0;
+      const again = () => {
+        frames += 1;
+        try {
+          for (const [node, top, left] of moves) {
+            if (!node.isConnected || [...touched].some(target => node.contains(target))) continue;
+            if (Math.abs(node.scrollTop - top) > 1 || Math.abs(node.scrollLeft - left) > 1) jump(node, top, left);
+          }
+        } catch (error) { console.warn('[Kulisy] scroll position was not repaired', error); }
+        if (frames < 4) requestAnimationFrame(again);
+        else { panel.removeEventListener('wheel', onTouch, { capture: true }); panel.removeEventListener('touchmove', onTouch, { capture: true }); }
+      };
+      requestAnimationFrame(again);
+    }
+  }
+
   function render() {
     if (resizing) { renderDeferred = true; return; }
+    keepScroll(drawPanel);
+  }
+
+  function drawPanel() {
     if (embedded) { panel.replaceChildren(element('main', { className: 'embed-content' }, [renderEmbeddedCard(embedCardId, { onGear: options.onGear })])); collapseHints(panel); return; }
     applyMode();
     panel.classList.toggle('single', scope.tabs.length === 1);

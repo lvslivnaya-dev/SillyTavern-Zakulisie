@@ -150,8 +150,24 @@ function contentOf(result) {
   return content;
 }
 
+/** A gateway that answers with its own notice instead of an error («You've reached today's chat limit», «rate limit», «quota exceeded»). */
+const PROVIDER_LIMIT = /(?:reached|exceeded|hit)\b[^.\n]{0,40}\b(?:limit|quota)\b|(?:limit|quota)[^.\n]{0,30}\b(?:reached|exceeded)\b|come back tomorrow|upgrade your plan|rate[- ]?limit(?:ed)?\b|too many requests|insufficient (?:credits|quota|balance)|(?:лимит|квот)[^.\n]{0,40}(?:исчерпан|превышен|достигнут)/i;
+
+/** Throws when the "answer" is really a limit notice of the provider (short text only: a real description never looks like that). */
+export function assertNotProviderLimit(text) {
+  const raw = String(text ?? '').trim();
+  if (raw.length < 400 && PROVIDER_LIMIT.test(raw)) {
+    throw new Error(`Модель или шлюз отказал из-за лимита и написал: «${raw.slice(0, 200)}». Это не ошибка расширения: смените модель в «Настройки → Модели и API → Картинки» или подождите, пока лимит обновится.`);
+  }
+  return text;
+}
+
 /** Ask the chosen model about a picture (a data: URL). Returns its raw text. */
-export async function askAboutImage(context, rawSettings, dataUrl, prompt = DESCRIBE_PROMPT, { maxTokens } = {}) {
+export async function askAboutImage(...args) {
+  return assertNotProviderLimit(await askAboutImageRaw(...args));
+}
+
+async function askAboutImageRaw(context, rawSettings, dataUrl, prompt = DESCRIBE_PROMPT, { maxTokens } = {}) {
   if (!/^data:image\//.test(String(dataUrl ?? ''))) throw new TypeError('Нужна картинка.');
   const settings = visionSettings(rawSettings);
   // A thinking model needs room for its thoughts before the answer: the caller may ask for more than the settings page allows.
@@ -184,6 +200,10 @@ export async function askAboutImage(context, rawSettings, dataUrl, prompt = DESC
   return contentOf(result);
 }
 
+/** An answer of a model that never got the picture («изображение недоступно», «данные обрезаны», "I can't see the image"). */
+const UNSEEN = /(?:изображени|картинк|фото)[^.\n]{0,70}(?:недоступн|не вид|не загруж|не удалось (?:обработ|откры|загруз)|обрезан|повреждён|повреждены|неполн)|(?:обрезан|повреждён|повреждены|неполн)[^.\n]{0,40}(?:изображени|картинк)|(?:can'?t|cannot|unable to) (?:see|view|access)[^.\n]{0,30}(?:image|picture|photo)|image (?:data )?(?:is |appears )?(?:truncated|incomplete|missing|unavailable)/i;
+const UNSEEN_ERROR = 'Модель не увидела картинку и написала об этом вместо описания. Попробуйте ещё раз; если повторится — проверьте модель в «Настройки → Модели и API → Картинки».';
+
 /** The model's answer as card fields: { name, category, gender, description } (missing parts are ''). */
 export function parseDescription(text) {
   // Thinking models put their reasoning before the answer: in <think> tags, or as plain
@@ -194,8 +214,10 @@ export function parseDescription(text) {
     // A model that ignored the format still gave a description: keep it as is.
     // But a reply that tried JSON and broke (reasoning, cut by the token limit) is not one.
     if (raw.includes('{')) throw new Error('Модель вернула размышления или обрезанный ответ вместо JSON. Увеличьте лимит токенов в «Настройки → Модели и API → Картинки» или выберите модель без размышлений.');
+    if (UNSEEN.test(raw)) throw new Error(UNSEEN_ERROR);
     return { name: '', category: '', gender: '', description: raw.replace(/^```\w*|```$/g, '').trim().slice(0, 3000) };
   }
+  if (UNSEEN.test(String(data.description ?? ''))) throw new Error(UNSEEN_ERROR);
   const categories = new Set(WARDROBE_CATEGORIES.map(([id]) => id));
   return {
     name: String(data.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),

@@ -560,6 +560,17 @@ export function cardIsEnglish(card) {
   return !cyrillic || latin > cyrillic;
 }
 
+/** Is this text written mostly in Russian letters? (an empty text is not.) */
+export function textIsRussian(text) {
+  const value = String(text ?? '');
+  return (value.match(/[А-Яа-яЁё]/g) ?? []).length > (value.match(/[A-Za-z]/g) ?? []).length;
+}
+
+/** The sections of a card that are written in Russian (whatever the card's own mark says): what is left to translate. */
+export function cardRussianSections(card) {
+  return (card?.sections ?? []).filter(section => String(section.text ?? '').trim() && textIsRussian(section.text));
+}
+
 /** Add a character card (the template's sections, empty, unless `sections` is given). It must sit in an existing folder. */
 export function addLibraryCharacter(library, fields = {}) {
   const next = clone(library);
