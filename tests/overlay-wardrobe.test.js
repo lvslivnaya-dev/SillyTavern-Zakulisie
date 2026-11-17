@@ -14,7 +14,7 @@ for (const name of Object.getOwnPropertyNames(window)) {
 }
 const { registerWardrobeRooms } = await import('../src/integration/overlay-wardrobe.js');
 
-function setup({ personaOn = true } = {}) {
+function setup({ personaOn = true, openCloset = undefined } = {}) {
   const calls = [];
   const state = { world: { wardrobe: { ran: { cardIds: ['c-shirt'], outfit: 'белая рубашка' } } } };
   const wardrobe = {
@@ -35,6 +35,7 @@ function setup({ personaOn = true } = {}) {
     wear: async payload => { calls.push(['wear', payload]); },
     takeOff: async payload => { calls.push(['off', payload]); },
     notify: () => {},
+    ...(openCloset ? { openCloset } : {}),
   });
   return { panes, calls, stop, redraws: () => redraws };
 }
@@ -115,4 +116,16 @@ test('persona: its own shelf only; with no persona in the chat a hint instead', 
   assert.ok(!box.textContent.includes('Чёрное пальто'));
   const none = setup({ personaOn: false });
   assert.match(draw(none.panes, 'wardrobe-persona').textContent, /Персона не привязана/);
+});
+
+test('closet: with the window wired in, «Шкаф» opens the big wardrobe window on this hero\'s closet instead of the small list', () => {
+  const opened = [];
+  const { panes } = setup({ openCloset: id => opened.push(id) });
+  const box = draw(panes, 'wardrobe-heroes');
+  [...box.querySelectorAll('.ku-wr-modes .ku-wr-chip')].find(chip => chip.textContent.startsWith('Шкаф')).click();
+  assert.deepEqual(opened, ['ran']);
+  assert.equal(box.querySelectorAll('.ku-wr-item').length, 1, 'the small pane stays as it was (nothing is switched inside it)');
+  const persona = draw(panes, 'wardrobe-persona');
+  [...persona.querySelectorAll('.ku-wr-modes .ku-wr-chip')].find(chip => chip.textContent.startsWith('Шкаф')).click();
+  assert.deepEqual(opened, ['ran', 'me']);
 });

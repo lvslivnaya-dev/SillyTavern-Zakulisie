@@ -135,6 +135,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   loreGate: { enabled: false, visualEvery: 6, named: 'core', sections: {} },
   // Saved custom cues («пусть приревнует»), shared by all chats.
   directionFavorites: [],
+  narratorNotes: [],
+  narratorPins: [],
   // Auxiliary model for the extension's own requests (see llm.js). The key of the
   // 'custom' mode is stored here, in SillyTavern's extension settings.
   aux: {

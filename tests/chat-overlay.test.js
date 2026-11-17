@@ -246,14 +246,14 @@ test('the drawer has the weather: a badge when closed, kind buttons and a lock w
     const weatherButtons = () => [...bar.querySelectorAll('.ku-dir-weather .ku-dir-btn')];
     const buttons = weatherButtons();
     assert.equal(buttons.filter(item => item.getAttribute('aria-pressed') === 'true').length, 1, 'only the current kind is pressed (the lock is not)');
-    buttons.find(item => item.title === 'Снег').click();
+    buttons.find(item => /^Снег/.test(item.title)).click();
     await Promise.resolve();
-    assert.deepEqual(sent.at(-1), { kind: 'snow', lock: false });
+    assert.deepEqual(sent.at(-1), { kind: 'snow', temp: '', text: '', lock: false, from: 0, days: 1 });
     weatherButtons().find(item => item.textContent === '🔓 Держать').click();
     await Promise.resolve();
     assert.deepEqual(sent.at(-1), { kind: 'rain', temp: 14, lock: true });
-    weatherButtons().find(item => /Заготовки/.test(item.textContent)).click();
-    assert.deepEqual(opened, ['weather']);
+    weatherButtons().find(item => /Календарь и погода/.test(item.textContent)).click();
+    assert.deepEqual(opened, ['calendar']);
     overlay.render(view({ weather: { kind: 'rain', temp: 14, source: 'lock', badge: '🌧 14°' }, director: { open: true } }));
     assert.ok([...bar.querySelectorAll('.ku-dir-weather .ku-dir-btn')].find(item => item.textContent === '🔒 Держится'));
   } finally { overlay.unmount(); }
@@ -266,7 +266,7 @@ test('the event card has ready genres; one press arms an event cue with the genr
     overlay.render(view({ director: { open: true, cues: [] } }));
     const bar = document.getElementById('ku-scene-chips');
     tileOf(bar, 'Событие').click();
-    const genres = [...bar.querySelectorAll('.ku-dir-genres .ku-dir-btn')];
+    const genres = [...bar.querySelectorAll('.ku-dir-genres .ku-dir-btn:not([data-ku-action="dir-plan-genre"])')];
     assert.deepEqual(genres.map(item => item.textContent.replace(/^\S+\s/, '')), ['Драка', 'Конфликт', 'Драма', 'Резня', 'Изнасилование', 'Насилие', 'Психологическое давление']);
     genres.find(item => /Драма/.test(item.textContent)).click();
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -562,4 +562,171 @@ test('a link that suits the scene is offered under the last reply with Вклю�
     overlay.render(view({ leaks: [] }));
     assert.equal(document.querySelectorAll('.ku-media-note-chat').length, 0, 'the last message is yours: the reply is not here yet');
   } finally { document.querySelector('.mes[mesid="4"]').removeAttribute('is_user'); mediaSection.suggest = null; overlay.unmount(); }
+});
+
+test('«Рассказчику»: write, send once, pin to this chat or to all chats, save with a cooldown; the lists fold; saved ones are sent, pinned, taken to the field or deleted', async () => {
+  const calls = [];
+  const overlay = mountChatOverlay({ onTogglePresent: () => {}, onLeak: () => {}, onToggleOpen: () => {}, onCue: () => true, onNotes: async payload => { calls.push(payload); return true; } });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  try {
+    const notes = {
+      library: [{ id: 'n1', text: 'Короче', every: 0, left: 0 }, { id: 'n2', text: 'Про погоду', every: 4, left: 2 }],
+      pins: [{ id: 'p1', text: 'Пиши от третьего лица', every: 3, left: 1, scope: 'chat' }, { id: 'g1', text: 'Реплики в кавычках', every: 0, left: 0, scope: 'all' }],
+    };
+    overlay.render(view({ director: { open: true, cues: [], notes } }));
+    const bar = document.getElementById('ku-scene-chips');
+    bar.querySelector('[data-pane="note"]').click();
+    const panel = () => bar.querySelector('.ku-dir-card');
+    const click = async selector => { panel().querySelector(selector).click(); await settle(); };
+    const typeIn = (field, value) => { const input = panel().querySelector(`[data-ku-field="${field}"]`); input.value = value; input.dispatchEvent(new window.Event('input', { bubbles: true })); };
+    // the pinned ones are open, the saved ones are folded
+    assert.match(panel().textContent, /Закреплено · 2/);
+    assert.match(panel().textContent, /Пиши от третьего лица/);
+    assert.match(panel().textContent, /этот чат · раз в 3 · через 1/);
+    assert.match(panel().textContent, /все чаты · каждый · со следующим ответом/);
+    assert.equal(panel().querySelectorAll('button[data-ku-action="dir-note-send"]').length, 0, 'the saved ones are folded');
+    await click('[data-ku-action="dir-note-fold"][data-which="lib"]');
+    const sends = [...panel().querySelectorAll('button[data-ku-action="dir-note-send"]')];
+    assert.equal(sends.length, 2);
+    assert.equal(sends[0].disabled, false);
+    assert.equal(sends[1].disabled, true, 'a cooling note cannot be sent');
+    assert.match(sends[1].textContent, /⏳2/);
+    sends[0].click();
+    await settle();
+    assert.deepEqual(calls.at(-1), { action: 'send', id: 'n1', wait: 0 });
+    // the field and the cooldown: pin (this chat), pin (all chats) and save carry both
+    typeIn('note', 'Больше тишины');
+    typeIn('note-every', '5');
+    await click('[data-ku-action="dir-note-pin"]');
+    assert.deepEqual(calls.at(-1), { action: 'pin', text: 'Больше тишины', every: 5 });
+    typeIn('note', 'Больше тишины');
+    await click('[data-ku-action="dir-note-pin-all"]');
+    assert.deepEqual(calls.at(-1), { action: 'pin-all', text: 'Больше тишины', every: 5 });
+    typeIn('note', 'Больше тишины');
+    await click('[data-ku-action="dir-note-save"]');
+    assert.deepEqual(calls.at(-1), { action: 'save', text: 'Больше тишины', every: 5 });
+    await click('[data-ku-action="dir-note-pin-saved"]');
+    assert.deepEqual(calls.at(-1), { action: 'pin-saved', id: 'n1' });
+    await click('[data-ku-action="dir-note-pin-all-saved"]');
+    assert.deepEqual(calls.at(-1), { action: 'pin-all-saved', id: 'n1' });
+    await click('[data-ku-action="dir-note-unpin"]');
+    assert.deepEqual(calls.at(-1), { action: 'unpin', id: 'p1' });
+    await click('[data-ku-action="dir-note-unpin-all"]');
+    assert.deepEqual(calls.at(-1), { action: 'unpin-all', id: 'g1' });
+    await click('[data-ku-action="dir-note-del"]');
+    assert.deepEqual(calls.at(-1), { action: 'delete', id: 'n1' });
+    // ✎ opens the row as a small form; «Сохранить» changes the note IN PLACE (scope + id), «Отмена» changes nothing
+    panel().querySelector('[data-ku-action="dir-note-edit"][data-scope="lib"][data-id="n2"]').click();
+    assert.equal(panel().querySelector('[data-ku-field="note-edit"]').value, 'Про погоду');
+    assert.equal(panel().querySelector('[data-ku-field="note-edit-every"]').value, '4');
+    typeIn('note-edit', 'Про погоду и ветер');
+    typeIn('note-edit-every', '2');
+    await click('[data-ku-action="dir-note-edit-save"]');
+    assert.deepEqual(calls.at(-1), { action: 'edit', scope: 'lib', id: 'n2', text: 'Про погоду и ветер', every: 2 });
+    assert.equal(panel().querySelector('[data-ku-field="note-edit"]'), null, 'the form closes after a save');
+    panel().querySelector('[data-ku-action="dir-note-edit"][data-scope="chat"][data-id="p1"]').click();
+    await click('[data-ku-action="dir-note-edit-cancel"]');
+    assert.equal(panel().querySelector('[data-ku-field="note-edit"]'), null);
+    panel().querySelector('[data-ku-action="dir-note-edit"][data-scope="all"][data-id="g1"]').click();
+    typeIn('note-edit', 'Реплики в «ёлочках»');
+    panel().querySelector('[data-ku-field="note-edit"]').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    assert.deepEqual(calls.at(-1), { action: 'edit', scope: 'all', id: 'g1', text: 'Реплики в «ёлочках»', every: 0 }, 'Enter saves too');
+    // folding the pinned ones hides them
+    await click('[data-ku-action="dir-note-fold"][data-which="pins"]');
+    assert.equal(panel().querySelector('[data-ku-action="dir-note-unpin"]'), null);
+  } finally { overlay.unmount(); }
+});
+
+test('the weather tab: pick the days and the span, then a kind goes onto all of them; «Вернуть прогнозу» clears the same days', async () => {
+  const sent = [];
+  const overlay = mountChatOverlay({ onTogglePresent: () => {}, onLeak: () => {}, onToggleOpen: () => {}, onWeather: payload => { sent.push(payload); } });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  try {
+    const week = Array.from({ length: 7 }, (_, index) => ({ day: 10 + index, label: `день ${10 + index}`, kind: index % 2 ? 'rain' : 'clear', temp: 10 + index, source: 'forecast' }));
+    overlay.render(view({ weather: { kind: 'clear', temp: 10, source: 'forecast', badge: '☀ 10°' }, weatherDay: 10, weatherWeek: week, director: { open: true } }));
+    const bar = document.getElementById('ku-scene-chips');
+    tileOf(bar, 'Погода').click();
+    const card = () => bar.querySelector('.ku-dir-weather');
+    assert.equal(card().querySelectorAll('.ku-wx-day').length, 7, 'the week ahead is on the card');
+    card().querySelectorAll('.ku-wx-day')[2].click();
+    card().querySelector('[data-ku-action="dir-wx-days"][data-days="3"]').click();
+    const temp = card().querySelector('[data-ku-field="wx-temp"]');
+    temp.value = '-4';
+    temp.dispatchEvent(new window.Event('input', { bubbles: true }));
+    [...card().querySelectorAll('.ku-dir-btn')].find(item => /^Снег/.test(item.title)).click();
+    await settle();
+    assert.deepEqual(sent.at(-1), { kind: 'snow', temp: -4, text: '', lock: false, from: 2, days: 3 });
+    assert.equal(card().querySelector('[data-ku-field="wx-temp"]').value, '', 'the drafts are emptied after the weather is set');
+    card().querySelectorAll('.ku-wx-day')[1].click();
+    card().querySelector('[data-ku-action="dir-wx-days"][data-days="7"]').click();
+    card().querySelector('[data-ku-action="dir-weather-clear"]').click();
+    await settle();
+    assert.deepEqual(sent.at(-1), { clear: true, from: 1, days: 7 });
+  } finally { overlay.unmount(); }
+});
+
+test('the event tab plans an event by the story clock: a span, own text or the narrator, a genre; the plans are listed and removable', async () => {
+  const sent = [];
+  const overlay = mountChatOverlay({ onTogglePresent: () => {}, onLeak: () => {}, onToggleOpen: () => {}, onCue: () => true, onPlan: async payload => { sent.push(payload); return true; } });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  try {
+    const plans = [{ id: 'p1', title: 'в дверь звонят', when: 'через 2 дня', left: 'осталось 1 дн. 3 ч', within: false }, { id: 'p2', title: '🎲 рассказчик придумает сам', when: 'в течение 3 недели', left: 'не позже, чем через 5 дн. 2 ч', within: true }];
+    overlay.render(view({ director: { open: true, cues: [], plans, planClock: true, planHours: true } }));
+    const bar = document.getElementById('ku-scene-chips');
+    tileOf(bar, 'Событие').click();
+    const card = () => bar.querySelector('.ku-dir-plan');
+    assert.ok(card(), 'the planner is under the ready events');
+    assert.match(card().textContent, /В плане · 2/);
+    assert.match(card().textContent, /осталось 1 дн\. 3 ч/);
+    const type = (field, value) => { const input = card().querySelector(`[data-ku-field="${field}"]`); input.value = value; input.dispatchEvent(new window.Event('input', { bubbles: true })); };
+    type('plan-amount', '3');
+    type('plan-unit', 'week');
+    card().querySelector('[data-ku-action="dir-plan-when"][data-within="true"]').click();
+    type('plan-text', 'приедет проверка');
+    card().querySelector('[data-ku-action="dir-plan-genre"][data-genre="drama"]').click();
+    card().querySelector('[data-ku-action="dir-plan-add"]').click();
+    await settle();
+    assert.deepEqual(sent.at(-1), { action: 'add', text: 'приедет проверка', genre: 'drama', amount: 3, unit: 'week', within: true });
+    assert.equal(card().querySelector('[data-ku-field="plan-text"]').value, '', 'the form is emptied after a plan is made');
+    card().querySelector('[data-ku-action="dir-plan-del"][data-id="p2"]').click();
+    await settle();
+    assert.deepEqual(sent.at(-1), { action: 'remove', id: 'p2' });
+    overlay.render(view({ director: { open: true, cues: [], plans: [], planClock: false } }));
+    assert.match(bar.querySelector('.ku-dir-plan').textContent, /нужен день истории/i);
+  } finally { overlay.unmount(); }
+});
+
+test('the long fields of the drawer wrap onto new lines instead of running sideways (a textarea, Enter still sends)', async () => {
+  const sent = [];
+  const overlay = mountChatOverlay({ onTogglePresent: () => {}, onLeak: () => {}, onToggleOpen: () => {}, onCue: cue => { sent.push(cue); return true; } });
+  try {
+    overlay.render(view({ director: { open: true, cues: [], notes: { library: [], pins: [] } } }));
+    const bar = document.getElementById('ku-scene-chips');
+    bar.querySelector('[data-pane="note"]').click();
+    const field = bar.querySelector('[data-ku-field="note"]');
+    assert.equal(field.tagName, 'TEXTAREA', 'the note field wraps its text');
+    field.value = 'очень длинное указание, которое раньше уезжало вбок и заставляло листать стрелкой';
+    field.dispatchEvent(new window.Event('input', { bubbles: true }));
+    field.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(sent.at(-1).text, 'очень длинное указание, которое раньше уезжало вбок и заставляло листать стрелкой');
+    bar.querySelector('[data-pane="event"]').click();
+    assert.equal(bar.querySelector('[data-ku-field="event"]').tagName, 'TEXTAREA');
+  } finally { overlay.unmount(); }
+});
+
+test('«Рассказчику» and «Повторы» stand in the left column, the other tools on the right', () => {
+  const overlay = mountChatOverlay({ onTogglePresent: () => {}, onLeak: () => {}, onToggleOpen: () => {} });
+  for (const [id, name] of [['repeats', 'Повторы'], ['threads', 'Нити'], ['relgraph', 'Связи']]) extraPanes.set(id, { id, icon: '🔁', name, title: name, render: box => { box.textContent = name; } });
+  try {
+    overlay.render(view({ director: { open: true } }));
+    const bar = document.getElementById('ku-scene-chips');
+    const names = rail => [...rail.querySelectorAll('.ku-tile .ku-tile-name')].map(item => item.textContent);
+    const left = names(bar.querySelector('.ku-rail:not(.ku-rail-r)'));
+    const right = names(bar.querySelector('.ku-rail-r'));
+    assert.ok(left.includes('Рассказчику') && left.includes('Повторы'), 'both are on the left');
+    assert.ok(!right.includes('Рассказчику') && !right.includes('Повторы'));
+    assert.ok(right.includes('Событие') && right.includes('Сцена') && right.includes('Нити') && right.includes('Связи'), 'the rest stay on the right');
+  } finally { for (const id of ['repeats', 'threads', 'relgraph']) extraPanes.delete(id); overlay.unmount(); }
 });

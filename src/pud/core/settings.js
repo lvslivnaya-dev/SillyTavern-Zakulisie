@@ -46,6 +46,8 @@ export function defaultSettings() {
     personaLooks: {},
     // Встроенные промпты нарратора: [{ id, name, text, isDefault }], см. core/prompts.js
     prompts: [],
+    // Визуальные пресеты: [{ id, name, parts: { background?, palette?, icons?, mood? } }], см. core/visual-presets.js
+    visualPresets: [],
     // Пункты меню «палочки» (ключи), спрятанные из списка расширений
     wandHidden: [],
     // Свои иконки: { pud: { имя: data-ссылка }, studio: { … } }, см. shared/custom-icons.js

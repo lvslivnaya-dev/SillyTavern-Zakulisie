@@ -75,3 +75,34 @@ export async function generateCalendarTemplate(context, { description, personaNa
     throw new Error(`Не удалось сгенерировать календарь: ${error?.message ?? error}`);
   }
 }
+
+const HOLIDAYS_SYSTEM = `You list ONLY holidays and memorable dates for a roleplay calendar. Output ONLY valid JSON:
+{"name":"short Russian name","startMonth":1,"events":[{"title":"...","note":"...","date":"MM-DD","kind":"holiday","intensity":2}]}
+- Nothing but holidays and dates asked for below: no classes, exams, lessons, work, appointments, birthdays of private people, no invented personal events.
+- Dates are "MM-DD" without a year, fixed dates only (for moving holidays give the usual date in a typical year and say so in the note).
+- title: Russian, at most 80 characters. note: Russian, at most 160 characters: what the day is and how it is celebrated or felt there.
+- intensity: 1 minor/observance, 2 a holiday people mark, 3 a major holiday (New Year, a national day, the biggest in-universe festival). kind is always "holiday".
+- Only real, well-known dates; for a fictional universe only dates that are canon (anniversaries, festivals, in-universe holidays); never invent canon. If the universe has few of them, return few.
+- At most 40 events. Return JSON only.`;
+
+/**
+ * Only holidays, nothing else. { international, place: 'Токио' | '', fandom: 'Магическая битва' | '' }.
+ * The answer has the shape of a calendar template, so the page reviews it the same way. Every event repeats yearly.
+ */
+export async function generateHolidays(context, { international = false, place = '', fandom = '' } = {}) {
+  const asked = [];
+  if (international) asked.push("INTERNATIONAL: well-known international and widely observed holidays (New Year, Christmas, Valentine's Day, Halloween, International Women's Day and similar).");
+  if (String(place).trim()) asked.push(`PLACE: public holidays, festivals and local days of «${String(place).trim()}» (the city, and the country it is in).`);
+  if (String(fandom).trim()) asked.push(`UNIVERSE: in-universe holidays, festivals and canon dates of the fandom «${String(fandom).trim()}».`);
+  if (!asked.length) throw new Error('Отметьте, какие праздники нужны: международные, города или вселенной.');
+  try {
+    const result = await requestStructured(context, {
+      prompt: [{ role: 'system', content: HOLIDAYS_SYSTEM }, { role: 'user', content: `Which holidays:\n${asked.join('\n')}\n\nReturn JSON only.` }],
+      trimNames: false,
+      busyLabel: 'календарь: ищу праздники…',
+    }, parseCalendarTemplate);
+    return { ...result, startMonth: 1, events: result.events.map(event => ({ ...event, kind: 'holiday', repeat: 'yearly', ...(event.intensity ? {} : { intensity: 2 }) })) };
+  } catch (error) {
+    throw new Error(`Не удалось найти праздники: ${error?.message ?? error}`);
+  }
+}

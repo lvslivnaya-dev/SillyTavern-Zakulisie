@@ -106,8 +106,11 @@ import { renderMediaPane } from './src/ui/media-pane.js';
 import { lookupMediaTitle } from './src/integration/media-title.js';
 import {
   armCue, buildDirectionPrompt, cueBadge, cueLabel, normalizeDirection, normalizeFavorites,
-  presenceAfterReply, removeCue, silenceCounts, startGeneration,
+  globalPinLeft, markNoteUsed, noteCooldownLeft, normalizeNoteLibrary, pinLeft, pinNote, presenceAfterReply, removeCue, removeNote, replyCountOf, saveNote, silenceCounts, startGeneration, unpinNote,
+  editNote, editPin, planEvent,
 } from './src/core/direction.js';
+import { absOf, describePlan, makePlan, normalizePlans, removePlan } from './src/core/event-plan.js';
+import { WEATHER_TEMPLATES, clearWeatherDays, paintDays, paintWeather, templateDays } from './src/core/weather.js';
 import { analyzeHistoryBatch, analyzeKnowledge, analyzeMessage, discoverHistoryCharacters } from './src/integration/analyzer.js';
 import { selectKnowledgeCandidates } from './src/integration/knowledge-analysis.js';
 import { detectConflicts } from './src/integration/conflicts.js';
@@ -119,8 +122,8 @@ import { startConsoleWatch } from './src/integration/console-watch.js';
 import { buildCleanerBackup, cleanerFilename, formatBytes, parseCleanerBackup, removeSettings, restoreSettings, scanSettings } from './src/core/settings-cleaner.js';
 import { clearRelationshipPrompt, updateGmPrompt, updateCalendarPrompt, updateCardsPrompt, updateDirectionPrompt, updateChroniclePrompt, updateKnowledgePrompt, updateNamesPrompt, updatePersonaPrompt, updateBondsPrompt, updateQuestsPrompt, updateRelationshipPrompt, updateScenePrompt, updateSongsPrompt } from './src/integration/prompt.js';
 import { fillNameForms } from './src/integration/name-forms.js';
-import { generateClimate } from './src/integration/weather-generation.js';
-import { generateCalendarTemplate } from './src/integration/calendar-generation.js';
+import { generateClimate, generateWeatherDays } from './src/integration/weather-generation.js';
+import { generateCalendarTemplate, generateHolidays } from './src/integration/calendar-generation.js';
 import { buildScenePrompt, looksFit, newlyDropped } from './src/integration/world-prompt.js';
 import { createReminders, createWorldCallbacks } from './src/integration/world-actions.js';
 import { linkedCards } from './src/integration/location-links.js';
@@ -174,6 +177,8 @@ import { mountSelectionChip } from './src/integration/selection-chip.js';
 import { DEFAULT_LOCAL_MODEL, LOCAL_MODELS, cosine, embedTexts } from './src/integration/embeddings.js';
 import { createChatStorage } from './src/integration/storage.js';
 import { createLibraryCallbacks, createLocationLibraryStore, syncChat, syncChatCards } from './src/integration/location-library-actions.js';
+import { autoLinkNarratorCards } from './src/integration/card-links.js';
+import { wardrobeFocus } from './src/ui/wardrobe-focus.js';
 import { personaApi } from './src/pud/integration/personas-api.js';
 import { createRelationshipStudio } from './src/ui/studio.js';
 import { createRelationshipWidget } from './src/ui/widget.js';
@@ -354,7 +359,9 @@ async function initKulisy() {
       leaks: openLeaks(),
       slips: openSlips(),
       factorHits: factorHits(),
-      calendar: calendarOf(state),
+      tavernCharacters: (() => { try { return (SillyTavern.getContext().characters ?? []).filter(item => item?.avatar).map(item => ({ avatar: String(item.avatar), name: String(item.name ?? item.avatar) })); } catch { return []; } })(),
+      narratorNow: currentNarrator(),
+      calendar: calendarView(state),
       calendarToday: dateOfDay(calendarOf(state), state.world?.clock?.day ?? 0),
       calendarSystems: calendarLibrary(),
       calendarTemplates: normalizeTemplates(settings.calendarTemplates),
@@ -785,7 +792,7 @@ async function initKulisy() {
     promptParts.scene = sceneBlock;
     updateScenePrompt(ctx, sceneBlock);
     const calendarBlock = settings.enabled && settings.sendCalendar !== false
-      ? buildCalendarPrompt(state, { flashback: Boolean(state.world?.clock?.flashback) }) : '';
+      ? buildCalendarPrompt({ ...state, ui: { ...state.ui, calendar: { ...(state.ui?.calendar ?? {}), events: [...(state.ui?.calendar?.events ?? []), ...birthdayEvents()] } } }, { flashback: Boolean(state.world?.clock?.flashback) }) : '';
     calendarTokens = calendarBlock ? countTokens(calendarBlock) : 0;
     promptParts.calendar = calendarBlock;
     updateCalendarPrompt(ctx, calendarBlock);
@@ -1190,6 +1197,34 @@ ${replyText}` });
     return normalizeCalendar(source.ui?.calendar, new Set(Object.keys(source.entities ?? {})));
   }
 
+  /**
+   * The birthdays of the characters whose cards are switched on in THIS chat (and of the persona's card): yearly «День рождения» events,
+   * made from the card's `birthday` ('MM-DD'). They are never stored in the calendar (the card is the one place that holds them), so they come
+   * only to the chats that have the card. A calendar of its own has other months: no birthdays there.
+   */
+  function birthdayEvents(source = state) {
+    try {
+      if (clockOf(calendarOf(source)).custom) return [];
+      const library = locationLibrary.get().characters ?? [];
+      const events = [];
+      for (const [entityId, cardId] of cardOfEntity()) {
+        const card = library.find(item => item.id === cardId);
+        if (!card?.birthday) continue;
+        events.push({ id: `bday:${cardId}`, title: `День рождения: ${source.entities?.[entityId]?.name ?? card.name}`, date: `1600-${card.birthday}`, repeat: 'yearly', kind: 'birthday', intensity: 2, ahead: 2, who: [entityId], fromCard: true, cardId });
+      }
+      return events;
+    } catch (error) {
+      console.error('[Kulisy] Birthdays of the cards failed.', error);
+      return [];
+    }
+  }
+
+  /** The calendar as the story reads it: the stored events and the birthdays of the cards. Writers use calendarOf (the stored one). */
+  function calendarView(source = state) {
+    const stored = calendarOf(source);
+    return { ...stored, events: [...stored.events, ...birthdayEvents(source)] };
+  }
+
   /** With a calendar of its own the climate comes from its seasons (and its months), not from the earthly climates. */
   function weatherCalendar(source = state) {
     const calendar = calendarOf(source);
@@ -1288,6 +1323,11 @@ ${replyText}` });
         description, personaName: personaId ? state.entities[personaId]?.name ?? '' : '', lore,
       });
     },
+    /** Only holidays (international, of a place, of a fandom's universe); nothing is saved, the page shows the drafts. */
+    onCalendarGenerateHolidays: async ({ international, place, fandom }) => {
+      if (isGenerationActive()) await waitForGenerationEnd();
+      return generateHolidays(routedContext(SillyTavern.getContext(), settings, 'generation'), { international: Boolean(international), place, fandom });
+    },
     /** Put a template (saved or just generated) into this chat's calendar, in a year. indexes: only those events. */
     onCalendarApplyTemplate: ({ template, templateId, year, indexes }) => {
       if (clockOf(calendarOf()).custom) throw new Error('Шаблоны сделаны для земного календаря: у календаря этого чата свои месяцы.');
@@ -1317,6 +1357,12 @@ ${replyText}` });
       notify();
     },
   };
+
+  /** Painted weather beats the weather set for today (by hand or by the chronicler): it is dropped so the painted days speak. */
+  async function dropTodaysWeather(first, count) {
+    const today = state.world?.clock?.day ?? 0;
+    if (today >= first && today < first + count && state.world?.weather) await worldCallbacks.onSetWeather({ clear: true });
+  }
 
   /** Weather (Мир → Погода): the plan of the chat is in the chat, the climates in the settings. */
   async function commitWeatherPlan(change) {
@@ -1522,6 +1568,55 @@ ${replyText}` });
       return addScenario(plan, made);
     }),
     onWeatherScenarioRemove: ({ id }) => commitWeatherPlan(plan => removeScenario(plan, id)),
+    /**
+     * The weather by hand for story days [startDay, startDay + days): one day or a stretch (the calendar window and the drawer).
+     * If today is inside, today's weather is set too (it beats the plan until the story moves on).
+     */
+    onWeatherPaint: async ({ startDay, days = 1, kind, temp = '', text = '', parts = null }) => {
+      const first = Math.round(Number(startDay));
+      const count = Math.round(Number(days)) || 1;
+      const number = temp === '' || temp == null ? null : Number(temp);
+      await commitWeatherPlan(plan => paintWeather(plan, { startDay: first, days: count, kind, temp: Number.isFinite(number) ? number : null, text, parts }));
+      await dropTodaysWeather(first, count);
+    },
+    /** A row of different days from `startDay` ([{ parts }] each): the generator's result or a ready template. */
+    onWeatherDays: async ({ startDay, days }) => {
+      const first = Math.round(Number(startDay));
+      await commitWeatherPlan(plan => paintDays(plan, first, days));
+      await dropTodaysWeather(first, (days ?? []).length);
+    },
+    onWeatherTemplate: async ({ templateId, startDay }) => {
+      const template = WEATHER_TEMPLATES.find(item => item.id === templateId);
+      if (!template) throw new Error('Такой заготовки погоды нет.');
+      const first = Math.round(Number(startDay));
+      await commitWeatherPlan(plan => paintDays(plan, first, templateDays(template)));
+      await dropTodaysWeather(first, template.days.length);
+    },
+    /** Weather for the days [startDay, startDay + count) from a city or a wish; nothing is saved, the page shows it. */
+    onWeatherGenerateDays: async ({ description, startDay, count }) => {
+      if (isGenerationActive()) await waitForGenerationEnd();
+      const first = Math.round(Number(startDay));
+      const total = Math.round(Number(count));
+      if (!first || !(total >= 1)) throw new Error('Выберите, на какие дни нужна погода.');
+      if (total > 31) throw new Error('За один раз можно сочинить погоду не больше чем на 31 день.');
+      const calendar = calendarOf();
+      const clock = clockOf(calendar);
+      const dates = Array.from({ length: total }, (_, index) => {
+        const date = dateOfDay(calendar, first + index);
+        return { date, label: date ? `${clock.humanDate(date)} (day ${first + index})` : `day ${first + index}` };
+      });
+      const climate = state.ui?.weatherPlan?.climateId ? findClimate(state.ui.weatherPlan.climateId, settings.weatherClimates) : null;
+      const days = await generateWeatherDays(routedContext(SillyTavern.getContext(), settings, 'generation'), { description, dates, climateName: climate?.name ?? '' });
+      return { days };
+    },
+    /** Take the hand-set and planned weather off those days: they go back to the forecast (today's set weather too). */
+    onWeatherClear: async ({ startDay, days = 1 }) => {
+      const first = Math.round(Number(startDay));
+      const count = Math.round(Number(days)) || 1;
+      await commitWeatherPlan(plan => clearWeatherDays(plan, { startDay: first, days: count }));
+      const today = state.world?.clock?.day ?? 0;
+      if (today >= first && today < first + count && state.world?.weather) await worldCallbacks.onSetWeather({ clear: true });
+    },
     /** A climate from one line; nothing is saved, the page shows it. */
     onWeatherGenerate: async ({ description }) => {
       if (isGenerationActive()) await waitForGenerationEnd();
@@ -4486,7 +4581,15 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     // Cards that left the library meanwhile are let go of their characters, in the same save.
     try {
       const libraryOperations = syncChat(state, locationLibrary);
-      const synced = syncChatCards(libraryOperations.length ? applyOperations(state, libraryOperations) : state, locationLibrary);
+      let synced = syncChatCards(libraryOperations.length ? applyOperations(state, libraryOperations) : state, locationLibrary);
+      // The cards tied to this chat's narrator switch on by themselves (once per card: one switched off by hand stays off).
+      const auto = autoLinkNarratorCards(synced, locationLibrary.get(), currentNarrator().avatar);
+      if (auto.linked.length || auto.skipped.length) {
+        synced = auto.state;
+        const names = auto.linked.map(item => locationLibrary.get().characters.find(card => card.id === item.cardId)?.name).filter(Boolean);
+        if (names.length) globalThis.toastr?.info?.(`Карточки нарратора включены в чате: ${names.join(', ')}`, 'Закулисье');
+        for (const skip of auto.skipped) globalThis.toastr?.warning?.(`Карточка «${skip.name}» не включилась: ${skip.why}`, 'Закулисье');
+      } else if (auto.state !== synced) synced = auto.state;
       if (synced !== state) commit(synced, true).catch(error => logEvent('warn', 'Локации и карточки чата не обновились по библиотеке', error));
     } catch (error) {
       logEvent('warn', 'Локации и карточки чата не обновились по библиотеке', error);
@@ -4673,7 +4776,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
 
   /** Today's calendar events, offered as ready scene events. */
   function eventIdeasForDirector() {
-    const calendar = calendarOf();
+    const calendar = calendarView();
     const today = dateOfDay(calendar, state.world?.clock?.day ?? 0);
     if (!today) return [];
     return eventsOn(calendar, today).map(event => [event.time, event.title].filter(Boolean).join(' ')).filter(Boolean).slice(0, 6);
@@ -4730,7 +4833,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
   /** The calendar for the drawer: the month around the story's date and the next events (deadlines of the quests too); null without a date. */
   function calendarGlance() {
     try {
-      const calendar = calendarOf();
+      const calendar = calendarView();
       const today = dateOfDay(calendar, state.world?.clock?.day ?? 0);
       if (!today) return null;
       const clock = clockOf(calendar);
@@ -4741,6 +4844,42 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       logEvent('warn', 'Календарь для шторки не собрался', error);
       return null;
     }
+  }
+
+  /** The tavern character of this chat (its narrator): { avatar, name }; empty in a group chat or without a chat. */
+  function currentNarrator() {
+    try {
+      const ctx = SillyTavern.getContext();
+      if (ctx.groupId) return { avatar: '', name: '' };
+      const found = ctx.characters?.[ctx.characterId];
+      return found?.avatar ? { avatar: String(found.avatar), name: String(found.name ?? '') } : { avatar: '', name: '' };
+    } catch { return { avatar: '', name: '' }; }
+  }
+
+  /** The story moment now (day and time of the clock as one number), or null while the day is unknown. */
+  function planClockNow() {
+    return absOf(state.world?.clock?.day, state.world?.clock?.time);
+  }
+
+  /** «2 недели» or «месяц» in story minutes, by the rules of the story's calendar (a month by its real months when the date is known, else 30 days). */
+  function planSpanMinutes(unit, amount) {
+    if (unit === 'hour') return amount * 60;
+    if (unit === 'day') return amount * 1440;
+    const calendar = calendarOf();
+    const cal = clockOf(calendar);
+    if (unit === 'week') return amount * cal.weekdayCount * 1440;
+    const today = dateOfDay(calendar, state.world?.clock?.day ?? 0);
+    if (today && cal.valid(today)) {
+      const [year, month, day] = today.split('-').map(Number);
+      const total = month - 1 + amount;
+      const toYear = year + Math.floor(total / cal.monthsCount);
+      const toMonth = (total % cal.monthsCount) + 1;
+      const pad = (value, width) => String(value).padStart(width, '0');
+      const target = `${pad(toYear, 4)}-${pad(toMonth, 2)}-${pad(Math.min(day, cal.daysInMonth(toYear, toMonth)), 2)}`;
+      const between = cal.valid(target) ? cal.daysBetween(today, target) : null;
+      if (between > 0) return between * 1440;
+    }
+    return amount * 30 * 1440;
   }
 
   /** Chips: everyone on stage, plus whoever the last messages mention (likely to come on). */
@@ -4773,6 +4912,21 @@ ${card.personality ?? card.data?.personality ?? ''}`;
         hotkeys: director.hotkeys !== false,
         canKick: !isGenerationActive(),
         favorites: normalizeFavorites(settings.directionFavorites),
+        // The planned events (they count story time): what they say, when, how long is left. A «within» plan never shows its drawn moment.
+        plans: normalizePlans(direction.plans).map(plan => ({ id: plan.id, ...describePlan(plan, planClockNow()), genre: plan.genre ?? '', within: plan.within })),
+        planClock: planClockNow() != null,
+        planHours: /^\d{1,2}:\d{2}$/.test(String(state.world?.clock?.time ?? '').trim()),
+        // «Рассказчику»: the saved notes (with the cooldown left) and the ones pinned to this chat.
+        notes: (() => {
+          const count = replyCountOf(SillyTavern.getContext().chat);
+          return {
+            library: normalizeNoteLibrary(settings.narratorNotes).map(item => ({ ...item, left: noteCooldownLeft(direction, item.id, item.every, count) })),
+            pins: [
+              ...normalizeNoteLibrary(settings.narratorPins).map(pin => ({ id: pin.id, text: pin.text, every: pin.every, left: globalPinLeft(direction, pin, count), scope: 'all' })),
+              ...(direction.pins ?? []).map(pin => ({ id: pin.id, text: pin.text, every: pin.every, left: pinLeft(pin, count), scope: 'chat' })),
+            ],
+          };
+        })(),
         cues: direction.cues.map(cue => ({ id: cue.id, kind: cue.kind, entityId: cue.entityId ?? '', label: cueLabel(cue, nameOf), badge: cueBadge(cue), used: cue.used, wait: cue.wait })),
         // For «🎬 Сцена»: the chat's places and everyone who can be in a scene.
         places: (state.world?.locations ?? []).filter(location => !location.off).map(location => ({ id: location.id, name: location.name })),
@@ -4796,7 +4950,23 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       }) : [],
       heat: (() => { const found = state.world?.heat; return { value: found?.value ?? 0, label: heatLevel(found?.value ?? 0).label, lock: Boolean(found?.lock), why: found?.why ?? '' }; })(),
       sceneMode: state.world?.clock?.mode ?? 'calm',
-      weather: (() => { const found = currentWeather(); return found ? { kind: found.kind, temp: found.temp, source: found.source, badge: weatherBadge(found) } : null; })(),
+      weather: (() => { const found = currentWeather(); return found ? { kind: found.kind, temp: found.temp, source: found.source, badge: weatherBadge(found), scenario: found.scenario ?? '', manual: Boolean(found.manual), text: found.text ?? '' } : null; })(),
+      // The week ahead for the drawer: [{ day, label, kind, temp, source }], and the story day today (0 = unknown).
+      weatherDay: state.world?.clock?.day ?? 0,
+      weatherWeek: (() => {
+        try {
+          const calendar = calendarOf();
+          const today = state.world?.clock?.day ?? 0;
+          if (!today) return [];
+          // Seven days from today, every one of them (a day with no weather known has an empty kind: it can still be picked).
+          return Array.from({ length: 7 }, (_, offset) => {
+            const day = today + offset;
+            const date = dateOfDay(calendar, day);
+            const found = weatherFor({ ...state, world: { ...state.world, weather: offset === 0 ? state.world?.weather : null } }, { plan: state.ui?.weatherPlan, climates: settings.weatherClimates, date, day, part: 'day', time: offset === 0 ? undefined : '', ...weatherCalendar(state) });
+            return { day, label: date ? calendarShortDate(calendar, date) : `день ${day}`, kind: found?.kind ?? '', temp: found?.temp ?? null, source: found?.source ?? '' };
+          });
+        } catch (error) { console.error('[Kulisy] Week forecast failed.', error); return []; }
+      })(),
       location: state.knowledge?.scene?.location ?? '',
       // Time and, when the calendar knows it, the date: «14:20 · вт 8 апр».
       time: settings.trackWorld !== false ? [state.world?.clock?.time ?? '', calendarShortDate(calendarOf(), dateOfDay(calendarOf(), state.world?.clock?.day ?? 0))].filter(Boolean).join(' · ') : '',
@@ -4811,6 +4981,11 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       waitingReveals: enabled ? openReveals().length : 0,
       slips: settings.enabled && settings.trackWorld !== false ? openSlips() : [],
     };
+  }
+
+  /** Open a page of the Studio: its own window when windows are separate, else the one panel. */
+  function openStudioTab(tab) {
+    return tab && settings.studioMulti === true && tab !== 'personas' ? pressWindowButton(windowOf(tab).id, tab, { toggle: false }) : tab ? studio.show(tab) : studio.open();
   }
 
   const LEAK_ACTIONS = { swipe: 'onLeakSwipe', knows: 'onLeakKnows', dismiss: 'onLeakDismiss' };
@@ -4832,8 +5007,19 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     onSetTime: async payload => {
       try { await worldCallbacks.onSetClock(payload); return true; } catch (error) { globalThis.toastr?.error?.(error.message, 'Закулисье'); return false; }
     },
-    onWeather: ({ kind, temp, lock }) => Promise.resolve(worldCallbacks.onSetWeather({ kind, temp: temp ?? '', text: '', lock }))
-      .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
+    /**
+     * The drawer's weather. `from` (0 = today) and `days` say for which days; one day from today is the plain «set the weather now» (and may be held),
+     * more is painted on the plan like in the calendar window. { clear: true } hands the days back to the forecast.
+     */
+    onWeather: ({ kind, temp, text = '', lock, clear, from = 0, days = 1 }) => {
+      const today = state.world?.clock?.day ?? 0;
+      const range = today > 0 && (from > 0 || days > 1);
+      return Promise.resolve().then(() => {
+        if (clear) return range ? weatherCallbacks.onWeatherClear({ startDay: today + from, days }) : worldCallbacks.onSetWeather({ clear: true });
+        if (range) return weatherCallbacks.onWeatherPaint({ startDay: today + from, days, kind, temp: temp ?? '', text });
+        return worldCallbacks.onSetWeather({ kind, temp: temp ?? '', text, lock });
+      }).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье'));
+    },
     onSceneMode: mode => Promise.resolve(worldCallbacks.onSetClock({ mode }))
       .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onTogglePresent: (id, present) => knowledgeCallbacks.onTogglePresent({ characterId: id, present })
@@ -4858,7 +5044,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
         .then(() => { if (action === 'remind') globalThis.toastr?.info?.('Поправка уйдёт со следующим ответом', 'Закулисье'); })
         .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье'));
     },
-    onOpenStudio: tab => (tab && settings.studioMulti === true && tab !== 'personas' ? pressWindowButton(windowOf(tab).id, tab, { toggle: false }) : tab ? studio.show(tab) : studio.open()),
+    onOpenStudio: tab => openStudioTab(tab),
     onOpenPersonas: avatar => controller?.personaBridge?.personaWindow?.open?.(avatar),
     onSetupOff: () => setupCallbacks.onSetupOff({ off: true }).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onCue: async cue => {
@@ -4873,6 +5059,96 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     },
     onRemoveCue: cueId => saveDirection(removeCue(directionState(), cueId))
       .catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
+    /**
+     * The notes for the narrator: save one for good (shared by all chats), delete it, pin one to this chat, unpin it, send a saved one now.
+     * A saved note may have a cooldown (every N replies): it cannot be sent again before that, and a pinned one goes by itself once per N replies.
+     */
+    onNotes: async ({ action, id = '', text = '', every = 0, wait = 0, scope = 'chat' }) => {
+      try {
+        if (!settings.enabled) throw new Error('Закулисье выключено.');
+        const library = normalizeNoteLibrary(settings.narratorNotes);
+        const saved = library.find(item => item.id === id);
+        const count = replyCountOf(SillyTavern.getContext().chat);
+        if (action === 'save') {
+          settings.narratorNotes = saveNote(library, { text, every });
+          context.saveSettingsDebounced();
+          globalThis.toastr?.warning?.('Сохранено в «Мои указания». В этот чат оно пока НЕ отправлено: ▶ отправит один раз, 📌 закрепит.', 'Закулисье');
+        } else if (action === 'save-pin') {
+          settings.narratorNotes = saveNote(library, { text, every });
+          context.saveSettingsDebounced();
+          await saveDirection(pinNote(directionState(), { text, every }));
+          globalThis.toastr?.success?.('Сохранено и закреплено: уйдёт со следующим ответом', 'Закулисье');
+        } else if (action === 'delete') {
+          settings.narratorNotes = removeNote(library, id);
+          context.saveSettingsDebounced();
+        } else if (action === 'pin') {
+          settings.narratorNotes = saveNote(library, { text, every });
+          context.saveSettingsDebounced();
+          await saveDirection(pinNote(directionState(), { text, every }));
+          globalThis.toastr?.success?.('Закреплено: уйдёт со следующим ответом', 'Закулисье');
+        } else if (action === 'pin-saved') {
+          if (!saved) throw new Error('Такого указания уже нет.');
+          await saveDirection(pinNote(directionState(), { text: saved.text, every: saved.every }));
+          globalThis.toastr?.success?.('Закреплено: уйдёт со следующим ответом', 'Закулисье');
+        } else if (action === 'pin-all' || action === 'pin-all-saved') {
+          // For ALL chats: kept in the settings; each chat counts its own cooldown.
+          const source = action === 'pin-all' ? { text, every } : saved;
+          if (!source) throw new Error('Такого указания уже нет.');
+          if (action === 'pin-all') settings.narratorNotes = saveNote(library, { text, every });
+          const pins = normalizeNoteLibrary(settings.narratorPins);
+          if (pins.length >= 10 && !pins.some(pin => pin.text.toLocaleLowerCase('ru-RU') === String(source.text).trim().toLocaleLowerCase('ru-RU'))) throw new Error('Для всех чатов закреплено уже 10: открепите лишнее.');
+          settings.narratorPins = saveNote(pins, { text: source.text, every: source.every });
+          context.saveSettingsDebounced();
+          globalThis.toastr?.success?.('Закреплено для всех чатов: уйдёт со следующим ответом', 'Закулисье');
+        } else if (action === 'unpin-all') {
+          settings.narratorPins = removeNote(normalizeNoteLibrary(settings.narratorPins), id);
+          context.saveSettingsDebounced();
+        } else if (action === 'unpin') {
+          await saveDirection(unpinNote(directionState(), id));
+        } else if (action === 'edit') {
+          // The edited note is saved IN PLACE: the same id, so the cooldown and the pin stay. `scope`: where the note lives.
+          if (scope === 'lib') settings.narratorNotes = editNote(library, id, { text, every });
+          else if (scope === 'all') settings.narratorPins = editNote(normalizeNoteLibrary(settings.narratorPins), id, { text, every });
+          else await saveDirection(editPin(directionState(), id, { text, every }));
+          if (scope !== 'chat') context.saveSettingsDebounced();
+          globalThis.toastr?.success?.(scope === 'lib' ? 'Указание поправлено' : 'Указание поправлено: уйдёт в таком виде со следующим ответом', 'Закулисье');
+        } else if (action === 'send') {
+          if (!saved) throw new Error('Такого указания уже нет.');
+          const left = noteCooldownLeft(directionState(), saved.id, saved.every, count);
+          if (left > 0) throw new Error(`Указание ещё остывает: подождите ${left} ${left === 1 ? 'ответ' : left < 5 ? 'ответа' : 'ответов'}.`);
+          const armed = armCue(directionState(), { kind: 'note', text: saved.text, wait, id: uniqueId('cue') }, Object.keys(state.entities));
+          await saveDirection(markNoteUsed(armed, saved.id, count));
+          globalThis.toastr?.success?.('Уйдёт со следующим ответом', 'Закулисье');
+        } else return false;
+        refreshChatOverlay();
+        return true;
+      } catch (error) {
+        globalThis.toastr?.error?.(error.message, 'Закулисье');
+        return false;
+      }
+    },
+    /** Planned events: { action: 'add', text, genre, amount, unit, within } or { action: 'remove', id }. */
+    onPlan: async ({ action, id = '', text = '', genre = '', amount = 1, unit = 'day', within = false }) => {
+      try {
+        if (!settings.enabled) throw new Error('Закулисье выключено.');
+        const direction = directionState();
+        if (action === 'remove') await saveDirection(planEvent(direction, removePlan(direction.plans, id)));
+        else if (action === 'add') {
+          const count = Math.max(1, Math.min(99, Math.round(Number(amount)) || 1));
+          const now = planClockNow();
+          if (now == null) throw new Error('Не знаю, какой сейчас день истории: задайте его в «Время» (кнопка 🕑 слева).');
+          if (unit === 'hour' && !/^\d{1,2}:\d{2}$/.test(String(state.world?.clock?.time ?? '').trim())) throw new Error('Для «часов» нужно время истории: поставьте его в «Время» (кнопка 🕑 слева).');
+          const plans = makePlan(direction.plans, { text, genre, nowAbs: now, minutes: planSpanMinutes(unit, count), unit, amount: count, within: Boolean(within), id: uniqueId('plan') });
+          await saveDirection(planEvent(direction, plans));
+          globalThis.toastr?.success?.('Запланировано: сработает, когда время истории дойдёт', 'Закулисье');
+        } else return false;
+        refreshChatOverlay();
+        return true;
+      } catch (error) {
+        globalThis.toastr?.error?.(error.message, 'Закулисье');
+        return false;
+      }
+    },
     onKickNow: () => {
       if (isGenerationActive()) { globalThis.toastr?.info?.('Сейчас идёт генерация — пинок уйдёт со следующей.', 'Закулисье'); return; }
       // Exactly like the send button: her text goes too, an empty field means a reply without a post.
@@ -4913,6 +5189,14 @@ ${card.personality ?? card.data?.personality ?? ''}`;
         .filter(entity => entity.id !== personaId && !isDead(state, entity.id))
         .map(entity => ({ id: entity.id, name: entity.name, here: here.has(entity.id) }))
         .sort((left, right) => Number(right.here) - Number(left.here) || left.name.localeCompare(right.name, 'ru'));
+    },
+    // «Шкаф» in the drawer opens the big wardrobe window on this character's closet.
+    openCloset: entityId => {
+      try {
+        wardrobeFocus.closets = true;
+        wardrobeFocus.cardId = cardOfEntity().get(entityId) ?? '';
+        openStudioTab('wardrobe');
+      } catch (error) { console.error('[Kulisy] The closet window did not open.', error); }
     },
     // The closet of the card the person has: the wardrobe pieces chosen there, and the pieces of the outfits chosen there.
     closetOf: id => {
@@ -5098,8 +5382,9 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     if (type === 'quiet' || !controller) return;
     // Stage cues: a new turn burns the last one's and puts the armed ones in force.
     try {
-      const started = startGeneration(directionState(), type);
+      const started = startGeneration(directionState(), type, { replyCount: replyCountOf(SillyTavern.getContext().chat), globalPins: normalizeNoteLibrary(settings.narratorPins), nowAbs: planClockNow() });
       if (started.changed) await saveDirection(started.direction);
+      if (started.firedPlans?.length) globalThis.toastr?.info?.(`🗓 Пришло время запланированного: ${started.firedPlans.map(plan => plan.text || 'событие на выбор рассказчика').join('; ').slice(0, 160)}`, 'Закулисье');
     } catch (error) { console.error('[Kulisy] Stage cues were not updated.', error); }
     await prepareHeadcanons(chat);
     refreshPrompt();

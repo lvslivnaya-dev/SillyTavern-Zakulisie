@@ -232,6 +232,23 @@ function withPersonaSections(sections) {
   return [...next, ...list, hidden];
 }
 
+const MONTH_LENGTHS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/** A birthday is a day and a month, no year: 'MM-DD' (29 February allowed), or '' when it is not one. */
+export function cleanBirthday(value) {
+  const match = /^(\d{1,2})-(\d{1,2})$/.exec(String(value ?? '').trim());
+  if (!match) return '';
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  if (month < 1 || month > 12 || day < 1 || day > MONTH_LENGTHS[month - 1]) return '';
+  return `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** The tavern characters (narrators) a card lives with: their avatar file names, unique, at most 30. */
+export function cleanNarrators(value) {
+  return [...new Set((Array.isArray(value) ? value : []).map(item => cleanText(item, 200)).filter(Boolean))].slice(0, 30);
+}
+
 /** A clean library character card from loose fields. */
 function characterEntry(id, folderId, name, raw) {
   const aliases = cleanCardAliases(raw?.aliases);
@@ -241,6 +258,8 @@ function characterEntry(id, folderId, name, raw) {
     aliases,
     ...(words ? { words } : {}),
     ...(raw?.gender === 'male' || raw?.gender === 'female' ? { gender: raw.gender } : {}),
+    ...(cleanBirthday(raw?.birthday) ? { birthday: cleanBirthday(raw.birthday) } : {}),
+    ...(raw?.persona !== true && cleanNarrators(raw?.narrators).length ? { narrators: cleanNarrators(raw.narrators) } : {}),
     ...(raw?.persona === true ? { persona: true, ...(cleanText(raw.avatar, 200) ? { avatar: cleanText(raw.avatar, 200) } : {}), ...(cleanRecords(raw.records).length ? { records: cleanRecords(raw.records) } : {}) } : {}),
     sections: raw?.persona === true ? withPersonaSections(normalizeSections(raw?.sections)) : normalizeSections(raw?.sections),
     ...(raw?.lang === 'en' ? { lang: 'en' } : {}),
@@ -530,6 +549,8 @@ function applyCharacterFields(next, card, fields) {
   }
   if (fields.closet !== undefined) { const closet = cleanCloset(fields.closet); if (closet) card.closet = closet; else delete card.closet; }
   if (fields.nameId !== undefined) { const nameId = cleanText(fields.nameId, 80); if (nameId) card.nameId = nameId; else delete card.nameId; }
+  if (fields.narrators !== undefined && !card.persona) { const narrators = cleanNarrators(fields.narrators); if (narrators.length) card.narrators = narrators; else delete card.narrators; }
+  if (fields.birthday !== undefined) { const birthday = cleanBirthday(fields.birthday); if (birthday) card.birthday = birthday; else delete card.birthday; }
   if (fields.gender !== undefined) { if (fields.gender === 'male' || fields.gender === 'female') card.gender = fields.gender; else delete card.gender; }
   if (fields.lang !== undefined) { if (fields.lang === 'en') card.lang = 'en'; else delete card.lang; }
   // the texts were written again in Russian: the old mark «English» goes

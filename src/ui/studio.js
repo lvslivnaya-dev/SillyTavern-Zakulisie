@@ -405,6 +405,7 @@ export function createRelationshipStudio(options = {}) {
   }
 
   function setTab(id) {
+    if (id === 'weather') id = 'calendar'; // the weather lives on the calendar page
     if (id !== tab) lastStatus = { message: '', danger: false };
     tab = id;
     scope = windowOf(id);

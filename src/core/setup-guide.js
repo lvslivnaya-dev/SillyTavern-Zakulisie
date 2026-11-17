@@ -54,7 +54,7 @@ export const SETUP_STEPS = Object.freeze([
     done: facts => facts.hasPlace,
   }),
   Object.freeze({
-    id: 'weather', tab: 'weather', required: false,
+    id: 'weather', tab: 'calendar', required: false,
     title: 'Задайте погоду',
     what: 'Погода влияет на одежду и на то, что видно за окном. Её можно поставить на сегодня или расписать на неделю вперёд.',
     how: [

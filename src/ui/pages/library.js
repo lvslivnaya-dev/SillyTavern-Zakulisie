@@ -908,7 +908,7 @@ ${add}` : (d.fields[field.id] || add);
     // The draft: what the user changed and has not saved yet. Sections are a list of plain objects edited in place.
     if (s.draft?.id !== entry.id) {
       s.draft = { id: entry.id, fields: {
-        name: entry.name, folderId: entry.folderId, aliases: entry.aliases.join(', '), gender: entry.gender ?? '',
+        name: entry.name, folderId: entry.folderId, aliases: entry.aliases.join(', '), gender: entry.gender ?? '', birthday: entry.birthday ?? '', narrators: [...(entry.narrators ?? [])],
         sections: entry.sections.map(section => ({ ...section, keys: [...(section.keys ?? [])] })),
         words: (entry.words ?? []).map(word => ({ ...word })),
         records: recordsToDraft(entry.records),
@@ -981,6 +981,29 @@ ${add}` : (d.fields[field.id] || add);
     const genderPick = element('select', { 'aria-label': 'Пол', className: 'ku-cgender', title: 'Пол героя: модель получает его вместе с остальным о персонаже, а тексты «пришёл / пришла» пишутся в нужном роде.' },
       [['', 'Пол: не указан'], ['female', 'Женский'], ['male', 'Мужской']].map(([value, text]) => element('option', { value, text, selected: value === draft.gender })));
     genderPick.addEventListener('change', () => { draft.gender = genderPick.value; });
+    // The birthday: a day and a month, no year. It stands in the calendar of every chat where this card is switched on.
+    const MONTHS_OF = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+    // Half a date (only the month or only the day) is kept apart from the draft until both are chosen, so a pick does not vanish.
+    const composeBirth = pick => (pick.month && pick.day ? `${String(pick.month).padStart(2, '0')}-${String(pick.day).padStart(2, '0')}` : '');
+    const fromDraft = () => { const [month, day] = /^\d{2}-\d{2}$/.test(draft.birthday ?? '') ? draft.birthday.split('-').map(Number) : [0, 0]; return { id: entry.id, month, day }; };
+    if (s.birth?.id !== entry.id || composeBirth(s.birth) !== (draft.birthday ?? '') && (composeBirth(s.birth) || draft.birthday)) s.birth = fromDraft();
+    const birthMonth = s.birth.month;
+    const birthDay = s.birth.day;
+    const monthLength = month => [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 31;
+    const daySelect = element('select', { 'aria-label': 'День рождения: число', className: 'ku-cbirth-day' }, [element('option', { value: '', text: 'число', selected: !birthDay }),
+      ...Array.from({ length: monthLength(birthMonth || 1) }, (_, index) => element('option', { value: String(index + 1), text: String(index + 1), selected: index + 1 === birthDay }))]);
+    const monthSelect = element('select', { 'aria-label': 'День рождения: месяц', className: 'ku-cbirth-month' }, [element('option', { value: '', text: 'месяц', selected: !birthMonth }),
+      ...MONTHS_OF.map((name, index) => element('option', { value: String(index + 1), text: name, selected: index + 1 === birthMonth }))]);
+    const setBirthday = () => {
+      const month = Number(monthSelect.value) || 0;
+      const day = Math.min(Number(daySelect.value) || 0, month ? monthLength(month) : 31);
+      s.birth = { id: entry.id, month, day };
+      draft.birthday = composeBirth(s.birth);
+      render();
+    };
+    daySelect.addEventListener('change', setBirthday);
+    monthSelect.addEventListener('change', setBirthday);
+    const birthPick = element('div', { className: 'ku-cbirth', role: 'group', title: 'День рождения без года. Он сам встаёт в календарь «День рождения» в тех чатах, где эта карточка включена (у персоны — где она выбрана).' }, [element('span', { className: 'ku-hint', text: '🎂' }), daySelect, monthSelect]);
     const folderPick = entry.persona || emb ? null : element('select', { 'aria-label': 'Папка карточки', className: 'ku-cfolder', title: 'Папка, в которой лежит карточка (фандом или АУ). Перенести её можно прямо здесь, после «Сохранить» она переедет.' },
       folderChoices(draft).map(item => element('option', { value: item.id, text: item.text, selected: item.id === draft.folderId })));
     if (folderPick) folderPick.addEventListener('change', () => { draft.folderId = folderPick.value; render(); });
@@ -1003,10 +1026,26 @@ ${add}` : (d.fields[field.id] || add);
       element('span', { text: jobHere ? jobHere.text : (s.gen.progress || 'Модель пишет карточку…') }),
     ]) : null;
     if (writing && !jobHere) s.gen.badgeEl = writing.lastChild;
+    // The narrators the card lives with: opening a chat with one of them switches the card on there (once; switched off by hand, it stays off).
+    const tavern = snapshot().tavernCharacters ?? [];
+    const nameOfAvatar = avatar => tavern.find(item => item.avatar === avatar)?.name || avatar.replace(/\.[a-z0-9]+$/i, '');
+    const narratorsRow = entry.persona || emb ? null : (() => {
+      const chosen = draft.narrators ?? [];
+      const free = element('select', { 'aria-label': 'Добавить нарратора', className: 'ku-cnarr-add' }, [element('option', { value: '', text: '+ нарратор…' }),
+        ...tavern.filter(item => !chosen.includes(item.avatar)).sort((left, right) => left.name.localeCompare(right.name, 'ru')).map(item => element('option', { value: item.avatar, text: item.name }))]);
+      free.addEventListener('change', () => { if (free.value) { draft.narrators = [...chosen, free.value]; render(); } });
+      return element('div', { className: 'ku-cnarr', role: 'group', 'aria-label': 'Нарраторы карточки', title: 'К каким нарраторам (персонажам таверны) относится карточка. Когда открывается чат с таким нарратором, карточка сама включается в нём. Выключенная вручную в этом чате обратно не включается. День рождения ставится в календарь только в тех чатах, где карточка включена.' }, [
+        element('span', { className: 'ku-hint', text: 'Нарраторы:' }),
+        ...chosen.map(avatar => element('span', { className: 'ku-tag ku-cnarr-chip' }, [element('span', { text: nameOfAvatar(avatar) }), Object.assign(button('×', 'btn icon small', () => { draft.narrators = chosen.filter(item => item !== avatar); render(); }, `Убрать нарратора ${nameOfAvatar(avatar)}`), {})])),
+        free,
+        ...(snapshot().narratorNow?.avatar && !chosen.includes(snapshot().narratorNow.avatar) ? [button(`+ ${snapshot().narratorNow.name || 'этот чат'}`, 'btn small', () => { draft.narrators = [...chosen, snapshot().narratorNow.avatar]; render(); }, 'Добавить нарратора открытого чата')] : []),
+      ]);
+    })();
     const top = element('header', { className: 'ku-ctop' }, [
       element('div', { className: 'ku-cport-box' }, [portraitFrame(entry, portrait), refBox(entry)]),
       element('div', { className: 'ku-ctop-main' }, [
-        element('div', { className: 'ku-cfields' }, [nameInput, aliasInput, genderPick, ...(folderPick ? [folderPick] : [])]),
+        element('div', { className: 'ku-cfields' }, [nameInput, aliasInput, genderPick, birthPick, ...(folderPick ? [folderPick] : [])]),
+        ...(narratorsRow ? [narratorsRow] : []),
         ...(writing ? [writing] : []),
         ...(translateFailed ? [translateFailed] : []),
         ...(leaveNotice ? [leaveNotice] : []),
@@ -1116,7 +1155,7 @@ ${add}` : (d.fields[field.id] || add);
     // ---- The footer
     const persist = async () => {
       await invoke('onLibraryUpdateCharacter', { cardId: entry.id, changes: {
-        name: draft.name, folderId: draft.folderId, aliases: draft.aliases.split(','), gender: draft.gender, sections: draft.sections, words: draft.words, closet: draft.closet, ...(entry.persona ? { records: recordsFromDraft(draft.records) } : {}),
+        name: draft.name, folderId: draft.folderId, aliases: draft.aliases.split(','), gender: draft.gender, birthday: draft.birthday ?? '', ...(entry.persona ? {} : { narrators: draft.narrators ?? [] }), sections: draft.sections, words: draft.words, closet: draft.closet, ...(entry.persona ? { records: recordsFromDraft(draft.records) } : {}),
       } });
       forget();
     };
@@ -2076,6 +2115,12 @@ export const LIBRARY_STYLE = `
 .ku-cfields{display:flex;gap:10px;flex-wrap:wrap}
 .ku-cfields input,.ku-cfields select{flex:1 1 200px;min-width:0;min-height:42px}
 .ku-cfields .ku-cgender{flex:0 1 150px}
+.ku-cbirth{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.ku-cnarr{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+.ku-cnarr-chip{display:inline-flex;align-items:center;gap:4px}
+.ku-cnarr select{flex:0 0 auto;width:auto;max-width:220px;min-height:32px}
+.ku-cfields .ku-cbirth select{flex:0 0 auto;min-width:0;width:auto}
+.ku-cfields .ku-cfolder{flex:0 1 220px;width:auto;min-width:0;max-width:240px;text-overflow:ellipsis}
 .ku-cname{font-size:18px;font-weight:700}
 .ku-ctop-tools{display:flex;gap:6px;align-items:center}
 .ku-ctop-tools .ku-gear{width:38px;height:38px;min-height:38px;border:1px solid var(--k-line);border-radius:12px;background:var(--k-inset);color:var(--k-muted)}

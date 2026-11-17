@@ -33,6 +33,7 @@ import { startThreads } from './ui/threads.js';
 import { startMood } from './ui/mood.js';
 import { startWeatherSound } from './ui/weather-sound.js';
 import { startRelGraph } from './ui/relgraph.js';
+import { startVisualPresets } from './ui/visual-presets.js';
 
 const FONT_BASE = new URL('../../assets/fonts/', import.meta.url);
 
@@ -71,7 +72,7 @@ const MODULES = [
   },
   {
     name: 'свои иконки',
-    start: ({ settings, shared }) => startIconStudio(document, { settings, save: () => globalThis.SillyTavern?.getContext?.().saveSettingsDebounced?.(), hub: shared.hub }),
+    start: ({ settings, shared }) => startIconStudio(document, { settings, save: () => globalThis.SillyTavern?.getContext?.().saveSettingsDebounced?.(), hub: shared.hub, shared }),
   },
   {
     name: 'меню палочки',
@@ -140,6 +141,10 @@ const MODULES = [
   {
     name: 'звуки погоды',
     start: ({ context, settings, shared, bridge }) => startWeatherSound(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared, bridge }),
+  },
+  {
+    name: 'визуальные пресеты',
+    start: ({ context, settings, shared }) => startVisualPresets(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared }),
   },
   {
     name: 'график отношений',

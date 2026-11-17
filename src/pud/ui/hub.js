@@ -24,7 +24,7 @@ export const NATIVE_TABS = ['ai', 'api', 'format', 'user', 'wand'];
 /** Блок «Сливовые приблуды»: всё своё от Закулисья. Неизвестные вкладки попадают сюда же, в конец. */
 export const SLIVA_TABS = ['chips', 'assistants', 'prompts', 'peek', 'repeats', 'threads', 'mood', 'sounds', 'relgraph'];
 /** Блок «Визуал»: идёт после своих приблуд и перед ссылками. */
-export const VISUAL_TABS = ['bg', 'palette', 'moodtheme', 'icons'];
+export const VISUAL_TABS = ['vpresets', 'bg', 'palette', 'moodtheme', 'icons'];
 
 export const HUB_LINKS = [
   { title: 'Документация', icon: 'doc', href: 'https://docs.sillytavern.app/' },

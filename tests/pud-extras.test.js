@@ -710,7 +710,7 @@ test('отношения: страница показывает сводку с�
   const bridge = sceneBridge(scene);
   bridge.scene.overview = ids => relationOverview(state, ids);
   bridge.scene.shifts = limit => recentShifts(state, limit);
-  const settings = { relGraph: { scaleIds: ['trust', 'love'] } };
+  const settings = { relGraph: { scaleIds: ['trust', 'love'], stickers: { mode: 'bars' } } };
   const undo = startRelGraph(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge });
   try {
     const pane = m.tabs.relgraph;
@@ -762,7 +762,7 @@ test('отношения: ⚙ у линии даёт ей свой набор ш
   const bridge = sceneBridge(scene);
   bridge.scene.overview = ids => relationOverview(state, ids);
   bridge.scene.shifts = limit => recentShifts(state, limit);
-  const settings = { relGraph: { scaleIds: ['trust'] } };
+  const settings = { relGraph: { scaleIds: ['trust'], stickers: { mode: 'bars' } } };
   const undo = startRelGraph(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge });
   try {
     const pane = m.tabs.relgraph;
@@ -944,4 +944,44 @@ test('настроение: плашки во вкладке «Кто» по у�
     assert.equal(settings.moods.strips, false);
     assert.equal(settings.moods.stripsHidden, true);
   } finally { undo(); }
+});
+
+test('отношения: стикеры — значок в рамке, который заполняется цветом; свои цвета роста, падения и выше 90, у каждого значка тоже', async () => {
+  const m = mount();
+  const { state } = graphState();
+  const scaleDefs = state.config.scales.map(item => ({ ...item, icon: '<svg class="pud-i"></svg>' }));
+  const scene = { value: { heat: 0 }, lines: relationLines(state), scales: scaleDefs, series: (a, b) => scaleSeries(state, a, b) };
+  const bridge = sceneBridge(scene);
+  bridge.scene.overview = ids => relationOverview(state, ids);
+  bridge.scene.shifts = limit => recentShifts(state, limit);
+  const settings = { relGraph: { scaleIds: ['trust', 'love'] } };
+  let saved = 0;
+  const undo = startRelGraph(m.document, { context: m.context, settings, save() { saved += 1; }, shared: m.shared, bridge });
+  try {
+    const pane = m.tabs.relgraph;
+    // by default: stickers, one per chosen scale, all of one size, inside the frame of the pair
+    const line = pane.querySelector('.pud-rel-line');
+    assert.equal(line.querySelectorAll('.pud-sticker').length, 2);
+    assert.equal(line.querySelector('.pud-rel-bar'), null, 'no bars');
+    const trust = line.querySelector('.pud-sticker');
+    assert.match(trust.getAttribute('style'), /--st-fill:40%/);
+    assert.match(trust.getAttribute('style'), /--st-color:var\(--pud-mint\)/, 'growth: a colour of the palette');
+    assert.ok(trust.querySelector('.pud-scale-mark svg'), 'the icon of the scale inside');
+    // the common colour of growth
+    click(m, pane.querySelector('[data-stk-role="grow"]:not([data-stk-scale])[data-stk-set="pal:butter"]'));
+    assert.equal(settings.relGraph.stickers.colors.grow, 'pal:butter');
+    assert.match(pane.querySelector('.pud-rel-line .pud-sticker').getAttribute('style'), /--st-color:var\(--pud-butter\)/);
+    // the colour of one icon beats the common one; «как у всех» takes it off
+    click(m, pane.querySelector('[data-stk-role="grow"][data-stk-scale="trust"][data-stk-set="pal:lilac"]'));
+    assert.equal(settings.relGraph.stickers.perScale.trust.grow, 'pal:lilac');
+    assert.match(pane.querySelector('.pud-rel-line .pud-sticker').getAttribute('style'), /--st-color:var\(--pud-lilac\)/);
+    click(m, pane.querySelector('[data-stk-role="grow"][data-stk-scale="trust"][data-stk-set=""]'));
+    assert.equal(settings.relGraph.stickers.perScale.trust, undefined);
+    assert.ok(saved >= 3, 'every change is saved');
+    // the way it looks
+    click(m, pane.querySelector('[data-stk-mode="bars"]'));
+    assert.ok(pane.querySelector('.pud-rel-line .pud-rel-bar'));
+    click(m, pane.querySelector('[data-stk-mode="stickers"]'));
+    assert.ok(pane.querySelector('.pud-rel-line .pud-sticker'));
+  } finally { undo(); m.done(); }
 });

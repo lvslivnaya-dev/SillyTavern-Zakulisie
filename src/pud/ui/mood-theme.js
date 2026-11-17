@@ -34,6 +34,13 @@ export function startMoodTheme(doc, { context, settings, save, shared = {}, brid
     };
   };
 
+  // For the visual presets: the rules that are on now and a way to put a set on.
+  const presetApi = {
+    get: () => structuredClone(cfg()),
+    set: value => { settings.moodTheme = normalizeMoodTheme(value); persist(); render(); },
+  };
+  shared.visual = { ...(shared.visual ?? {}), mood: presetApi };
+
   const tint = doc.createElement('div');
   tint.id = TINT_ID;
   tint.setAttribute('aria-hidden', 'true');
@@ -146,6 +153,7 @@ export function startMoodTheme(doc, { context, settings, save, shared = {}, brid
   render();
 
   return () => {
+    if (shared.visual?.mood === presetApi) delete shared.visual.mood;
     view.clearInterval(timer);
     unsubscribeScene();
     paneObserver?.disconnect();

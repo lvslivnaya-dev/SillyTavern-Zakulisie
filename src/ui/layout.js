@@ -18,7 +18,6 @@ export const NAV_GROUPS = Object.freeze([
     ['cards', 'Карточки', 'card'],
     ['wardrobe', 'Гардероб', 'shirt'],
     ['calendar', 'Календарь', 'calendar'],
-    ['weather', 'Погода', 'cloud'],
     ['quests', 'Квесты', 'flag'],
     ['dice', 'Кубик', 'dice'],
     ['names', 'Имена', 'tag'],
@@ -59,14 +58,15 @@ export const WINDOWS = Object.freeze([
   Object.freeze({ id: 'places', title: 'Локации', subtitle: 'Где происходит сцена', iconClass: 'fa-location-dot', tabs: Object.freeze(['places']) }),
   Object.freeze({ id: 'wardrobe', title: 'Гардероб', subtitle: 'Во что одеты герои и что у них с собой', iconClass: 'fa-shirt', tabs: Object.freeze(['wardrobe']) }),
   Object.freeze({ id: 'quests', title: 'Квесты', subtitle: 'Что герои ведут и что откладывают', iconClass: 'fa-flag', tabs: Object.freeze(['quests']) }),
-  Object.freeze({ id: 'calendar', title: 'Календарь', subtitle: 'Время, даты и праздники истории', iconClass: 'fa-calendar-days', tabs: Object.freeze(['calendar']) }),
+  Object.freeze({ id: 'calendar', title: 'Календарь и погода', subtitle: 'Время, даты, праздники и погода истории', iconClass: 'fa-calendar-days', tabs: Object.freeze(['calendar']) }),
   Object.freeze({ id: 'media', title: 'Медиа', subtitle: 'музыка, видео и другое', iconClass: 'fa-music', tabs: Object.freeze(['player', 'songs']) }),
   // Everything else: the dice, names, weather and the machinery. The persona window is the former Pudrenitsa's one (Kulisy only embeds the card editor in it).
-  Object.freeze({ id: 'settings', title: 'Настройки Закулисья', subtitle: 'Тонкая настройка', iconClass: 'fa-gear', tabs: Object.freeze(['weather', 'dice', 'names', 'setup', 'journal', 'lorebooks', 'leaks', 'settings']) }),
+  Object.freeze({ id: 'settings', title: 'Настройки Закулисья', subtitle: 'Тонкая настройка', iconClass: 'fa-gear', tabs: Object.freeze(['dice', 'names', 'setup', 'journal', 'lorebooks', 'leaks', 'settings']) }),
 ]);
 
 /** The window a tab lives in (the settings window for anything unknown). */
 export function windowOf(tabId) {
+  if (tabId === 'weather') tabId = 'calendar'; // the weather is part of the calendar page
   return WINDOWS.find(item => item.tabs.includes(tabId)) ?? WINDOWS.at(-1);
 }
 

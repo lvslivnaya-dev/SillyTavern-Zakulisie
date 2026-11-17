@@ -507,3 +507,42 @@
 .ku-wr-label { flex: 0 0 52px; font-size: .75em; letter-spacing: .06em; text-transform: uppercase; opacity: .6; }
 .ku-wr-inline { margin-bottom: 0; flex: 1 1 auto; }
 .ku-wr-modes { padding-bottom: 2px; border-bottom: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent); margin-bottom: 8px; }
+
+/* «Рассказчику»: закреплённые и сохранённые указания (тесно: два ряда кнопок, списки сворачиваются, строка = текст в две строки и маленькие кнопки) */
+.ku-dir-notes { gap: 6px; }
+.ku-dir-noteacts, .ku-dir-notetiming { display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; }
+.ku-dir-noteacts .ku-dir-btn { flex: 1 1 0; min-width: 0; padding-left: 4px; padding-right: 4px; white-space: nowrap; }
+.ku-dir-every { width: 52px; flex: 0 0 52px; }
+.ku-dir-fold { width: 100%; text-align: left; font-weight: 600; }
+.ku-dir-notelist { display: flex; flex-direction: column; gap: 4px; max-height: 190px; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.ku-dir-noterow { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+.ku-dir-notebody { flex: 1 1 auto; min-width: 0; }
+.ku-dir-notetext { font-size: .88em; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.ku-dir-notemeta { font-size: .68em; opacity: .6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ku-dir-notebtns { display: flex; flex: 0 0 auto; gap: 2px; }
+.ku-dir-mini { padding: 0 6px; min-width: 0; min-height: 0; line-height: 22px; height: 24px; }
+.ku-dir-mini:disabled { opacity: .5; cursor: default; }
+
+/* Правка указания на месте */
+.ku-dir-noteedit { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 4px; border: 1px dashed var(--SmartThemeBorderColor); border-radius: 8px; }
+.ku-dir-noteedit-text { width: 100%; box-sizing: border-box; resize: vertical; min-height: 3.2em; }
+
+/* «Запланировать на потом» */
+.ku-dir-plan { gap: 6px; }
+.ku-dir-planspan { display: flex; gap: 4px; align-items: center; flex-wrap: nowrap; }
+.ku-dir-plan-unit { flex: 1 1 auto; min-width: 0; width: auto; }
+.ku-dir-plan-ico { flex: 0 0 auto; line-height: 24px; }
+
+/* Погода в шторке: неделя вперёд, срок, температура */
+.ku-wx-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.ku-wx-day { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 3px 1px; min-width: 0; border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; line-height: 1.15; }
+.ku-wx-day.on { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 28%, transparent); border-color: var(--SmartThemeQuoteColor); }
+.ku-wx-day.first { box-shadow: inset 0 0 0 1px var(--SmartThemeQuoteColor); }
+.ku-wx-lab { font-size: .62em; opacity: .7; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ku-wx-ico { font-size: 1.15em; }
+.ku-wx-t { font-size: .68em; opacity: .85; min-height: 1em; }
+.ku-wx-temp { width: 4.6em; flex: 0 0 4.6em; }
+.ku-wx-kinds { flex-wrap: wrap; }
+
+/* Длинный текст в полях шторки переносится на новую строку и растёт вниз, а не уходит вбок */
+#ku-scene-chips textarea.ku-dir-wrap { resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.3; min-height: 2.2em; box-sizing: border-box; }

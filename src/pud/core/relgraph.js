@@ -152,11 +152,86 @@ export const RELGRAPH_DEFAULTS = Object.freeze({
 });
 
 const lineIds = (value, max) => (Array.isArray(value) ? [...new Set(value.filter(item => typeof item === 'string' && item))].slice(0, max) : []);
-const lineScaleMap = value => Object.fromEntries(Object.entries(value && typeof value === 'object' ? value : {}).slice(0, 100).map(([id, list]) => [id, lineIds(list, 5)]));
+/** How many scales (stickers) one line may show: every scale of the chat. */
+export const SCALES_PER_LINE = 30;
+const lineScaleMap = value => Object.fromEntries(Object.entries(value && typeof value === 'object' ? value : {}).slice(0, 100).map(([id, list]) => [id, lineIds(list, SCALES_PER_LINE)]));
+
+// ───────── Стикеры: значок шкалы, который заполняется цветом по мере роста или падения ─────────
+
+/** The value from which a sticker takes its «extra» colour (above it, both ways). */
+export const STICKER_THRESHOLD = 90;
+/** Roles of a colour: growth, fall, and the extra ones above the threshold. */
+export const STICKER_ROLES = Object.freeze([
+  ['grow', 'Рост', 'Чем заполняется, когда значение растёт'],
+  ['fall', 'Падение', 'Чем заполняется, когда значение падает'],
+  ['growMax', `Рост выше ${STICKER_THRESHOLD}`, 'Другой цвет, когда значение выше 90 (необязательно)'],
+  ['fallMax', `Падение ниже −${STICKER_THRESHOLD}`, 'Другой цвет, когда значение ниже −90 (необязательно)'],
+]);
+/** Colours of the palette a sticker may take: key → [label, css variable]. A colour is kept as a palette key («pal:mint»), so it follows the palette. */
+export const STICKER_PALETTE = Object.freeze([
+  ['accent', 'Нажатое', '--pud-rose'], ['accent2', 'Значки', '--pud-rose2'], ['accent3', 'Ореол', '--pud-rose3'],
+  ['mint', 'Включено', '--pud-mint'], ['butter', 'Избранное', '--pud-butter'], ['lilac', 'Сиреневый', '--pud-lilac'],
+  ['danger', 'Опасное', '--pud-danger'], ['ink', 'Текст', '--pud-ink'], ['ink2', 'Текст 2', '--pud-ink2'],
+]);
+export const STICKER_DEFAULTS = Object.freeze({ mode: 'stickers', colors: { grow: 'pal:mint', fall: 'pal:danger', growMax: '', fallMax: '' }, perScale: {} });
+const ROLE_IDS = STICKER_ROLES.map(([id]) => id);
+const HEX = /^#[0-9a-f]{6}$/;
+
+/** A colour as it is kept: '#rrggbb', 'pal:<key>' or '' (none). Anything else is nothing. */
+export function cleanStickerColor(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (HEX.test(text)) return text;
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/.exec(text);
+  if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`;
+  if (text.startsWith('pal:') && STICKER_PALETTE.some(([key]) => key === text.slice(4))) return text;
+  return '';
+}
+
+/** A kept colour → a CSS value (a hex, or the variable of the palette colour). */
+export function stickerCss(value) {
+  const text = cleanStickerColor(value);
+  if (!text) return '';
+  if (text.startsWith('pal:')) return `var(${STICKER_PALETTE.find(([key]) => key === text.slice(4))[2]})`;
+  return text;
+}
+
+function cleanRoles(raw) {
+  const out = {};
+  for (const id of ROLE_IDS) { const color = cleanStickerColor(raw?.[id]); if (color) out[id] = color; }
+  return out;
+}
+
+/** Settings of the stickers: { mode: 'stickers' | 'bars', colors: {role: colour}, perScale: { scaleId: {role: colour} } }. */
+export function normalizeStickers(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const colors = { ...STICKER_DEFAULTS.colors, ...cleanRoles(source.colors) };
+  // an extra colour that was cleared stays cleared (it is optional)
+  for (const id of ['growMax', 'fallMax']) if (source.colors && Object.hasOwn(source.colors, id) && !cleanStickerColor(source.colors[id])) colors[id] = '';
+  const perScale = {};
+  for (const [id, roles] of Object.entries(source.perScale && typeof source.perScale === 'object' ? source.perScale : {}).slice(0, 60)) {
+    const clean = cleanRoles(roles);
+    if (id && Object.keys(clean).length) perScale[id] = clean;
+  }
+  return { mode: source.mode === 'bars' ? 'bars' : 'stickers', colors, perScale };
+}
+
+/**
+ * How a sticker looks for a value from −100 to 100: { fill: 0–100 (percent of the sticker), dir: 'up' | 'down' | 'none', extra: bool, color: css }.
+ * The colour of the scale itself wins over the common one; above ±90 the «extra» colour is taken when one is set, else the usual one.
+ */
+export function stickerLook(value, scaleId, stickers) {
+  const cfg = normalizeStickers(stickers);
+  const number = Math.max(-100, Math.min(100, Number(value) || 0));
+  const up = number > 0;
+  const role = (base) => cfg.perScale[scaleId]?.[base] || cfg.colors[base] || '';
+  const extra = Math.abs(number) > STICKER_THRESHOLD && Boolean(role(up ? 'growMax' : 'fallMax'));
+  const color = role(extra ? (up ? 'growMax' : 'fallMax') : (up ? 'grow' : 'fall'));
+  return { fill: Math.round(Math.abs(number)), dir: number > 0 ? 'up' : number < 0 ? 'down' : 'none', extra, color: stickerCss(color) };
+}
 
 export function normalizeRelGraph(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
-  const ids = value => (Array.isArray(value) ? [...new Set(value.map(String))].slice(0, 5) : []);
+  const ids = value => (Array.isArray(value) ? [...new Set(value.map(String))].slice(0, SCALES_PER_LINE) : []);
   return {
     lineId: typeof source.lineId === 'string' ? source.lineId : '',
     // линии, которые не отслеживаем, и закреплённые наверху сводки
@@ -166,5 +241,6 @@ export function normalizeRelGraph(raw) {
     scaleIds: ids(source.scaleIds).length ? ids(source.scaleIds) : [...RELGRAPH_DEFAULTS.scaleIds],
     pinned: (Array.isArray(source.pinned) ? source.pinned : []).filter(item => item && typeof item.lineId === 'string')
       .map(item => ({ lineId: item.lineId, scaleIds: ids(item.scaleIds), place: item.place === 'rail' ? 'rail' : 'widget' })).slice(0, 8),
+    stickers: normalizeStickers(source.stickers),
   };
 }

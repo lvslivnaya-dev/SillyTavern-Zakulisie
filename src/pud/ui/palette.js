@@ -85,6 +85,24 @@ export function startPalette(doc, { settings, save, shared = {}, generate }) {
     doc.body.classList.remove(DARK_CLASS, ...Object.values(NO_PAW_CLASSES));
   }];
 
+  // For the visual presets: what is on now and how to put a palette (and the paws) on.
+  const presetApi = {
+    get: () => ({ id: settings.palette, custom: custom().find(item => item.id === settings.palette) ?? null, paws: { ...settings.paws } }),
+    set: ({ id, custom: copy = null, paws = null } = {}) => {
+      let target = id;
+      if (copy) {
+        const clean = sanitizeCustomPalettes([copy])[0];
+        if (clean) { settings.customPalettes = [...custom().filter(item => item.id !== clean.id), clean]; target = clean.id; }
+      }
+      if (known(target)) settings.palette = target;
+      if (paws) { settings.paws = { ...settings.paws, ...paws }; applyPaws(); }
+      reapply();
+      save();
+      presetApi.redraw?.();
+    },
+  };
+  shared.visual = { ...(shared.visual ?? {}), palette: presetApi };
+  undo.push(() => { if (shared.visual?.palette === presetApi) delete shared.visual.palette; });
   const tab = shared.hub?.addTab?.('palette', 'Палитра', 'wand');
   if (tab) {
     undo.push(() => tab.remove());
@@ -180,6 +198,7 @@ export function startPalette(doc, { settings, save, shared = {}, generate }) {
       }
     };
 
+    presetApi.redraw = () => { deleteArmed = false; render(); };
     render();
 
     tab.pane.addEventListener('keydown', event => {

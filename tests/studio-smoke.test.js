@@ -656,6 +656,216 @@ test('calendar page: month grid with events, a day, the editor and the generator
   } finally { studio?.destroy(); }
 });
 
+test('calendar page with the weather: icons in the month, a day or a stretch set by hand or handed back to the forecast', async () => {
+  const snapshot = {
+    ...sampleState(),
+    world: { clock: { day: 2, time: '14:20' } },
+    calendarToday: '2025-04-08',
+    calendar: { anchor: '2025-04-07', events: [] },
+    weatherSet: null,
+    weatherPlan: { climateId: 'tokyo', month: 0, scenarios: [{ id: 'hand-4-1-heat', name: 'Жара', startDay: 4, days: 1, kind: 'heat', temp: 35, text: '', manual: true }] },
+    weatherClimates: [{ id: 'tokyo', name: 'Токио', builtin: true, months: Array.from({ length: 12 }, () => ({ min: 10, max: 20, kinds: { clear: 1 } })) }],
+  };
+  const calls = [];
+  let studio;
+  const errors = captureErrors(() => {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, open: true, layout: { mode: 'window', tab: 'calendar' }, callbacks: {
+      onWeatherPaint: payload => { calls.push(['paint', payload]); return Promise.resolve(); },
+      onWeatherClear: payload => { calls.push(['clear', payload]); return Promise.resolve(); },
+    } });
+  });
+  try {
+    assert.deepEqual(errors, [], errors.join('\n'));
+    const shadow = studio.element.shadowRoot;
+    assert.ok(shadow.querySelectorAll('.ku-cal-wx').length >= 20, 'the days of the story have their weather in the grid');
+    const cell = day => [...shadow.querySelectorAll('.ku-cal-cell')].find(item => new RegExp(`${day} апреля 2025`).test(item.getAttribute('aria-label')));
+    assert.match(cell(10).getAttribute('aria-label'), /Погода: жара, \+35°.*\(вручную\)/, 'a hand-set day says so');
+    assert.equal(cell(6).querySelector('.ku-cal-wx'), null, 'before the story there is no weather');
+    cell(9).click();
+    const box = () => shadow.querySelector('.ku-cal-wxbox');
+    assert.ok(box(), 'the weather of the chosen day is under its events');
+    [...box().querySelectorAll('.ku-wx-kind')].find(item => /Дождь/.test(item.textContent)).click();
+    const temp = box().querySelector('input[type="number"]');
+    temp.value = '8';
+    temp.dispatchEvent(new window.Event('input'));
+    const to = box().querySelector('input[type="date"]');
+    to.value = '2025-04-11';
+    to.dispatchEvent(new window.Event('input'));
+    [...box().querySelectorAll('button')].find(item => item.textContent === 'Поставить погоду').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.at(-1), ['paint', { startDay: 3, days: 3, kind: 'rain', temp: '8', text: '' }]);
+    cell(9).click();
+    [...box().querySelectorAll('button')].find(item => item.textContent === 'Вернуть прогнозу').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.at(-1), ['clear', { startDay: 3, days: 1 }]);
+    // the weather can be hidden from the grid
+    [...shadow.querySelectorAll('button')].find(item => /Погода: видна/.test(item.textContent)).click();
+    assert.equal(shadow.querySelectorAll('.ku-cal-wx').length, 0);
+  } finally { studio?.destroy(); }
+});
+
+test('the weather planner under the calendar: stretches of a day, a template, the generator, and a birthday of a card among the events', async () => {
+  const snapshot = {
+    ...sampleState(),
+    world: { clock: { day: 2, time: '14:20' } },
+    calendarToday: '2025-04-08',
+    calendar: { anchor: '2025-04-07', events: [{ id: 'bday:c1', title: 'День рождения: Юта', date: '1600-04-12', repeat: 'yearly', kind: 'birthday', intensity: 2, fromCard: true, cardId: 'c1' }] },
+    weatherSet: null,
+    weatherPlan: { climateId: '', month: 0, scenarios: [] },
+    weatherClimates: [],
+  };
+  const calls = [];
+  let studio;
+  const errors = captureErrors(() => {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, open: true, layout: { mode: 'window', tab: 'calendar' }, callbacks: {
+      onWeatherPaint: payload => { calls.push(['paint', payload]); return Promise.resolve(); },
+      onWeatherTemplate: payload => { calls.push(['template', payload]); return Promise.resolve(); },
+      onWeatherGenerateDays: async payload => { calls.push(['generate', payload]); return { days: [{ parts: [{ from: '00:00', kind: 'rain', temp: 9, text: 'морось' }] }, { parts: [{ from: '00:00', kind: 'clear', temp: 12, text: '' }, { from: '15:00', kind: 'wind', temp: 10, text: 'свежо' }] }] }; },
+      onWeatherDays: payload => { calls.push(['days', payload]); return Promise.resolve(); },
+    } });
+  });
+  try {
+    assert.deepEqual(errors, [], errors.join('\n'));
+    const shadow = studio.element.shadowRoot;
+    const cell = day => [...shadow.querySelectorAll('.ku-cal-cell')].find(item => new RegExp(`${day} апреля 2025`).test(item.getAttribute('aria-label')));
+    const plan = () => shadow.querySelector('.ku-wxplan');
+    assert.ok(plan(), 'the planner is on the same page as the calendar');
+    assert.ok(shadow.querySelector('.studio').classList.contains('single'), 'one window, one page: no tabs');
+    // a birthday from a card stands among the events, with a link to the card instead of the edit buttons
+    cell(12).click();
+    assert.match(shadow.textContent, /День рождения: Юта/);
+    assert.ok([...shadow.querySelectorAll('.ku-cal-event button')].some(item => item.textContent === 'К карточке'));
+    assert.ok(![...shadow.querySelectorAll('.ku-cal-event button')].some(item => item.textContent === 'Изменить'));
+    // a day with up to three stretches of weather
+    cell(10).click();
+    const section = () => [...plan().querySelectorAll('.ku-wx-part')];
+    assert.equal(section().length, 1);
+    [...plan().querySelectorAll('button')].find(item => /погода меняется в течение дня/.test(item.textContent)).click();
+    assert.equal(section().length, 2);
+    const pick = (row, kind) => { const select = row.querySelector('select'); select.value = kind; select.dispatchEvent(new window.Event('change')); };
+    pick(section()[0], 'clear');
+    pick(section()[1], 'rain');
+    const time = section()[1].querySelector('input[type="time"]');
+    time.value = '18:30';
+    time.dispatchEvent(new window.Event('input'));
+    [...plan().querySelectorAll('.ku-cal-quick button')].find(item => item.textContent === '3 дня').click();
+    [...plan().querySelectorAll('button')].find(item => item.textContent === 'Поставить погоду').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.at(-1)[1].parts.map(part => [part.from, part.kind]), [['00:00', 'clear'], ['18:30', 'rain']]);
+    assert.equal(calls.at(-1)[1].startDay, 4);
+    assert.equal(calls.at(-1)[1].days, 3);
+    // a ready template for one day starts with the first chosen day
+    [...plan().querySelectorAll('.ku-wxtpl button')].find(item => item.textContent === 'Ясно, к вечеру дождь').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.at(-1), ['template', { templateId: 'd-eveningrain', startDay: 4 }]);
+    assert.ok([...plan().querySelectorAll('.ku-wxtpl-head')].map(item => item.textContent).join('|').includes('На 7 дней'), 'templates for one, three and seven days');
+    // the generator: a city or a wish for the chosen days, a preview, then it is set
+    const wish = plan().querySelector('textarea');
+    wish.value = 'Токио, ранняя осень';
+    wish.dispatchEvent(new window.Event('input'));
+    [...plan().querySelectorAll('button')].find(item => /^Сочинить на/.test(item.textContent)).click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.find(item => item[0] === 'generate')[1], { description: 'Токио, ранняя осень', startDay: 4, count: 3 });
+    assert.equal(plan().querySelectorAll('.ku-wxgen-day').length, 2);
+    assert.match(plan().querySelector('.ku-wxgen').textContent, /с 15:00/);
+    [...plan().querySelectorAll('button')].find(item => item.textContent === 'Поставить эту погоду').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(calls.at(-1)[0], 'days');
+    assert.equal(calls.at(-1)[1].startDay, 4);
+    assert.equal(calls.at(-1)[1].days.length, 2);
+  } finally { studio?.destroy(); }
+});
+
+test('the year generator window: «Только праздники» asks what kind, needs a fandom when it is ticked, and its drafts stand in a clean column', async () => {
+  const snapshot = { ...sampleState(), world: { clock: { day: 2, time: '14:20' } }, calendarToday: '2025-04-08', calendar: { anchor: '2025-04-07', events: [] } };
+  const calls = [];
+  let studio;
+  const errors = captureErrors(() => {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, open: true, layout: { mode: 'window', tab: 'calendar' }, callbacks: {
+      onCalendarGenerateHolidays: async payload => { calls.push(payload); return { name: 'Праздники', startMonth: 1, events: [{ title: 'Новый год', date: '01-01', repeat: 'yearly', kind: 'holiday' }, { title: 'Танабата, очень-очень длинное название праздника, которое занимает несколько строк', date: '07-07', repeat: 'yearly', kind: 'holiday', note: 'Звёзды' }] }; },
+    } });
+  });
+  try {
+    assert.deepEqual(errors, [], errors.join('\n'));
+    const shadow = studio.element.shadowRoot;
+    const press = text => [...shadow.querySelectorAll('button')].find(item => item.textContent === text);
+    press('✨ Сгенерировать год').click();
+    press('Только праздники').click();
+    assert.ok(shadow.querySelector('.ku-cal-layer input[type="checkbox"]'));
+    // the universe is ticked, but no fandom named: it is refused
+    const labels = () => [...shadow.querySelectorAll('.ku-cal-layer .ku-cal-check')];
+    labels().find(item => /вселенной/.test(item.textContent)).querySelector('input').click();
+    press('Найти праздники').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(calls.length, 0, 'no fandom: nothing is asked');
+    assert.match(shadow.textContent, /Впишите фандом/);
+    const fandom = shadow.querySelector('.ku-cal-layer input[aria-label="Фандом"]');
+    fandom.value = 'Магическая битва';
+    fandom.dispatchEvent(new window.Event('input'));
+    press('Найти праздники').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls[0], { international: true, place: '', fandom: 'Магическая битва' });
+    const drafts = [...shadow.querySelectorAll('.ku-cal-draft')];
+    assert.equal(drafts.length, 2);
+    for (const row of drafts) assert.ok(row.firstElementChild.matches('input[type="checkbox"]'), 'the tick is the first cell of its row, always in the same column');
+  } finally { studio?.destroy(); }
+});
+
+test('wardrobe: «Шкафы» — собрать шкаф персонажу: вещи и образы по нажатию, всё показанное, надетое сейчас; окно открывается сразу на нужном шкафе', async () => {
+  const cards = [
+    { id: 'w1', shelf: 'characters', gender: 'male', category: 'top', name: 'Рубашка', description: '', image: '' },
+    { id: 'w2', shelf: 'characters', gender: 'male', category: 'outerwear', name: 'Пальто', description: '', image: '' },
+    { id: 'w3', shelf: 'characters', gender: 'male', category: 'top', name: 'Только Рана', description: '', image: '' },
+  ];
+  const snapshot = {
+    ...sampleState(),
+    wardrobe: { cards, looks: [{ id: 'l1', shelf: 'characters', name: 'Выходной', cardIds: ['w2'] }] },
+    world: { clock: { day: 1 }, wardrobe: { ent1: { cardIds: ['w1'], outfit: '' } } },
+    cardByEntity: { ent1: { id: 'c1', name: 'Мидзуки' } },
+    locationLibrary: { folders: [{ id: 'f', name: 'Папка' }], locations: [], items: [], characters: [
+      { id: 'c1', folderId: 'f', name: 'Мидзуки', aliases: [], sections: [], closet: { cardIds: ['w1'], lookIds: [] } },
+      { id: 'c2', folderId: 'f', name: 'Ран', aliases: [], sections: [], closet: { cardIds: ['w3'], lookIds: [], ownIds: ['w3'] } },
+    ] },
+  };
+  const calls = [];
+  let studio;
+  const errors = captureErrors(() => {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, open: true, layout: { mode: 'window', tab: 'wardrobe' }, callbacks: {
+      onLibraryUpdateCharacter: payload => { calls.push(payload); return Promise.resolve(); },
+    } });
+  });
+  try {
+    assert.deepEqual(errors, [], errors.join('\n'));
+    const shadow = studio.element.shadowRoot;
+    [...shadow.querySelectorAll('.ku-wsb')].find(item => /^Шкафы/.test(item.textContent)).click();
+    assert.ok(shadow.querySelector('.ku-closets'), 'the section «Шкафы»');
+    // the first one is the character who is in the chat; Ran is not in the chat
+    assert.match(shadow.querySelector('.ku-closet-who .ku-wsb.on').textContent, /Мидзуки/);
+    assert.match(shadow.querySelector('.ku-closet-main').textContent, /Шкаф: Мидзуки/);
+    const tiles = () => [...shadow.querySelectorAll('.ku-ctile')];
+    assert.deepEqual(tiles().map(item => item.querySelector('.ku-cap').textContent), ['Рубашка', 'Пальто'], 'a thing that is personal to another character is not offered');
+    // a tap puts a thing into the closet
+    tiles().find(item => /Пальто/.test(item.textContent)).click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.at(-1), { cardId: 'c1', changes: { closet: { cardIds: ['w1', 'w2'], lookIds: [], ownIds: [] } } });
+    // an outfit
+    [...shadow.querySelectorAll('.ku-closet-looks button')].find(item => /Выходной/.test(item.textContent)).click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.at(-1).changes.closet.lookIds, ['l1']);
+    // what is worn now goes in as well; «clear» empties the closet
+    assert.ok([...shadow.querySelectorAll('button')].some(item => /Взять то, что надето сейчас \(1\)/.test(item.textContent)));
+    [...shadow.querySelectorAll('button')].find(item => item.textContent === 'Очистить шкаф').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.at(-1).changes.closet, { cardIds: [], lookIds: [], ownIds: [] });
+    // another character
+    [...shadow.querySelectorAll('.ku-closet-who .ku-wsb')].find(item => /Ран/.test(item.textContent)).click();
+    assert.match(shadow.querySelector('.ku-closet-main').textContent, /Шкаф: Ран/);
+    assert.ok(tiles().some(item => /Только Рана/.test(item.textContent)), 'his own piece is his');
+  } finally { studio?.destroy(); }
+});
+
 test('names page: the library card, adding a name, editing a form, the switches', async () => {
   const calls = [];
   const snapshot = {
@@ -718,61 +928,6 @@ test('names page: the library card, adding a name, editing a form, the switches'
     assert.equal(calls.filter(call => call[0] === 'remove').length, 0, 'the first press deletes nothing');
     remove().click();
     assert.deepEqual(calls.at(-1), ['remove', { ids: ['n1'] }]);
-  } finally { studio?.destroy(); }
-});
-
-test('weather page: now, the week, the climate, ready scenarios, setting by hand', async () => {
-  const calls = [];
-  const snapshot = {
-    ...sampleState(),
-    world: { clock: { day: 5, time: '14:20' } },
-    weather: { kind: 'rain', temp: 14, text: 'моросит', source: 'set' },
-    weatherSet: { kind: 'rain', temp: 14, text: 'моросит', day: 5 },
-    weatherPlan: { climateId: 'tokyo', month: 0, scenarios: [{ id: 'typhoon-8', name: 'Тайфун', startDay: 8, days: 2, kind: 'storm', tempDelta: -3, text: 'шквал' }] },
-    weatherDated: false,
-    weatherClimates: [{ id: 'tokyo', name: 'Токио и центральная Япония', builtin: true, months: Array.from({ length: 12 }, () => ({ min: 2, max: 10, kinds: { clear: 5, rain: 2 } })) }],
-    weatherScenarios: [{ id: 'typhoon', name: 'Тайфун', days: 2, kind: 'storm', tempDelta: -3, text: 'шквал' }],
-    weatherWeek: [
-      { day: 5, date: '', kind: 'rain', temp: 14, source: 'set' },
-      { day: 6, date: '', kind: 'clear', temp: 9, source: 'forecast' },
-      { day: 8, date: '', kind: 'storm', temp: 6, source: 'scenario', scenario: 'Тайфун' },
-    ],
-  };
-  let studio;
-  const errors = captureErrors(() => {
-    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, open: true, layout: { mode: 'window', tab: 'weather' }, callbacks: {
-      onSetWeather: payload => { calls.push(['set', payload]); return Promise.resolve(); },
-      onWeatherScenario: payload => { calls.push(['scenario', payload]); return Promise.resolve(); },
-      onWeatherPlan: payload => { calls.push(['plan', payload]); return Promise.resolve(); },
-      onWeatherScenarioRemove: payload => { calls.push(['remove', payload]); return Promise.resolve(); },
-    } });
-  });
-  try {
-    assert.deepEqual(errors, [], errors.join('\n'));
-    const root = studio.element.shadowRoot;
-    assert.match(root.querySelector('.ku-wx-now').textContent, /Дождь · \+14°/);
-    assert.match(root.querySelector('.ku-wx-now').textContent, /моросит/);
-    assert.equal(root.querySelectorAll('.ku-wx-day').length, 3);
-    assert.match(root.querySelector('.ku-wx-day.scenario').textContent, /«Тайфун»/);
-    assert.match(root.textContent, /Даты истории нет/, 'no date: the month is asked for');
-    // By hand: pick a kind, type, apply.
-    [...root.querySelectorAll('.ku-wx-kinds button')].find(item => /Снег/.test(item.textContent)).click();
-    const [temp, text] = root.querySelectorAll('.ku-wx-fields input');
-    temp.value = '-2'; temp.dispatchEvent(new window.Event('input'));
-    text.value = 'мелкий снег'; text.dispatchEvent(new window.Event('input'));
-    [...root.querySelectorAll('button')].find(item => item.textContent === 'Задать погоду').click();
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.deepEqual(calls.at(-1), ['set', { kind: 'snow', temp: '-2', text: 'мелкий снег', lock: false }]);
-    // A ready scenario from a day.
-    const start = root.querySelector('.ku-wx-scenario input');
-    start.value = '9'; start.dispatchEvent(new window.Event('input'));
-    [...root.querySelectorAll('.ku-wx-scenario button')][0].click();
-    assert.deepEqual(calls.at(-1), ['scenario', { templateId: 'typhoon', startDay: '9' }]);
-    // Hand the weather back to the forecast; take a scenario out.
-    [...root.querySelectorAll('button')].find(item => item.textContent === 'Вернуть прогнозу').click();
-    assert.deepEqual(calls.at(-1), ['set', { clear: true }]);
-    root.querySelector('.ku-fact button').click();
-    assert.deepEqual(calls.at(-1), ['remove', { id: 'typhoon-8' }]);
   } finally { studio?.destroy(); }
 });
 
@@ -1081,7 +1236,7 @@ test('settings window: one flat list of pages, no group headings', async () => {
   const saved = [];
   let studio;
   const errors = captureErrors(() => {
-    studio = createRelationshipStudio({ store: { getSnapshot: () => sampleState() }, open: true, layout: { mode: 'window', tab: 'weather' }, callbacks: {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => sampleState() }, open: true, layout: { mode: 'window', tab: 'dice' }, callbacks: {
       onLayoutChange: value => { saved.push(value); },
     } });
   });
@@ -1090,7 +1245,8 @@ test('settings window: one flat list of pages, no group headings', async () => {
     const root = studio.element.shadowRoot;
     assert.equal(root.querySelectorAll('.nav-fold').length, 0, 'the settings window is one flat list: no «Мир» / «Система» headings');
     const items = [...root.querySelectorAll('.nav button .nav-label')].map(node => node.textContent);
-    assert.ok(items.includes('Имена') && items.includes('Погода') && items.includes('Настройки'));
+    assert.ok(items.includes('Имена') && items.includes('Настройки'));
+    assert.ok(!items.includes('Погода'), 'the weather moved to the calendar window');
     assert.equal(root.querySelector('.hero .section-title'), null, 'and no eyebrow over the title');
   } finally { studio?.destroy(); }
 });

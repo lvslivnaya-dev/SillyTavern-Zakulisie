@@ -204,7 +204,7 @@ export function createWeatherPages(ctx) {
     return view;
   }
 
-  return { renderWeather };
+  return { renderWeather, renderClimate };
 }
 
 export const WEATHER_STYLE = `

@@ -22,7 +22,7 @@ export const WEATHER_KINDS = Object.freeze({
   heat: { label: 'Жара', icon: '🌡', en: 'oppressive heat' },
 });
 export const WEATHER_KIND_IDS = Object.freeze(Object.keys(WEATHER_KINDS));
-export const WEATHER_LIMITS = Object.freeze({ text: 160, temp: 60, scenarios: 40, days: 60, name: 60, climates: 30 });
+export const WEATHER_LIMITS = Object.freeze({ text: 160, temp: 60, scenarios: 80, days: 366, name: 60, climates: 30 });
 export const MONTH_NAMES = Object.freeze(['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']);
 
 const PART_OFFSET = Object.freeze({ dawn: -3, morning: -2, day: 0, evening: -2, dusk: -2, night: -4 });
@@ -132,20 +132,63 @@ export function normalizeClimates(list) {
   return out;
 }
 
+const toMinutes = value => {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? '').trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return hours < 24 && minutes < 60 ? hours * 60 + minutes : null;
+};
+const toClock = minutes => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+export const WEATHER_PARTS_MAX = 3;
+
+/**
+ * The weather of ONE day in up to three stretches: [{ from: 'HH:MM', kind, temp?, tempDelta?, text }]. The first one starts the day (00:00),
+ * the next ones say when it changes. `temp` is fixed, `tempDelta` shifts the forecast's temperature.
+ */
+export function cleanWeatherParts(raw) {
+  const found = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!WEATHER_KIND_IDS.includes(item?.kind)) continue;
+    const from = toMinutes(item.from ?? '00:00');
+    if (from == null) continue;
+    const temp = cleanTemp(item.temp);
+    const delta = Math.round(Number(item.tempDelta));
+    found.push({
+      from, kind: item.kind,
+      ...(temp != null ? { temp } : {}),
+      ...(temp == null && Number.isFinite(delta) && delta ? { tempDelta: Math.max(-40, Math.min(40, delta)) } : {}),
+      text: clip(item.text, WEATHER_LIMITS.text),
+    });
+  }
+  found.sort((left, right) => left.from - right.from);
+  const unique = found.filter((part, index) => index === 0 || part.from !== found[index - 1].from).slice(0, WEATHER_PARTS_MAX);
+  if (unique.length) unique[0].from = 0; // the first stretch is the start of the day
+  return unique.map(part => ({ ...part, from: toClock(part.from) }));
+}
+
 function cleanScenario(raw) {
-  if (!raw || !WEATHER_KIND_IDS.includes(raw.kind)) return null;
+  if (!raw) return null;
+  let parts = cleanWeatherParts(raw.parts);
+  const kind = WEATHER_KIND_IDS.includes(raw.kind) ? raw.kind : parts[0]?.kind;
+  if (!kind) return null;
   const startDay = wholeDay(raw.startDay);
   const days = Math.min(WEATHER_LIMITS.days, wholeDay(raw.days));
   if (!startDay || !days) return null;
-  const temp = cleanTemp(raw.temp);
-  const delta = Math.round(Number(raw.tempDelta));
+  // One stretch is just the weather of the scenario itself.
+  const only = parts.length === 1 ? parts[0] : null;
+  if (parts.length < 2) parts = [];
+  const temp = cleanTemp(only ? only.temp : raw.temp);
+  const delta = Math.round(Number(only ? only.tempDelta : raw.tempDelta));
   return {
-    id: clip(raw.id, 80) || `weather-${startDay}-${raw.kind}`,
-    name: clip(raw.name, WEATHER_LIMITS.name) || WEATHER_KINDS[raw.kind].label,
-    startDay, days, kind: raw.kind,
+    id: clip(raw.id, 80) || `weather-${startDay}-${kind}`,
+    name: clip(raw.name, WEATHER_LIMITS.name) || (parts.length ? parts.map(part => WEATHER_KINDS[part.kind].label).join(' → ') : WEATHER_KINDS[kind].label),
+    startDay, days, kind: only ? only.kind : kind,
     ...(temp != null ? { temp } : {}),
     ...(temp == null && Number.isFinite(delta) && delta ? { tempDelta: Math.max(-40, Math.min(40, delta)) } : {}),
-    text: clip(raw.text, WEATHER_LIMITS.text),
+    text: clip(only ? only.text : raw.text, WEATHER_LIMITS.text),
+    ...(parts.length ? { parts } : {}),
+    ...(raw.manual === true ? { manual: true } : {}),
   };
 }
 
@@ -171,6 +214,96 @@ export function addScenario(plan, scenario) {
   const clean = cleanScenario(scenario);
   if (!clean) throw new Error('Для сценария нужны день начала и число дней.');
   next.scenarios = [...next.scenarios.filter(item => item.id !== clean.id), clean].sort((left, right) => left.startDay - right.startDay);
+  return next;
+}
+
+/**
+ * Cut the days [startDay, startDay + days) out of the scenarios: a scenario that sticks out on one or both sides stays in pieces.
+ * The weather of those days then falls to whatever is left (the forecast).
+ */
+function carve(scenarios, startDay, days) {
+  const from = startDay;
+  const to = startDay + days; // exclusive
+  const out = [];
+  for (const item of scenarios) {
+    const end = item.startDay + item.days;
+    if (end <= from || item.startDay >= to) { out.push(item); continue; }
+    if (item.startDay < from) out.push({ ...item, id: `${item.id}-a`, days: from - item.startDay });
+    if (end > to) out.push({ ...item, id: `${item.id}-b`, startDay: to, days: end - to });
+  }
+  return out;
+}
+
+/**
+ * The user sets the weather by hand for days [startDay, startDay + days): one day or a stretch. It wins over everything that was
+ * planned on those days (older scenarios are cut around it). `kind` is required; `temp` and `text` may be empty (then the forecast's temperature stays).
+ */
+export function paintWeather(plan, { startDay, days = 1, kind, temp = null, text = '', parts = null } = {}) {
+  const next = normalizePlan(plan);
+  const start = wholeDay(startDay);
+  const length = Math.min(WEATHER_LIMITS.days, wholeDay(days));
+  const stretches = cleanWeatherParts(parts);
+  if (!stretches.length && !WEATHER_KIND_IDS.includes(kind)) throw new Error('Выберите, какая погода.');
+  if (!start || !length) throw new Error('Для погоды нужны день начала и число дней.');
+  const made = cleanScenario({ id: `hand-${start}-${length}-${stretches[0]?.kind ?? kind}`, startDay: start, days: length, kind, temp, text, parts: stretches, manual: true });
+  const rest = carve(next.scenarios, start, length).filter(item => item.id !== made.id);
+  if (rest.length >= WEATHER_LIMITS.scenarios) throw new Error(`В прогнозе уже ${WEATHER_LIMITS.scenarios} заготовок: уберите лишние.`);
+  next.scenarios = [...rest, made].sort((left, right) => left.startDay - right.startDay);
+  return next;
+}
+
+/**
+ * A row of different days from `startDay`: [{ parts }] (one entry per day). Neighbours with the same weather become one scenario.
+ * Used by the ready templates and by the generator.
+ */
+export function paintDays(plan, startDay, days) {
+  const start = wholeDay(startDay);
+  if (!start) throw new Error('Для погоды нужен день начала.');
+  const list = (Array.isArray(days) ? days : []).map(item => cleanWeatherParts(item?.parts)).filter(parts => parts.length).slice(0, WEATHER_LIMITS.days);
+  if (!list.length) throw new Error('В погоде нет ни одного дня.');
+  let next = normalizePlan(plan);
+  let index = 0;
+  while (index < list.length) {
+    let length = 1;
+    while (index + length < list.length && JSON.stringify(list[index + length]) === JSON.stringify(list[index])) length += 1;
+    next = paintWeather(next, { startDay: start + index, days: length, parts: list[index] });
+    index += length;
+  }
+  return next;
+}
+
+/**
+ * Ready weather for one day, three or seven: each template is a list of days, each day has up to three stretches with the hour it begins.
+ * The weather need not change every day: a calm day is one stretch. `tempDelta` shifts whatever the climate says.
+ */
+const day = (...parts) => ({ parts: parts.map(([from, kind, tempDelta, text]) => ({ from, kind, ...(tempDelta ? { tempDelta } : {}), text })) });
+export const WEATHER_TEMPLATES = Object.freeze([
+  { id: 'd-clear', span: 1, name: 'Ясный день', days: [day(['00:00', 'clear', 2, 'солнечно весь день'])] },
+  { id: 'd-cloudy', span: 1, name: 'Пасмурный день', days: [day(['00:00', 'cloudy', -1, 'низкое серое небо весь день'])] },
+  { id: 'd-eveningrain', span: 1, name: 'Ясно, к вечеру дождь', days: [day(['00:00', 'clear', 0, 'солнечное утро'], ['15:00', 'cloudy', -1, 'набегают тучи'], ['18:00', 'rain', -3, 'к вечеру начинается дождь'])] },
+  { id: 'd-fog', span: 1, name: 'Туман с утра, к полудню ясно', days: [day(['00:00', 'fog', -2, 'плотный туман'], ['10:00', 'cloudy', 0, 'туман редеет'], ['13:00', 'clear', 2, 'выглянуло солнце'])] },
+  { id: 'd-storm', span: 1, name: 'Душно, днём гроза', days: [day(['00:00', 'heat', 3, 'душное утро'], ['15:00', 'storm', -4, 'гроза с ливнем'], ['19:00', 'cloudy', -3, 'после грозы свежо'])] },
+  { id: 'd-snow', span: 1, name: 'Снег к вечеру', days: [day(['00:00', 'cloudy', -2, 'хмуро'], ['14:00', 'snow', -3, 'пошёл снег'], ['21:00', 'clear', -5, 'снег кончился, морозно'])] },
+  { id: 't-clear', span: 3, name: 'Три ясных дня', days: [day(['00:00', 'clear', 2, 'ни облачка'])].concat([day(['00:00', 'clear', 2, 'ни облачка'])], [day(['00:00', 'clear', 2, 'ни облачка'])]) },
+  { id: 't-rain', span: 3, name: 'Три дождливых дня', days: [day(['00:00', 'rain', -2, 'моросит с утра']), day(['00:00', 'rain', -3, 'льёт'], ['16:00', 'cloudy', -2, 'дождь стихает']), day(['00:00', 'cloudy', -1, 'сыро'], ['15:00', 'clear', 1, 'к вечеру проясняется'])] },
+  { id: 't-cooling', span: 3, name: 'Похолодание на три дня', days: [day(['00:00', 'clear', 0, 'ясно'], ['17:00', 'wind', -3, 'поднимается холодный ветер']), day(['00:00', 'wind', -6, 'ветрено и холодно']), day(['00:00', 'cloudy', -8, 'пасмурно, изо рта пар'])] },
+  { id: 'w-rain', span: 7, name: 'Неделя дождей', days: [day(['00:00', 'cloudy', -1, 'небо затягивает'], ['18:00', 'rain', -2, 'начался дождь']), day(['00:00', 'rain', -2, 'дождь']), day(['00:00', 'rain', -3, 'ливень'], ['17:00', 'cloudy', -2, 'ливень стих']), day(['00:00', 'rain', -2, 'дождь']), day(['00:00', 'cloudy', -1, 'сыро']), day(['00:00', 'rain', -2, 'опять дождь']), day(['00:00', 'cloudy', 0, 'тучи расходятся'], ['16:00', 'clear', 1, 'солнце'])] },
+  { id: 'w-warm', span: 7, name: 'Тёплая неделя с одной грозой', days: [day(['00:00', 'clear', 2, 'тепло']), day(['00:00', 'clear', 3, 'жарче вчерашнего']), day(['00:00', 'heat', 4, 'душно'], ['16:00', 'storm', -5, 'гроза'], ['20:00', 'cloudy', -4, 'прохладно после грозы']), day(['00:00', 'cloudy', -1, 'свежо'], ['13:00', 'clear', 1, 'проясняется']), day(['00:00', 'clear', 2, 'тепло']), day(['00:00', 'clear', 2, 'тепло']), day(['00:00', 'clear', 3, 'ясно'])] },
+  { id: 'w-cold', span: 7, name: 'Неделя к зиме: от ясного до снега', days: [day(['00:00', 'clear', 0, 'ясно']), day(['00:00', 'clear', -2, 'прохладно']), day(['00:00', 'cloudy', -3, 'пасмурно']), day(['00:00', 'wind', -5, 'ветер'], ['15:00', 'cloudy', -5, 'тучи']), day(['00:00', 'cloudy', -6, 'серо'], ['16:00', 'snow', -7, 'первый снег']), day(['00:00', 'snow', -8, 'снегопад']), day(['00:00', 'snow', -8, 'снег'], ['14:00', 'clear', -10, 'прояснилось, мороз'])] },
+]);
+
+/** A template as a list of days for `paintDays`. */
+export function templateDays(template) {
+  return (template?.days ?? []).map(item => ({ parts: item.parts }));
+}
+
+/** Take the plan's scenarios off the days [startDay, startDay + days): they go back to the forecast. */
+export function clearWeatherDays(plan, { startDay, days = 1 } = {}) {
+  const next = normalizePlan(plan);
+  const start = wholeDay(startDay);
+  const length = Math.min(WEATHER_LIMITS.days, wholeDay(days));
+  if (!start || !length) throw new Error('Для погоды нужны день начала и число дней.');
+  next.scenarios = carve(next.scenarios, start, length);
   return next;
 }
 
@@ -229,7 +362,7 @@ const monthOfDate = iso => { const month = Number(String(iso ?? '').slice(5, 7))
  * Weather in force on `day` (0 = unknown): { kind, temp, text, source } or null.
  * source: 'lock' | 'set' | 'scenario' | 'forecast'. `date` is the calendar date of that day, if known.
  */
-export function weatherFor(state, { plan, climates = [], date = '', day = state?.world?.clock?.day ?? 0, part = state?.world?.clock?.part ?? '', climate, monthOf = monthOfDate } = {}) {
+export function weatherFor(state, { plan, climates = [], date = '', day = state?.world?.clock?.day ?? 0, part = state?.world?.clock?.part ?? '', time = state?.world?.clock?.time ?? '', climate, monthOf = monthOfDate } = {}) {
   const set = state?.world?.weather;
   const shift = PART_OFFSET[part] ?? 0;
   const withPart = value => (value == null ? null : value + shift);
@@ -242,8 +375,19 @@ export function weatherFor(state, { plan, climates = [], date = '', day = state?
   const base = model && month && day ? forecastDay(model, { day, month }) : null;
   const scenario = day ? clean.scenarios.find(item => day >= item.startDay && day < item.startDay + item.days) : null;
   if (scenario) {
-    const temp = scenario.temp ?? (base ? base.temp + (scenario.tempDelta ?? 0) : null);
-    return { kind: scenario.kind, temp: withPart(temp), text: scenario.text, source: 'scenario', scenario: scenario.name };
+    // A day in stretches: the stretch the clock is in, and what comes later that day (the narrator is told, so it can turn when the time comes).
+    const tempOf = item => item.temp ?? (base ? base.temp + (item.tempDelta ?? 0) : null);
+    const stretches = scenario.parts ?? [];
+    let now = scenario;
+    let later = [];
+    if (stretches.length) {
+      const minutes = toMinutes(time);
+      let index = 0;
+      if (minutes != null) stretches.forEach((item, at) => { if (toMinutes(item.from) <= minutes) index = at; });
+      now = stretches[index];
+      later = stretches.slice(index + 1).map(item => ({ at: item.from, kind: item.kind, temp: withPart(tempOf(item)), text: item.text }));
+    }
+    return { kind: now.kind, temp: withPart(tempOf(now)), text: now.text, source: 'scenario', scenario: scenario.name, ...(scenario.manual ? { manual: true } : {}), ...(later.length ? { later } : {}) };
   }
   if (base) return { kind: base.kind, temp: withPart(base.temp), text: '', source: 'forecast' };
   return null;
@@ -254,7 +398,8 @@ export function weekForecast(state, { plan, climates = [], dateOfDay = () => '',
   const out = [];
   if (!fromDay) return out;
   for (let day = fromDay; day < fromDay + count; day += 1) {
-    const found = weatherFor({ ...state, world: { ...state?.world, weather: day === fromDay ? state?.world?.weather : null } }, { plan, climates, date: dateOfDay(day), day, part: 'day', climate, monthOf });
+    // What was set by hand or by the chronicler belongs to TODAY only (a lock too): other days show the plan and the forecast.
+    const found = weatherFor({ ...state, world: { ...state?.world, weather: day === (state?.world?.clock?.day ?? 0) ? state?.world?.weather : null } }, { plan, climates, date: dateOfDay(day), day, part: 'day', time: day === (state?.world?.clock?.day ?? 0) ? undefined : '', climate, monthOf });
     if (found) out.push({ day, date: dateOfDay(day), ...found });
   }
   return out;
@@ -266,7 +411,10 @@ export function weekForecast(state, { plan, climates = [], dateOfDay = () => '',
 export function weatherLine(weather) {
   if (!weather || !WEATHER_KINDS[weather.kind]) return '';
   const temp = weather.temp == null ? '' : `, about ${weather.temp > 0 ? '+' : ''}${weather.temp}°C`;
-  return `weather: ${WEATHER_KINDS[weather.kind].en}${temp}${weather.text ? ` — ${weather.text}` : ''}`;
+  const later = (weather.later ?? []).filter(item => WEATHER_KINDS[item.kind])
+    .map(item => `from ${item.at} ${WEATHER_KINDS[item.kind].en}${item.temp == null ? '' : `, about ${item.temp > 0 ? '+' : ''}${item.temp}°C`}${item.text ? ` (${item.text})` : ''}`);
+  const change = later.length ? ` | planned change later today: ${later.join('; ')} — when the story's time reaches it, let the weather turn (a look at the window, the first drops, the wind changing), never announce it` : '';
+  return `weather: ${WEATHER_KINDS[weather.kind].en}${temp}${weather.text ? ` — ${weather.text}` : ''}${change}`;
 }
 
 /** «🌧 14°» for the drawer. */

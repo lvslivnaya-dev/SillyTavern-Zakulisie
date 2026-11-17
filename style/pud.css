@@ -6404,3 +6404,41 @@ body.pud-on #ku-scene-chips .ku-rail2 .pud-sidebar {
   background: none;
 }
 body.pud-on #ku-scene-chips .ku-rail2 .pud-sidebar button { width: 100%; height: 38px; border-radius: 10px; font-size: 15px; }
+
+/* Стикеры отношений: значок шкалы в рамке, которая заполняется цветом снизу (рост и падение — разными цветами) */
+body.pud-on .pud-sticker { --st-size: 46px; position: relative; display: inline-grid; place-items: center; flex: 0 0 var(--st-size); width: var(--st-size); height: var(--st-size); box-sizing: border-box; border: 2px solid var(--pud-line); border-radius: 12px; overflow: hidden; background: rgb(var(--pud-card-rgb) / 0.75); color: var(--pud-ink); }
+body.pud-on .pud-sticker-fill { position: absolute; left: 0; right: 0; bottom: 0; height: var(--st-fill, 0%); background: var(--st-color, var(--pud-mint)); opacity: .85; transition: height .35s ease; }
+body.pud-on .pud-sticker.max { border-color: var(--st-color, var(--pud-mint)); box-shadow: 0 0 0 2px var(--st-color, var(--pud-mint)), 0 0 8px var(--st-color, var(--pud-mint)); }
+body.pud-on .pud-sticker .pud-scale-mark { position: relative; z-index: 1; display: inline-flex; width: 24px; height: 24px; margin: 0; color: var(--pud-ink); filter: drop-shadow(0 0 2px rgb(var(--pud-card-rgb) / .9)); }
+body.pud-on .pud-sticker .pud-scale-mark svg, body.pud-on .pud-sticker .pud-scale-mark img, body.pud-on .pud-sticker .pud-scale-mark .ku-ico { width: 100%; height: 100%; object-fit: contain; }
+body.pud-on .pud-sticker b { position: absolute; z-index: 1; left: 0; right: 0; bottom: 1px; text-align: center; font-size: 10px; line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 0 3px rgb(var(--pud-card-rgb)), 0 0 3px rgb(var(--pud-card-rgb)); }
+body.pud-on .pud-sticker-trend { position: absolute; z-index: 1; top: 1px; right: 3px; font-style: normal; font-size: 9px; line-height: 1; text-shadow: 0 0 3px rgb(var(--pud-card-rgb)); }
+body.pud-on .pud-sticker-mini { --st-size: 30px; }
+body.pud-on .pud-sticker-mini .pud-scale-mark { width: 18px; height: 18px; }
+body.pud-on .pud-rel-line { border: 2px solid var(--pud-rose3); border-radius: 12px; padding: 8px; margin: 0; }
+body.pud-on .pud-rel-cells:has(.pud-sticker) { display: flex; flex-wrap: wrap; gap: 6px; }
+body.pud-on .pud-relrail-stickers { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+body.pud-on #ku-scene-chips .ku-rail .pud-relrail-stickers .pud-sticker, body.pud-on .pud-relrail-stickers .pud-sticker { --st-size: 38px; }
+body.pud-on .pud-stk-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+body.pud-on .pud-stk-color { display: flex; flex-direction: column; gap: 3px; }
+body.pud-on .pud-stk-label { font-size: 12px; font-weight: 700; }
+body.pud-on .pud-stk-sw { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+body.pud-on .pud-stk-dot { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 2px solid var(--pud-line); cursor: pointer; }
+body.pud-on .pud-stk-dot.on { outline: 2px solid var(--pud-ink); outline-offset: 1px; }
+body.pud-on .pud-stk-sw input[type=color] { width: 28px; height: 24px; padding: 0; border: 1px solid var(--pud-line); border-radius: 6px; background: none; cursor: pointer; }
+body.pud-on .pud-stk-none { font-size: 11px; padding: 2px 8px; border-radius: 8px; border: 1px solid var(--pud-line); background: transparent; color: inherit; cursor: pointer; }
+body.pud-on .pud-stk-none.on { background: var(--pud-tint2); }
+body.pud-on .pud-stk-scale { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px dashed var(--pud-line2); }
+body.pud-on .pud-stk-scalehead { display: flex; align-items: center; gap: 8px; }
+body.pud-on .pud-stk-preview { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Визуальные пресеты: галочки стоят напротив надписи, части пресета — в строку */
+body.pud-on .pud-vp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+body.pud-on .pud-vp { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--pud-line2); border-radius: 10px; }
+body.pud-on .pud-vp-head { display: flex; gap: 8px; align-items: center; }
+body.pud-on .pud-vp-head input { flex: 1 1 auto; min-width: 0; }
+body.pud-on .pud-vp-parts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; }
+body.pud-on .pud-vp-edit { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+body.pud-on .pud-vp-toggle, body.pud-on .pud-vp-include .checkbox_label { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; width: auto; margin: 0; }
+body.pud-on .pud-vp-toggle input, body.pud-on .pud-vp-include input { flex: 0 0 auto; width: auto; margin: 0; }
+body.pud-on .pud-vp-include { display: flex; flex-wrap: wrap; gap: 6px 16px; }

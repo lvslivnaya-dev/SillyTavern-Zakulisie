@@ -45,11 +45,12 @@ export const characterApi = {
     return live().characters[index(avatar)];
   },
 
-  async setField(doc, avatar, field, value) {
+  async setField(doc, avatar, field, value, { server = false } = {}) {
     const spec = CHAR_FIELDS[field];
     if (!spec) throw new Error(`неизвестное поле ${field}`);
     const native = doc.querySelector(spec.native);
-    if (characterApi.isCurrent(avatar) && live().menuType !== 'create' && native) {
+    // `server`: straight to the card file, never through the open editor (a card that has just been made must not depend on what the editor holds).
+    if (!server && characterApi.isCurrent(avatar) && live().menuType !== 'create' && native) {
       native.value = value;
       native.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true }));
       const character = byAvatar(avatar);

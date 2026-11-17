@@ -56,7 +56,7 @@ function shortNames(people) {
  * @returns {() => void} the way to take both tabs away
  */
 export function registerWardrobeRooms(deps) {
-  const { panes, rerender, getState, wardrobe, heroes, persona, closetOf, wear, takeOff, notify } = deps;
+  const { panes, rerender, getState, wardrobe, heroes, persona, closetOf, wear, takeOff, notify, openCloset } = deps;
   /** What each tab remembers between redraws (the drawer is rebuilt after every change). */
   const memory = {
     persona: { who: '', mode: {}, gender: '', category: '', query: '', busy: false },
@@ -140,8 +140,11 @@ export function registerWardrobeRooms(deps) {
     // «Шкаф» (what is chosen for them in the card) or the whole wardrobe of the shelf.
     const modes = node('div', 'ku-wr-chips ku-wr-modes');
     modes.append(
-      button(`Шкаф${closetCards.size ? ` · ${closetCards.size}` : ''}`, `ku-wr-chip${mode === 'closet' ? ' on' : ''}`, () => { m.mode[who.id] = 'closet'; render(shelf, container); },
-        'Только то, что выбрано для них в карточке (Мир → Карточки → Шкаф)'),
+      // «Шкаф» opens the wardrobe window on the closet of this character (the big one: look through it, put it together); without that, the small list.
+      button(`Шкаф${closetCards.size ? ` · ${closetCards.size}` : ''}`, `ku-wr-chip${mode === 'closet' ? ' on' : ''}`, () => {
+        if (openCloset) { openCloset(who.id); return; }
+        m.mode[who.id] = 'closet'; render(shelf, container);
+      }, 'Открыть окно гардероба на шкафе этого героя: посмотреть его и собрать'),
       button('Вся гардеробная', `ku-wr-chip${mode === 'all' ? ' on' : ''}`, () => { m.mode[who.id] = 'all'; render(shelf, container); }, `Все вещи полки «${shelf === 'persona' ? 'Персона' : 'Персонажи'}»`),
     );
     root.append(modes);

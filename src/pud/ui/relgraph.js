@@ -4,7 +4,7 @@
  * Данные приходят из моста Кулис (bridge.scene.lines / scales / series), состояние не меняется.
  */
 import { report } from '../core/guard.js';
-import { SERIES_COLORS, chartPath, zeroY, normalizeRelGraph } from '../core/relgraph.js';
+import { SERIES_COLORS, STICKER_PALETTE, STICKER_ROLES, STICKER_THRESHOLD, chartPath, cleanStickerColor, normalizeRelGraph, normalizeStickers, stickerCss, stickerLook, zeroY } from '../core/relgraph.js';
 import { watchRail, railHost } from './rail-extras.js';
 
 export const WIDGET_CLASS = 'pud-relw';
@@ -47,7 +47,14 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
   const trendHtml = delta => (delta > 0 ? `<em class="pud-rel-trend up">↑${delta}</em>` : delta < 0 ? `<em class="pud-rel-trend down">↓${-delta}</em>` : '<em class="pud-rel-trend">·</em>');
   const signed = value => `${value > 0 ? '+' : ''}${Math.round(value)}`;
   /** Одна шкала одной линии: значок, полоска от −100 до 100 (ноль посередине), число и тренд. */
+  /** The sticker of a scale: its icon in a square frame, filled with colour from the bottom as much as the value says (growth and fall have their own colours). */
+  const stickerHtml = cell => {
+    const look = stickerLook(cell.value, cell.id, cfg().stickers);
+    const sign = cell.value > 0 ? '+' : '';
+    return `<span class="pud-sticker${look.extra ? ' max' : ''}${look.dir === 'none' ? ' zero' : ''}" data-dir="${look.dir}" style="--st-fill:${look.fill}%;${look.color ? `--st-color:${look.color}` : ''}" title="${escapeHtml(cell.label)}: ${sign}${Math.round(cell.value)} (${signed(cell.delta)} за последние изменения)"><span class="pud-sticker-fill"></span><span class="pud-sticker-mark pud-scale-mark">${markOf(cell.id, cell.label)}</span><b>${Math.round(cell.value)}</b>${cell.delta ? `<em class="pud-sticker-trend ${cell.delta > 0 ? 'up' : 'down'}">${cell.delta > 0 ? '↑' : '↓'}</em>` : ''}</span>`;
+  };
   const cellHtml = cell => {
+    if (cfg().stickers.mode === 'stickers') return stickerHtml(cell);
     const width = Math.min(50, Math.abs(cell.value) / 2);
     const bar = cell.value >= 0 ? `left:50%;width:${width}%` : `left:${50 - width}%;width:${width}%`;
     return `<span class="pud-rel-cell" title="${escapeHtml(cell.label)}: ${Math.round(cell.value)} (${signed(cell.delta)} за последние изменения)"><span class="pud-scale-mark">${markOf(cell.id, cell.label)}</span><span class="pud-rel-bar"><i class="${cell.value < 0 ? 'neg' : 'pos'}" style="${bar}"></i></span><b>${Math.round(cell.value)}</b>${trendHtml(cell.delta)}</span>`;
@@ -167,7 +174,7 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
         railHost(rail).append(node);
       }
       const row = (api?.overview?.(item.scaleIds) ?? []).find(found => found.id === item.lineId);
-      const html = row?.scales?.length ? `<div class="pud-relrail-title">${escapeHtml(labelOf(item.lineId))}</div>${row.scales.map(cell => `<div class="pud-relrail-cell" title="${escapeHtml(cell.label)}: ${Math.round(cell.value)}"><span class="pud-scale-mark">${markOf(cell.id, cell.label)}</span><b>${Math.round(cell.value)}</b>${trendHtml(cell.delta)}</div>`).join('')}` : '';
+      const html = row?.scales?.length ? `<div class="pud-relrail-title">${escapeHtml(labelOf(item.lineId))}</div>${cfg().stickers.mode === 'stickers' ? `<div class="pud-relrail-stickers">${row.scales.map(stickerHtml).join('')}</div>` : row.scales.map(cell => `<div class="pud-relrail-cell" title="${escapeHtml(cell.label)}: ${Math.round(cell.value)}"><span class="pud-scale-mark">${markOf(cell.id, cell.label)}</span><b>${Math.round(cell.value)}</b>${trendHtml(cell.delta)}</div>`).join('')}` : '';
       if (node.dataset.sig !== html) { node.innerHTML = html; node.dataset.sig = html; }
     }
   }
@@ -189,6 +196,63 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
     render();
   }
 
+  // ───────── Стикеры: настройка цветов
+  const roleLabel = Object.fromEntries(STICKER_ROLES.map(([id, label]) => [id, label]));
+  /** A colour to pick: the colours of the palette as swatches, any colour with the picker, and «нет» for the optional ones. */
+  const colorControl = (role, value, scaleId = '') => {
+    const css = stickerCss(value);
+    const attrs = `data-stk-role="${role}"${scaleId ? ` data-stk-scale="${escapeHtml(scaleId)}"` : ''}`;
+    const hex = /^#[0-9a-f]{6}$/.test(cleanStickerColor(value)) ? cleanStickerColor(value) : '#888888';
+    return `<span class="pud-stk-color" title="${escapeHtml(roleLabel[role] ?? role)}">
+      <span class="pud-stk-label">${escapeHtml(roleLabel[role] ?? role)}</span>
+      <span class="pud-stk-sw">${STICKER_PALETTE.map(([key, label, variable]) => `<button type="button" class="pud-stk-dot${cleanStickerColor(value) === `pal:${key}` ? ' on' : ''}" ${attrs} data-stk-set="pal:${key}" style="background:var(${variable})" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"></button>`).join('')}<input type="color" value="${hex}" ${attrs} data-stk-pick aria-label="Свой цвет: ${escapeHtml(roleLabel[role] ?? role)}"><button type="button" class="pud-stk-none${css ? '' : ' on'}" ${attrs} data-stk-set="" title="${scaleId ? 'Как у всех' : 'Без особого цвета'}">${scaleId ? 'как у всех' : 'нет'}</button></span>
+    </span>`;
+  };
+  const previewHtml = (scaleId, label) => [-95, -50, 0, 50, 95].map(value => stickerHtml({ id: scaleId, label, value, delta: 0 })).join('');
+  function stickersHtml() {
+    const st = cfg().stickers;
+    const list = scales();
+    return `<div class="pud-card pud-card-col pud-stickers-card">
+      <b>Стикеры</b>
+      <p class="pud-hint">Шкалы пары рисуются стикерами: значок шкалы в рамке, которая заполняется цветом снизу по мере роста или падения. Цвета берутся из палитры (или любой свой). Когда значение выше ${STICKER_THRESHOLD} или ниже −${STICKER_THRESHOLD}, можно поставить другой цвет.</p>
+      <div class="pud-peek-city">
+        <button type="button" class="menu_button${st.mode === 'stickers' ? ' on' : ''}" data-stk-mode="stickers">Стикеры</button>
+        <button type="button" class="menu_button${st.mode === 'bars' ? ' on' : ''}" data-stk-mode="bars">Полоски</button>
+      </div>
+      <div class="pud-stk-roles">${STICKER_ROLES.map(([role]) => colorControl(role, st.colors[role])).join('')}</div>
+      <details class="pud-stk-per"><summary>Свои цвета для каждого значка${Object.keys(st.perScale).length ? ` · ${Object.keys(st.perScale).length}` : ''}</summary>
+        <p class="pud-hint">Не обязательно: у значка без своих цветов берутся общие.</p>
+        ${list.map(item => `<div class="pud-stk-scale"><span class="pud-stk-scalehead"><span class="pud-sticker pud-sticker-mini zero"><span class="pud-sticker-mark pud-scale-mark">${markOf(item.id, item.label)}</span></span><b>${escapeHtml(item.label)}</b>${st.perScale[item.id] ? `<button type="button" class="menu_button" data-stk-reset="${escapeHtml(item.id)}">Сбросить</button>` : ''}</span>
+          <span class="pud-stk-preview">${previewHtml(item.id, item.label)}</span>
+          <span class="pud-stk-roles">${STICKER_ROLES.map(([role]) => colorControl(role, st.perScale[item.id]?.[role] ?? '', item.id)).join('')}</span></div>`).join('') || '<p class="pud-lib-empty">Шкал пока нет.</p>'}
+      </details>
+    </div>`;
+  }
+  /** Change one colour (or the mode): kept at once, the drawer is repainted. */
+  function stickerAction(node, value) {
+    const modeButton = node.closest?.('[data-stk-mode]');
+    const resetButton = node.closest?.('[data-stk-reset]');
+    const target = node.closest?.('[data-stk-role]');
+    const st = cfg().stickers;
+    if (modeButton) st.mode = modeButton.dataset.stkMode === 'bars' ? 'bars' : 'stickers';
+    else if (resetButton) delete st.perScale[resetButton.dataset.stkReset];
+    else if (target) {
+      const role = target.dataset.stkRole;
+      const scaleId = target.dataset.stkScale || '';
+      const color = cleanStickerColor(value ?? target.dataset.stkSet ?? '');
+      if (scaleId) {
+        const own = { ...(st.perScale[scaleId] ?? {}) };
+        if (color) own[role] = color; else delete own[role];
+        if (Object.keys(own).length) st.perScale[scaleId] = own; else delete st.perScale[scaleId];
+      } else st.colors[role] = color;
+    } else return false;
+    settings.relGraph.stickers = normalizeStickers(st);
+    persist();
+    paintRail();
+    shared.quick?.refresh('relgraph');
+    return true;
+  }
+
   // ───────── вкладка
   function render() {
     if (!pane) return;
@@ -203,9 +267,10 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
       <h3>Отношения</h3>
       <p class="pud-hint">Сводка «сейчас»: у каждой пары значения выбранных шкал и сдвиг за последние изменения (стрелка). Ниже последние сдвиги: нажмите на строку, чтобы перейти к сообщению. График по шагам спрятан в раскрывающийся блок.</p>
       ${api ? '' : '<p class="pud-lib-empty">Модуль Кулис не подключён: данных нет.</p>'}
+      ${stickersHtml()}
       <div class="pud-card pud-card-col">
         <b>Сейчас</b>
-        <p class="pud-hint">Шкалы у каждой линии свои: нажмите ⚙ у линии и выберите значки. Не больше пяти шкал на линию.</p>
+        <p class="pud-hint">Шкалы у каждой линии свои: нажмите ⚙ у линии и выберите значки. Выбрать можно сколько угодно, хоть все.</p>
         ${overviewHtml()}
       </div>
       <div class="pud-card pud-card-col"><b>Последние сдвиги</b>${shiftsHtml(12)}</div>
@@ -236,7 +301,7 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
     else if (kind === 'scale') {
       const set = new Set(scalesFor(id));
       if (set.has(button.dataset.sid)) set.delete(button.dataset.sid); else set.add(button.dataset.sid);
-      c.lineScales[id] = scales().map(item => item.id).filter(sid => set.has(sid)).slice(0, 5);
+      c.lineScales[id] = scales().map(item => item.id).filter(sid => set.has(sid));
     } else return false;
     persist();
     render();
@@ -284,8 +349,11 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
   const onChange = event => {
     const target = event.target;
     if (target.dataset?.field === 'line') { cfg().lineId = target.value; persist(); render(); }
+    if (target.matches?.('[data-stk-pick]')) { stickerAction(target, target.value); render(); }
   };
   const onClick = event => {
+    if (event.target.closest?.('[data-stk-pick]')) return;
+    if (stickerAction(event.target)) { render(); return; }
     if (relAction(event.target) || toMessage(event.target)) return;
     const target = event.target.closest?.('[data-act]');
     if (!target) return;

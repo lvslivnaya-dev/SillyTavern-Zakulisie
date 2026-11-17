@@ -48,8 +48,12 @@ test('the scene window shows its five tabs only; one-tab windows have no menu', 
     assert.equal(root.querySelector('.brand strong').textContent, 'Гардероб');
 
     studio.showWindow('settings');
-    assert.ok(labels().includes('Кубик') && labels().includes('Имена') && labels().includes('Погода'));
+    assert.ok(labels().includes('Кубик') && labels().includes('Имена') && !labels().includes('Погода'));
     assert.ok(!labels().includes('Хроника'));
+
+    // The weather lives on the calendar page: one button, one window (an old link to «weather» leads there).
+    assert.equal(windowOf('weather').id, 'calendar');
+    assert.ok(!NAV_TABS.some(([id]) => id === 'weather'));
   } finally { studio?.destroy(); }
 });
 
@@ -126,6 +130,30 @@ test('card of the library: closing with unsaved typing asks first; a clean card 
     clickClose();
     [...root.querySelectorAll('.ku-aunotice button')].find(button => button.textContent === 'Не сохранять').click();
     assert.equal(root.querySelector('.ku-ccard'), null, 'leave without saving closes the card');
+  } finally { studio?.destroy(); place.remove(); }
+});
+
+test('card of the library: the birthday picks stay when only the day or only the month is chosen, and both go to the save', async () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  const card = { id: 'c1', folderId: 'f1', name: 'Судзу', aliases: [], sections: [{ id: 's1', kind: 'visual', title: 'Visual', text: 'Высокая.' }], records: [], words: [] };
+  const snapshot = { ...sample(), locationLibrary: { folders: [{ id: 'f1', name: 'Папка' }], locations: [], items: [], characters: [card] } };
+  const saved = [];
+  let studio;
+  try {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place, callbacks: { onLibraryUpdateCharacter: payload => { saved.push(payload); return Promise.resolve(); } } });
+    studio.showWindow('cards', 'cards');
+    const root = studio.element.shadowRoot;
+    root.querySelector('.ku-place-open')?.click();
+    const pick = (selector, value) => { const select = root.querySelector(selector); select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); };
+    pick('.ku-cbirth-day', '7');
+    assert.equal(root.querySelector('.ku-cbirth-day').value, '7', 'the day stays while the month is not chosen yet');
+    pick('.ku-cbirth-month', '3');
+    assert.equal(root.querySelector('.ku-cbirth-day').value, '7');
+    assert.equal(root.querySelector('.ku-cbirth-month').value, '3');
+    [...root.querySelectorAll('button')].find(button => button.textContent === 'Сохранить').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(saved.at(-1).changes.birthday, '03-07');
   } finally { studio?.destroy(); place.remove(); }
 });
 

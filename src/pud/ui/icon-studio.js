@@ -49,15 +49,21 @@ const escapeHtml = text => String(text ?? '').replace(/[&<>"']/g, ch => ({ '&': 
  * @param {Document} doc
  * @param {{ settings: any, save: () => void, hub?: { addTab: Function } }} deps
  */
-export function startIconStudio(doc, { settings, save, hub }) {
+export function startIconStudio(doc, { settings, save, hub, shared = {} }) {
   const apply = () => {
     settings.icons = normalizeIcons(settings.icons);
     applyCustomIcons(doc, settings.icons.pud);
     setCustomIcons(settings.icons);
   };
   apply();
+  // For the visual presets: the icons that are on now and a way to put a set on.
+  const presetApi = {
+    get: () => structuredClone(normalizeIcons(settings.icons)),
+    set: icons => { settings.icons = normalizeIcons(icons); try { save(); } catch (error) { report('иконки: сохранение', error); } apply(); presetApi.redraw?.(); },
+  };
+  shared.visual = { ...(shared.visual ?? {}), icons: presetApi };
   const tab = hub?.addTab('icons', 'Иконки', 'image');
-  if (!tab) return () => {};
+  if (!tab) return () => { if (shared.visual?.icons === presetApi) delete shared.visual.icons; };
   const pane = tab.pane;
   let notice = '';
   const persist = () => { try { save(); } catch (error) { report('иконки: сохранение', error); } };
@@ -90,6 +96,7 @@ export function startIconStudio(doc, { settings, save, hub }) {
       <p class="pud-hint">Эти иконки меняются при следующем открытии окна.</p>
       <div class="pud-icogrid">${ICON_NAMES.map(name => tile('studio', name)).join('')}</div>`;
   };
+  presetApi.redraw = () => { notice = ''; render(); };
   render();
 
   const onChange = async event => {
@@ -128,6 +135,7 @@ export function startIconStudio(doc, { settings, save, hub }) {
   pane.addEventListener('click', onClick);
 
   return () => {
+    if (shared.visual?.icons === presetApi) delete shared.visual.icons;
     pane.removeEventListener('change', onChange);
     pane.removeEventListener('click', onClick);
     tab.remove?.();

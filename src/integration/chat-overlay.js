@@ -61,6 +61,7 @@ function actionButton(label, action, data, title) {
 
 import { WEATHER_KINDS, WEATHER_KIND_IDS } from '../core/weather.js';
 import { EVENT_GENRES } from '../core/direction.js';
+import { PLAN_UNITS, PLAN_UNIT_IDS, plural } from '../core/event-plan.js';
 
 const MODE_LABEL = { calm: 'Быт', fight: 'Бой', intim: 'Близость' };
 const MODE_MARK = { calm: '☕', fight: '⚔', intim: '🔥' };
@@ -69,6 +70,11 @@ const MODE_HINT = {
   fight: 'Бой: модели уходят боевые разделы анкет',
   intim: 'Близость: модели уходят разделы анкет для интимных сцен',
 };
+
+/** The two lists of the «Рассказчику» tab: the pinned ones are open until folded, the saved ones are folded until opened. */
+function noteIsOpen(ui, which) {
+  return which === 'lib' ? ui.noteFold?.lib === true : ui.noteFold?.pins !== false;
+}
 
 function chipButton(text, action, data = {}, title = '', className = 'ku-dir-btn') {
   const button = node('button', className, text);
@@ -98,9 +104,9 @@ function chipButton(text, action, data = {}, title = '', className = 'ku-dir-btn
  * eventIdeas() → [text]: today's calendar events, offered as ready scene events.
  */
 export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, onMediaOffer, onQuestStep, onSong, onQuestPush, onDiceRoll, onDiceToggle, onDiceLock, onDiceAdd, onDiceSend, onDiceClear, onSetTime, onWeather, onSceneMode, onTogglePresent, onLeak, onSlip, onDeath, onReveal, onSecretHint, onOpenStudio, onOpenPersonas, onSetupOff, onCalendarSave, onCalendarRemove,
-  onCue, onRemoveCue, onKickNow, onToggleOpen, onFavorite, describe, eventIdeas }) {
+  onCue, onRemoveCue, onKickNow, onToggleOpen, onFavorite, onNotes, onPlan, describe, eventIdeas }) {
   // The panel's own state: what is selected and typed survives every re-render.
-  const fresh = () => ({ stageNote: null, diceAdd: '', diceDraft: '', clock: null, selected: '', pane: '', wait: 0, draft: '', eventDraft: '', sceneDraft: '', noteDraft: '', placeDraft: '', placeId: '', skip: 'none', sceneCast: [], songFind: '', calDay: '', calForm: null });
+  const fresh = () => ({ stageNote: null, diceAdd: '', diceDraft: '', clock: null, selected: '', pane: '', wait: 0, draft: '', eventDraft: '', sceneDraft: '', noteDraft: '', noteEvery: 0, noteFold: {}, noteEdit: null, planAmount: 1, planUnit: 'day', planWithin: false, planText: '', planGenre: '', wxFrom: 0, wxDays: 1, wxTemp: '', wxText: '', placeDraft: '', placeId: '', skip: 'none', sceneCast: [], songFind: '', calDay: '', calForm: null });
   const ui = fresh();
   let lastView = null;
   const snoozed = new Set(); // chats whose setup reminder was put off until the page is reloaded
@@ -149,9 +155,21 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     saveClock();
   }
 
+  /** The weather the user picked goes onto the chosen days (from today by default, one day); the typed temperature and words go with it. */
+  function applyWeather(kind) {
+    const temp = ui.wxTemp.trim();
+    const single = ui.wxFrom === 0 && ui.wxDays === 1;
+    Promise.resolve(onWeather?.({ kind, temp: temp === '' || !Number.isFinite(Number(temp)) ? '' : Number(temp), text: ui.wxText.trim(), lock: single && lastView?.weather?.source === 'lock', from: ui.wxFrom, days: ui.wxDays }))
+      .then(() => { ui.wxTemp = ''; ui.wxText = ''; ui.wxFrom = 0; ui.wxDays = 1; rerender(); });
+  }
+
   function directorAction(action, data) {
     switch (action) {
-      case 'dir-weather': Promise.resolve(onWeather?.({ kind: data.kind, lock: lastView?.weather?.source === 'lock' })).then(() => rerender()); return true;
+      case 'dir-weather': applyWeather(data.kind); return true;
+      case 'dir-wx-apply': if (lastView?.weather?.kind) applyWeather(lastView.weather.kind); return true;
+      case 'dir-wx-from': ui.wxFrom = Math.max(0, Math.round(Number(data.from)) || 0); rerender(); return true;
+      case 'dir-wx-days': ui.wxDays = Math.max(1, Math.round(Number(data.days)) || 1); rerender(); return true;
+      case 'dir-weather-clear': Promise.resolve(onWeather?.({ clear: true, from: ui.wxFrom, days: ui.wxDays })).then(() => { ui.wxFrom = 0; ui.wxDays = 1; rerender(); }); return true;
       case 'dir-weather-lock': Promise.resolve(onWeather?.({ kind: lastView?.weather?.kind, temp: lastView?.weather?.temp, lock: lastView?.weather?.source !== 'lock' })).then(() => rerender()); return true;
       case 'dir-dice-roll': Promise.resolve(onDiceRoll?.({ only: data.group || '' })).then(() => rerender()); return true;
       case 'dir-dice-pick': Promise.resolve(onDiceToggle?.({ group: data.group, option: data.option })).then(() => rerender()); return true;
@@ -266,6 +284,31 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
         if (text) arm({ kind: 'note', text });
         return true;
       }
+      case 'dir-note-save': { const text = ui.noteDraft.trim(); if (text) Promise.resolve(onNotes?.({ action: 'save', text, every: ui.noteEvery })).then(ok => { if (ok) { ui.noteDraft = ''; rerender(); } }); return true; }
+      case 'dir-note-pin-all': { const text = ui.noteDraft.trim(); if (text) Promise.resolve(onNotes?.({ action: 'pin-all', text, every: ui.noteEvery })).then(ok => { if (ok) { ui.noteDraft = ''; rerender(); } }); return true; }
+      case 'dir-note-pin-all-saved': Promise.resolve(onNotes?.({ action: 'pin-all-saved', id: data.id })).then(() => rerender()); return true;
+      case 'dir-note-unpin-all': Promise.resolve(onNotes?.({ action: 'unpin-all', id: data.id })).then(() => rerender()); return true;
+      case 'dir-note-fold': ui.noteFold = { ...ui.noteFold, [data.which]: !noteIsOpen(ui, data.which) }; rerender(); return true;
+      case 'dir-note-pin': { const text = ui.noteDraft.trim(); if (text) Promise.resolve(onNotes?.({ action: 'pin', text, every: ui.noteEvery })).then(ok => { if (ok) { ui.noteDraft = ''; rerender(); } }); return true; }
+      case 'dir-note-send': Promise.resolve(onNotes?.({ action: 'send', id: data.id, wait: ui.wait })).then(() => rerender()); return true;
+      case 'dir-note-pin-saved': Promise.resolve(onNotes?.({ action: 'pin-saved', id: data.id })).then(() => rerender()); return true;
+      case 'dir-note-unpin': Promise.resolve(onNotes?.({ action: 'unpin', id: data.id })).then(() => rerender()); return true;
+      case 'dir-note-del': Promise.resolve(onNotes?.({ action: 'delete', id: data.id })).then(() => rerender()); return true;
+      case 'dir-note-edit': ui.noteEdit = { scope: data.scope, id: data.id, text: data.text ?? '', every: Math.max(0, Math.round(Number(data.every)) || 0) }; rerender(); return true;
+      case 'dir-note-edit-cancel': ui.noteEdit = null; rerender(); return true;
+      case 'dir-note-edit-save': {
+        const edit = ui.noteEdit;
+        if (!edit || !edit.text.trim()) return true;
+        Promise.resolve(onNotes?.({ action: 'edit', scope: edit.scope, id: edit.id, text: edit.text.trim(), every: edit.every })).then(ok => { if (ok) { ui.noteEdit = null; rerender(); } });
+        return true;
+      }
+      case 'dir-plan-when': ui.planWithin = data.within === 'true'; rerender(); return true;
+      case 'dir-plan-genre': ui.planGenre = ui.planGenre === data.genre ? '' : data.genre; rerender(); return true;
+      case 'dir-plan-add':
+        Promise.resolve(onPlan?.({ action: 'add', text: ui.planText.trim(), genre: ui.planGenre, amount: ui.planAmount, unit: ui.planUnit, within: ui.planWithin })).then(ok => { if (ok) { ui.planText = ''; ui.planGenre = ''; rerender(); } });
+        return true;
+      case 'dir-plan-del': Promise.resolve(onPlan?.({ action: 'remove', id: data.id })).then(() => rerender()); return true;
+      case 'dir-note-load': ui.noteDraft = data.text ?? ''; ui.noteEvery = Math.max(0, Math.round(Number(data.every)) || 0); rerender(); return true;
       case 'dir-fav-save': if (ui.draft.trim()) onFavorite?.(ui.draft.trim(), true); return true;
       case 'dir-fav-del': onFavorite?.(data.text, false); return true;
       case 'dir-remove': onRemoveCue?.(data.cueId); return true;
@@ -308,6 +351,14 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     if (field === 'event') ui.eventDraft = event.target.value;
     if (field === 'scene') ui.sceneDraft = event.target.value;
     if (field === 'note') ui.noteDraft = event.target.value;
+    if (field === 'note-edit' && ui.noteEdit) ui.noteEdit.text = event.target.value;
+    if (field === 'note-edit-every' && ui.noteEdit) ui.noteEdit.every = Math.max(0, Math.min(99, Math.round(Number(event.target.value)) || 0));
+    if (field === 'plan-text') ui.planText = event.target.value;
+    if (field === 'plan-amount') ui.planAmount = Math.max(1, Math.min(99, Math.round(Number(event.target.value)) || 1));
+    if (field === 'plan-unit' && PLAN_UNIT_IDS.includes(event.target.value)) { ui.planUnit = event.target.value; rerender(); }
+    if (field === 'wx-temp') ui.wxTemp = event.target.value;
+    if (field === 'wx-text') ui.wxText = event.target.value;
+    if (field === 'note-every') ui.noteEvery = Math.max(0, Math.min(99, Math.round(Number(event.target.value)) || 0));
     if (field === 'place') ui.placeDraft = event.target.value;
     if (field === 'song-find') { ui.songFind = event.target.value; rerender(); }
     if (field === 'dice-add') ui.diceDraft = event.target.value;
@@ -327,7 +378,7 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     }
   };
   // Enter sends from one-line fields; the scene's text is a textarea, Enter there is a new line.
-  const ENTER_ACTIONS = { custom: 'dir-custom', event: 'dir-event-custom', note: 'dir-note', 'dice-add': 'dir-dice-add-save', 'stage-note': 'dir-stage-note', 'clock-time': 'dir-clock-save', 'clock-day': 'dir-clock-save', 'clock-label': 'dir-clock-save', 'cal-title': 'dir-cal-save' };
+  const ENTER_ACTIONS = { custom: 'dir-custom', event: 'dir-event-custom', note: 'dir-note', 'note-edit': 'dir-note-edit-save', 'note-edit-every': 'dir-note-edit-save', 'plan-text': 'dir-plan-add', 'wx-text': 'dir-wx-apply', 'wx-temp': 'dir-wx-apply', 'dice-add': 'dir-dice-add-save', 'stage-note': 'dir-stage-note', 'clock-time': 'dir-clock-save', 'clock-day': 'dir-clock-save', 'clock-label': 'dir-clock-save', 'cal-title': 'dir-cal-save' };
   const onKey = event => {
     const action = ENTER_ACTIONS[event.target?.dataset?.kuField];
     if (action && event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -393,9 +444,18 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     return row;
   }
 
+  /** Fields whose text may be long: they wrap onto new lines and grow, instead of running sideways. Enter still sends, Shift+Enter breaks the line. */
+  const WRAP_FIELDS = new Set(['custom', 'event', 'plan-text', 'note', 'stage-note', 'dice-add', 'place', 'wx-text', 'scene']);
+
   function textField(field, value, placeholder) {
-    const input = node('input', 'text_pole ku-dir-input');
-    input.type = 'text';
+    const wrap = WRAP_FIELDS.has(field);
+    const input = node(wrap ? 'textarea' : 'input', `text_pole ku-dir-input${wrap ? ' ku-dir-wrap' : ''}`);
+    if (wrap) {
+      input.rows = 1;
+      const fit = () => { if (input.scrollHeight > 0) { input.style.height = 'auto'; input.style.height = `${input.scrollHeight}px`; } };
+      input.addEventListener('input', fit);
+      globalThis.requestAnimationFrame?.(fit);
+    } else input.type = 'text';
     input.dataset.kuField = field;
     input.value = value;
     input.placeholder = placeholder;
@@ -501,6 +561,71 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     return card;
   }
 
+  /** «🗓 Запланировать»: an event that comes by the STORY clock: in N hours, days, weeks or months; its own text, or the narrator invents it. */
+  function planMenu(director) {
+    const card = node('div', 'ku-dir-card ku-dir-plan');
+    card.append(node('div', 'ku-dir-card-head', '🗓 Запланировать на потом'));
+    card.querySelector('.ku-dir-card-head').title = 'Событие придёт, когда время ИСТОРИИ дойдёт до срока (а не через столько-то ответов). Своё или на выбор рассказчика.';
+    const when = node('div', 'ku-dir-row ku-dir-when');
+    when.append(
+      chipButton('Ровно через', 'dir-plan-when', { within: 'false' }, 'В точно назначенный срок', `ku-dir-seg${ui.planWithin ? '' : ' on'}`),
+      chipButton('В любой момент в течение', 'dir-plan-when', { within: 'true' }, 'Случайный момент внутри срока: заранее неизвестно, когда именно', `ku-dir-seg${ui.planWithin ? ' on' : ''}`));
+    const span = node('div', 'ku-dir-row ku-dir-planspan');
+    const amount = node('input', 'text_pole ku-dir-input ku-dir-every');
+    amount.type = 'number';
+    amount.min = '1';
+    amount.max = '99';
+    amount.value = String(ui.planAmount);
+    amount.dataset.kuField = 'plan-amount';
+    amount.setAttribute('aria-label', 'Сколько');
+    const unit = node('select', 'text_pole ku-dir-plan-unit');
+    unit.dataset.kuField = 'plan-unit';
+    unit.setAttribute('aria-label', 'В чём считать срок');
+    for (const id of PLAN_UNIT_IDS) {
+      const option = node('option', null, plural(ui.planAmount, PLAN_UNITS[id].forms));
+      option.value = id;
+      option.selected = id === ui.planUnit;
+      unit.append(option);
+    }
+    span.append(amount, unit);
+    const what = node('div', 'ku-dir-row ku-dir-field');
+    what.append(textField('plan-text', ui.planText, 'что случится (пусто — рассказчик придумает сам)'));
+    const genres = node('div', 'ku-dir-row ku-dir-genres');
+    genres.append(node('span', 'ku-dir-caption', 'Жанр:'));
+    for (const [id, genre] of Object.entries(EVENT_GENRES)) {
+      const on = ui.planGenre === id;
+      const chip = chipButton(`${genre.icon} ${genre.label}`, 'dir-plan-genre', { genre: id }, `Событие в жанре «${genre.label.toLowerCase()}»; ещё раз — снять`, `ku-dir-btn${on ? ' on' : ''}`);
+      chip.setAttribute('aria-pressed', String(on));
+      genres.append(chip);
+    }
+    const go = node('div', 'ku-dir-row');
+    go.append(chipButton('🗓 Запланировать', 'dir-plan-add', {}, 'Поставить в план (Enter в поле)', 'ku-dir-btn ku-dir-kick'));
+    card.append(when, span, what, genres, go);
+    const hint = !director.planClock ? 'Сначала нужен день истории: задайте его в 🕑 «Время».'
+      : ui.planUnit === 'hour' && !director.planHours ? 'Для часов нужно время истории: задайте его в 🕑 «Время».'
+        : ui.planText.trim() ? 'Событие будет твоё: рассказчик подаст его через сюжет.'
+          : ui.planGenre ? `Рассказчик придумает событие в жанре «${EVENT_GENRES[ui.planGenre].label.toLowerCase()}».` : 'Событие придумает рассказчик: по месту, времени и настроению сцены.';
+    card.append(node('span', 'ku-dir-caption', hint));
+    const plans = director.plans ?? [];
+    if (plans.length) {
+      card.append(node('span', 'ku-dir-caption ku-dir-gap', `В плане · ${plans.length}`));
+      const list = node('div', 'ku-dir-notelist');
+      for (const plan of plans) {
+        const row = node('div', 'ku-dir-noterow');
+        const body = node('div', 'ku-dir-notebody');
+        const line = node('div', 'ku-dir-notetext', plan.title);
+        line.title = plan.title;
+        body.append(line, node('div', 'ku-dir-notemeta', `${plan.when}${plan.left ? ` · ${plan.left}` : ''}`));
+        const buttons = node('div', 'ku-dir-notebtns');
+        buttons.append(chipButton('✕', 'dir-plan-del', { id: plan.id }, 'Убрать из плана', 'ku-dir-btn ku-dir-mini'));
+        row.append(node('span', 'ku-dir-plan-ico', plan.within ? '🎲' : '🗓'), body, buttons);
+        list.append(row);
+      }
+      card.append(list);
+    }
+    return card;
+  }
+
   function sceneMenu(director) {
     const card = node('div', 'ku-dir-card');
     card.append(node('div', 'ku-dir-card-head', '🎬 Начать новую сцену'));
@@ -550,13 +675,97 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     return card;
   }
 
-  function noteMenu() {
-    const card = node('div', 'ku-dir-card');
-    card.append(node('div', 'ku-dir-card-head', '📝 Рассказчику'));
-    card.append(node('div', 'ku-dir-caption', 'Указание на следующий ответ: «короче», «больше атмосферы, меньше диалогов», «пусть ночь будет дождливой».'));
+  /**
+   * «Рассказчику»: a note for the next reply. One line to write it, one row of buttons (once / this chat / all chats / save), the cooldown and the delay on one row,
+   * then two folded lists (pinned, saved) whose rows are small: the text in two lines at most and little buttons beside it.
+   */
+  function noteMenu(director) {
+    const card = node('div', 'ku-dir-card ku-dir-notes');
+    const head = node('div', 'ku-dir-card-head', '📝 Рассказчику');
+    head.title = 'Указание модели. 📝 уйдёт один раз; 📌 закрепит в этом чате (идёт с каждым ответом, а с кд раз в N ответов); 🌐 закрепит во всех чатах; 💾 только сохранит в «Мои указания».';
+    card.append(head);
     const field = node('div', 'ku-dir-row ku-dir-field');
-    field.append(textField('note', ui.noteDraft, 'что сказать рассказчику…'), chipButton('📝', 'dir-note', {}, 'Добавить (Enter)'));
-    card.append(field, waitRow());
+    field.append(textField('note', ui.noteDraft, 'что сказать рассказчику…'));
+    const actions = node('div', 'ku-dir-row ku-dir-noteacts');
+    actions.append(
+      chipButton('📝 раз', 'dir-note', {}, 'Отправить один раз (Enter)'),
+      chipButton('📌 чат', 'dir-note-pin', {}, 'Закрепить в этом чате: идёт с ответами, пока не открепите'),
+      chipButton('🌐 все', 'dir-note-pin-all', {}, 'Закрепить во всех чатах'),
+      chipButton('💾', 'dir-note-save', {}, 'Только сохранить в «Мои указания» (в чат не отправляется)'));
+    const timing = node('div', 'ku-dir-row ku-dir-notetiming');
+    const every = node('input', 'text_pole ku-dir-input ku-dir-every');
+    every.type = 'number';
+    every.min = '0';
+    every.max = '99';
+    every.value = String(ui.noteEvery);
+    every.dataset.kuField = 'note-every';
+    every.title = 'Кулдаун: раз в сколько ответов указание может уйти. 0 — без кулдауна (закреплённое идёт с каждым ответом)';
+    timing.append(node('span', 'ku-dir-caption', 'кд'), every);
+    for (const [value, text] of [[0, 'сейчас'], [1, '+1'], [2, '+2'], [3, '+3']]) {
+      timing.append(chipButton(text, 'dir-wait', { wait: value }, value ? `Для разовой отправки: пропустить ${value} ${value === 1 ? 'ответ' : 'ответа'}, потом сработать` : 'Разовое: в следующем ответе', `ku-dir-btn ku-dir-mini${ui.wait === value ? ' on' : ''}`));
+    }
+    card.append(field, actions, timing);
+
+    const notes = director.notes ?? { library: [], pins: [] };
+    const everyText = value => (value > 0 ? `раз в ${value}` : 'каждый');
+    const section = (which, title, count, rows) => {
+      const open = noteIsOpen(ui, which);
+      const header = chipButton(`${open ? '▾' : '▸'} ${title} · ${count}`, 'dir-note-fold', { which }, open ? 'Свернуть' : 'Развернуть', 'ku-dir-btn ku-dir-fold');
+      card.append(header);
+      if (open) {
+        const list = node('div', 'ku-dir-notelist');
+        if (!count) list.append(node('div', 'ku-dir-caption', which === 'lib' ? 'Пока пусто: впишите указание и нажмите 💾.' : 'Ничего не закреплено.'));
+        list.append(...rows);
+        card.append(list);
+      }
+    };
+    const rowOf = (lead, text, meta, buttons, scope = '', id = '', every = 0) => {
+      // The row being edited turns into a small form: a text, a cooldown, «save» and «cancel». The save changes the note in place.
+      if (ui.noteEdit && ui.noteEdit.scope === scope && ui.noteEdit.id === id && id) {
+        const form = node('div', 'ku-dir-noteedit');
+        const area = node('textarea', 'text_pole ku-dir-input ku-dir-noteedit-text');
+        area.dataset.kuField = 'note-edit';
+        area.value = ui.noteEdit.text;
+        area.rows = 3;
+        area.maxLength = 400;
+        const foot = node('div', 'ku-dir-row');
+        const cooldown = node('input', 'text_pole ku-dir-input ku-dir-every');
+        cooldown.type = 'number';
+        cooldown.min = '0';
+        cooldown.max = '99';
+        cooldown.value = String(ui.noteEdit.every);
+        cooldown.dataset.kuField = 'note-edit-every';
+        cooldown.title = 'Кулдаун: раз в сколько ответов указание может уйти. 0 — без кулдауна';
+        foot.append(node('span', 'ku-dir-caption', 'кд'), cooldown,
+          chipButton('✓ Сохранить', 'dir-note-edit-save', {}, 'Сохранить правку (Enter)', 'ku-dir-btn ku-dir-kick'),
+          chipButton('Отмена', 'dir-note-edit-cancel', {}, 'Не менять', 'ku-dir-btn'));
+        form.append(area, foot);
+        return form;
+      }
+      const row = node('div', 'ku-dir-noterow');
+      const body = node('div', 'ku-dir-notebody');
+      const line = node('div', 'ku-dir-notetext', text);
+      line.title = text;
+      body.append(line, node('div', 'ku-dir-notemeta', meta));
+      row.append(...(lead ? [lead] : []), body, node('div', 'ku-dir-notebtns'));
+      row.lastChild.append(...buttons);
+      return row;
+    };
+    const mini = (text, action, data, title) => chipButton(text, action, data, title, 'ku-dir-btn ku-dir-mini');
+    section('pins', '📌 Закреплено', notes.pins.length, notes.pins.map(pin => rowOf(null, pin.text,
+      `${pin.scope === 'all' ? '🌐 все чаты' : 'этот чат'} · ${everyText(pin.every)} · ${pin.left > 0 ? `через ${pin.left}` : 'со следующим ответом'}`,
+      [mini('✎', 'dir-note-edit', { scope: pin.scope, id: pin.id, text: pin.text, every: pin.every }, 'Поправить здесь же: правка сохранится в этом закреплении'),
+        mini('✕', pin.scope === 'all' ? 'dir-note-unpin-all' : 'dir-note-unpin', { id: pin.id }, pin.scope === 'all' ? 'Открепить от всех чатов' : 'Открепить в этом чате')], pin.scope, pin.id, pin.every)));
+    section('lib', '💾 Мои указания', notes.library.length, notes.library.map(item => {
+      const cooling = item.left > 0;
+      const send = mini(cooling ? `⏳${item.left}` : '▶', 'dir-note-send', { id: item.id }, cooling ? `Остывает: ещё ${item.left} отв.` : 'Отправить сейчас (со следующим ответом)');
+      send.disabled = cooling;
+      return rowOf(send, item.text, item.every > 0 ? `кд ${item.every}` : 'без кд',
+        [mini('📌', 'dir-note-pin-saved', { id: item.id }, 'Закрепить в этом чате'),
+          mini('🌐', 'dir-note-pin-all-saved', { id: item.id }, 'Закрепить во всех чатах'),
+          mini('✎', 'dir-note-edit', { scope: 'lib', id: item.id, text: item.text, every: item.every }, 'Поправить здесь же: правка сохранится в этом указании'),
+          mini('✕', 'dir-note-del', { id: item.id }, 'Удалить из сохранённых')], 'lib', item.id, item.every);
+    }));
     return card;
   }
 
@@ -1109,25 +1318,70 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
       card.append(fields, quick, node('span', 'ku-dir-caption', 'Время идёт вперёд само по ходу ответов. Здесь можно поправить его вручную.'));
       return card;
     };
+    /**
+     * The drawer's weather: what is in force, the week ahead (click a day to start from it), how many days, the temperature and words,
+     * and the eight kinds: a kind goes onto every chosen day. By default it is «today, one day», like before.
+     */
     const weatherCard = () => {
       const card = node('div', 'ku-dir-card ku-dir-weather');
-      card.append(node('span', 'ku-dir-caption', 'Погода на улице:'));
-      const row = node('div', 'ku-dir-row');
+      const now = view.weather;
+      const info = now ? WEATHER_KINDS[now.kind] : null;
+      const SOURCE = { lock: 'держится', set: 'выбрана', scenario: 'заготовка', forecast: 'по прогнозу' };
+      const tempOf = value => (value == null ? '' : `${value > 0 ? '+' : ''}${value}°`);
+      card.append(node('div', 'ku-dir-card-head', info
+        ? `${info.icon} ${info.label}${now.temp != null ? ` · ${tempOf(now.temp)}` : ''} · ${now.manual ? 'вручную' : (SOURCE[now.source] ?? '')}${now.scenario && !now.manual ? ` «${now.scenario}»` : ''}`
+        : '🌤 Погоды пока нет'));
+      const today = view.weatherDay ?? 0;
+      const week = view.weatherWeek ?? [];
+      if (today > 0 && week.length) {
+        card.append(node('span', 'ku-dir-caption', 'Для каких дней (нажми день, с которого начать):'));
+        const strip = node('div', 'ku-wx-strip');
+        for (const item of week) {
+          const offset = item.day - today;
+          const inside = offset >= ui.wxFrom && offset < ui.wxFrom + ui.wxDays;
+          const day = chipButton('', 'dir-wx-from', { from: offset }, `${offset === 0 ? 'Сегодня' : item.label}: начать с этого дня`, `ku-wx-day${inside ? ' on' : ''}${offset === ui.wxFrom ? ' first' : ''}`);
+          day.setAttribute('aria-pressed', String(inside));
+          day.append(node('span', 'ku-wx-lab', offset === 0 ? 'сегодня' : offset === 1 ? 'завтра' : item.label), node('span', 'ku-wx-ico', WEATHER_KINDS[item.kind]?.icon ?? '·'), node('span', 'ku-wx-t', tempOf(item.temp)));
+          strip.append(day);
+        }
+        const spans = node('div', 'ku-dir-row');
+        spans.append(node('span', 'ku-dir-caption', 'Сколько дней:'));
+        for (const [days, label] of [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, 'неделя'], [14, '2 нед.']]) {
+          spans.append(chipButton(label, 'dir-wx-days', { days }, days === 1 ? 'Только этот день' : `${days} дней подряд`, `ku-dir-seg${ui.wxDays === days ? ' on' : ''}`));
+        }
+        card.append(strip, spans);
+      }
+      const fields = node('div', 'ku-dir-row ku-dir-field');
+      const temp = node('input', 'text_pole ku-dir-input ku-wx-temp');
+      temp.type = 'number';
+      temp.min = '-60';
+      temp.max = '60';
+      temp.value = ui.wxTemp;
+      temp.placeholder = '°C';
+      temp.dataset.kuField = 'wx-temp';
+      temp.setAttribute('aria-label', 'Температура, градусы');
+      temp.title = 'Температура. Пусто — как даёт прогноз';
+      const words = textField('wx-text', ui.wxText, 'как выглядит: моросит, лужи');
+      words.setAttribute('aria-label', 'Как выглядит погода');
+      fields.append(temp, words, chipButton('✓', 'dir-wx-apply', {}, now ? 'Применить температуру и слова к текущей погоде на выбранные дни (Enter)' : 'Сначала выберите, какая погода', 'ku-dir-btn'));
+      const row = node('div', 'ku-dir-row ku-wx-kinds');
       for (const id of WEATHER_KIND_IDS) {
-        const on = view.weather?.kind === id;
-        const button = chipButton(`${WEATHER_KINDS[id].icon} ${WEATHER_KINDS[id].label}`, 'dir-weather', { kind: id }, WEATHER_KINDS[id].label, `ku-dir-btn${on ? ' on' : ''}`);
+        const on = now?.kind === id && ui.wxFrom === 0;
+        const button = chipButton(`${WEATHER_KINDS[id].icon} ${WEATHER_KINDS[id].label}`, 'dir-weather', { kind: id }, `${WEATHER_KINDS[id].label}: на выбранные дни`, `ku-dir-btn${on ? ' on' : ''}`);
         button.setAttribute('aria-pressed', String(on));
         row.append(button);
       }
       const tools = node('div', 'ku-dir-row');
-      if (view.weather) {
-        const locked = view.weather.source === 'lock';
+      if (now && ui.wxFrom === 0 && ui.wxDays === 1) {
+        const locked = now.source === 'lock';
         const lockButton = chipButton(locked ? '🔒 Держится' : '🔓 Держать', 'dir-weather-lock', {}, locked ? 'Погода держится: нажмите, чтобы отпустить' : 'Держать эту погоду: летописец и прогноз её не меняют', `ku-dir-btn${locked ? ' on' : ''}`);
         lockButton.setAttribute('aria-pressed', String(locked));
         tools.append(lockButton);
       }
-      tools.append(chipButton('Заготовки ▸', 'studio', { tab: 'weather' }, 'Климат и сценарии: тайфун, дожди, жара…', 'ku-dir-btn'));
-      card.append(row, tools);
+      tools.append(chipButton('↺ Вернуть прогнозу', 'dir-weather-clear', {}, 'Снять ручную погоду и заготовки с выбранных дней: они снова считаются по прогнозу', 'ku-dir-btn'));
+      tools.append(chipButton('📅 Календарь и погода ▸', 'studio', { tab: 'calendar' }, 'Календарь с погодой по дням: на любое число или промежуток, заготовки на 1, 3 и 7 дней, сочинить прогноз', 'ku-dir-btn'));
+      card.append(fields, row, tools);
+      if (today > 0) card.append(node('span', 'ku-dir-caption', ui.wxFrom === 0 && ui.wxDays === 1 ? 'Выбери погоду: она встанет на сегодня. Чтобы на несколько дней или на завтра — выбери дни выше.' : 'Выбери погоду: она встанет на отмеченные дни.'));
       return card;
     };
     // The rail: always there, one button per tab; the first one folds and unfolds the panel.
@@ -1137,8 +1391,10 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     if (pending) toggle.append(node('span', 'ku-rail-badge', pending));
     // The tabs are shared out between the two rails: the state of the scene on one side, the tools on the other.
     const TOOL_PANES = new Set(['songs', 'scene', 'event', 'note', ...extraPanes.keys()]);
+    // «Рассказчику» and «Повторы» live in the left column with the state of the scene, the rest of the tools stay on the right.
+    const LEFT_PANES = new Set(['note', 'repeats']);
     const tiles = [...grid.children];
-    const isTool = child => TOOL_PANES.has(child.dataset?.pane) || child.dataset?.kuAction === 'dir-kick';
+    const isTool = child => (TOOL_PANES.has(child.dataset?.pane) && !LEFT_PANES.has(child.dataset?.pane)) || child.dataset?.kuAction === 'dir-kick';
     bar.querySelector('.ku-rail:not(.ku-rail-r)').replaceChildren(toggle, ...tiles.filter(child => !isTool(child)));
     bar.querySelector('.ku-rail-r').replaceChildren(...tiles.filter(isTool));
     const TAB_TITLES = { who: 'Кто на сцене', others: 'Позвать', time: 'Время', weather: 'Погода', mode: 'Тип сцены', dice: 'Кубик близости', heat: 'Накал сцены', quests: 'Квесты', songs: 'Медиа', scene: 'Новая сцена', event: 'Событие', note: 'Рассказчику', sent: 'Что уходит модели' };
@@ -1170,9 +1426,9 @@ export function mountChatOverlay({ onDiceRelease, onStage, onHeat, onQuestHint, 
     else if (pane === 'dice') parts.push(diceCard(view));
     else if (pane === 'weather') parts.push(weatherCard());
     else if (pane === 'mode') parts.push(modeCard());
-    else if (pane === 'event') parts.push(eventMenu());
+    else if (pane === 'event') parts.push(eventMenu(), planMenu(director));
     else if (pane === 'scene') parts.push(sceneMenu(director));
-    else if (pane === 'note') parts.push(noteMenu());
+    else if (pane === 'note') parts.push(noteMenu(director));
     else if (extraPanes.has(pane)) parts.push(extraPaneBody(extraPanes.get(pane)));
     if (director.cues?.length) {
       const queue = node('div', 'ku-dir-row ku-dir-queue');

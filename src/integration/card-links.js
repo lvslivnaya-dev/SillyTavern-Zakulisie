@@ -218,3 +218,19 @@ export function syncCardLinks(state, library) {
   const cards = Object.fromEntries(Object.entries(state.ui?.cards ?? {}).filter(([cardId, entityId]) => known.has(cardId) && state.entities?.[entityId]));
   return Object.keys(cards).length === Object.keys(state.ui?.cards ?? {}).length ? state : { ...state, ui: { ...(state.ui ?? {}), cards } };
 }
+
+/**
+ * A chat opened with the tavern character `avatar` (its narrator): the cards tied to that narrator are switched on, ONCE per card. The card is
+ * then written down in `state.ui.cardsAuto`, so a card the user switched off in this chat does not come back by itself.
+ * A card that could not be attached (several heroes with its name) is written down too, so it does not complain at every opening.
+ * → { state, linked, skipped, replaced } (state is the same object when nothing was due).
+ */
+export function autoLinkNarratorCards(state, library, avatar) {
+  const key = String(avatar ?? '');
+  const done = new Set(state.ui?.cardsAuto ?? []);
+  const due = key ? (library?.characters ?? []).filter(card => !card.persona && (card.narrators ?? []).includes(key) && !done.has(card.id)) : [];
+  if (!due.length) return { state, linked: [], skipped: [], replaced: [] };
+  const result = linkCards(state, library, due.map(card => card.id));
+  const cardsAuto = [...new Set([...done, ...due.map(card => card.id)])];
+  return { ...result, state: { ...result.state, ui: { ...(result.state.ui ?? {}), cardsAuto } } };
+}

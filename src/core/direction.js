@@ -9,19 +9,13 @@
  * Pure: no DOM, no SillyTavern. index.js feeds it the generation type and the chat.
  */
 
-/** Ready genres of a scene event (the «⚡ Событие» pills): the label on the button and what the narrator is told. */
-export const EVENT_GENRES = Object.freeze({
-  fight: { label: 'Драка', icon: '👊', en: 'a fight: the tension breaks into blows, the characters get physical' },
-  conflict: { label: 'Конфликт', icon: '⚔', en: 'an open conflict flares up: a heated quarrel or a standoff that nobody can ignore' },
-  drama: { label: 'Драма', icon: '🎭', en: 'an emotional drama: a painful confession, a rupture or a loss that hits the characters hard' },
-  massacre: { label: 'Резня', icon: '🩸', en: 'a massacre: mass killing, brutal and graphic, with lasting consequences for the survivors' },
-  rape: { label: 'Изнасилование', icon: '⛓', en: 'a rape: a sexual assault is committed against a character, written in the story\'s own tone, with its real consequences for those involved' },
-  violence: { label: 'Насилие', icon: '🥀', en: 'an act of violence is committed against a character, with real physical and emotional consequences' },
-  pressure: { label: 'Психологическое давление', icon: '🕸', en: 'psychological pressure: manipulation, intimidation, gaslighting or coercion aimed at a character' },
-});
+import { EVENT_GENRES } from './event-genres.js';
+import { duePlans, normalizePlans } from './event-plan.js';
+
+export { EVENT_GENRES };
 
 export const CUE_KINDS = Object.freeze(['enter', 'react', 'custom', 'factor', 'secret', 'hold', 'focus', 'call', 'leave', 'event', 'scene', 'note', 'recall', 'dice', 'quest']);
-export const DIRECTION_LIMITS = Object.freeze({ cues: 20, text: 400, sceneText: 1200, place: 120, cast: 20, wait: 9, favorites: 30, favorite: 200 });
+export const DIRECTION_LIMITS = Object.freeze({ cues: 20, text: 400, sceneText: 1200, place: 120, cast: 20, wait: 9, favorites: 30, favorite: 200, notes: 30, pins: 10, everyMax: 99 });
 /** How much story time a new scene skips (the narrator's words; the chronicler moves the clock). */
 export const SCENE_SKIPS = Object.freeze({ none: '', hour: 'an hour later', evening: 'later that evening', nextday: 'the next day', week: 'a week later' });
 
@@ -91,7 +85,156 @@ function normalizeCue(raw, knownIds) {
 export function normalizeDirection(raw, knownIds = null) {
   const ids = knownIds ? new Set(knownIds) : null;
   const cues = Array.isArray(raw?.cues) ? raw.cues.map(cue => normalizeCue(cue, ids)).filter(Boolean) : [];
-  return { cues: cues.slice(-DIRECTION_LIMITS.cues) };
+  const pins = normalizePins(raw?.pins);
+  const uses = normalizeUses(raw?.uses);
+  const plans = normalizePlans(raw?.plans);
+  return { cues: cues.slice(-DIRECTION_LIMITS.cues), ...(pins.length ? { pins } : {}), ...(Object.keys(uses).length ? { uses } : {}), ...(plans.length ? { plans } : {}) };
+}
+
+/** What stays of a direction state besides its cues: the pinned notes, when the saved ones were last sent, the planned events. */
+const keepRest = (direction, cues) => ({ cues, ...(direction?.pins?.length ? { pins: direction.pins } : {}), ...(direction?.uses && Object.keys(direction.uses).length ? { uses: direction.uses } : {}), ...(direction?.plans?.length ? { plans: direction.plans } : {}) });
+
+const everyOf = value => Math.max(0, Math.min(DIRECTION_LIMITS.everyMax, Math.round(Number(value)) || 0));
+
+/** Pinned notes of this chat: { id, text, every, last }. `every` = a cooldown in replies (0 = every reply); `last` = the reply number it went with (null = not yet). */
+function normalizePins(raw) {
+  const result = [];
+  const seen = new Set();
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const text = clip(item?.text, DIRECTION_LIMITS.text);
+    const id = typeof item?.id === 'string' && item.id ? item.id.slice(0, 60) : '';
+    if (!text || !id || seen.has(id)) continue;
+    seen.add(id);
+    const last = Number.isFinite(Number(item.last)) && item.last !== null && item.last !== '' ? Math.max(0, Math.round(Number(item.last))) : null;
+    result.push({ id, text, every: everyOf(item.every), last });
+  }
+  return result.slice(0, DIRECTION_LIMITS.pins);
+}
+
+/** When each saved note went with a reply (by the reply number): its cooldown counts from there. */
+function normalizeUses(raw) {
+  const result = {};
+  if (!raw || typeof raw !== 'object') return result;
+  for (const [id, value] of Object.entries(raw).slice(0, DIRECTION_LIMITS.notes * 2)) {
+    const number = Number(value);
+    if (id && Number.isFinite(number) && number >= 0) result[String(id).slice(0, 60)] = Math.round(number);
+  }
+  return result;
+}
+
+const randomId = prefix => `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+
+/** The saved notes for the narrator, shared by all chats: { id, text, every }, unique by text, newest first. */
+export function normalizeNoteLibrary(raw) {
+  const seen = new Set();
+  const result = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const text = clip(item?.text, DIRECTION_LIMITS.text);
+    const key = text.toLocaleLowerCase('ru-RU');
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    result.push({ id: typeof item.id === 'string' && item.id ? item.id.slice(0, 60) : randomId('note'), text, every: everyOf(item.every) });
+  }
+  return result.slice(0, DIRECTION_LIMITS.notes);
+}
+
+/** Save a note (the same text again only changes its cooldown). → the new library. */
+export function saveNote(library, { text, every = 0 }) {
+  const clean = clip(text, DIRECTION_LIMITS.text);
+  if (!clean) throw new Error('Впишите текст указания.');
+  const list = normalizeNoteLibrary(library);
+  const key = clean.toLocaleLowerCase('ru-RU');
+  const old = list.find(item => item.text.toLocaleLowerCase('ru-RU') === key);
+  return normalizeNoteLibrary([{ id: old?.id ?? randomId('note'), text: clean, every: everyOf(every) }, ...list.filter(item => item !== old)]);
+}
+
+export function removeNote(library, id) {
+  return normalizeNoteLibrary(library).filter(item => item.id !== id);
+}
+
+/**
+ * Change a saved (or pinned-to-all) note IN PLACE: the same id, so its cooldown and its pin stay. A text that already belongs to another note
+ * is refused (two notes with the same words would collapse into one). → the new library.
+ */
+export function editNote(library, id, { text, every = 0 }) {
+  const clean = clip(text, DIRECTION_LIMITS.text);
+  if (!clean) throw new Error('Впишите текст указания.');
+  const list = normalizeNoteLibrary(library);
+  if (!list.some(item => item.id === id)) throw new Error('Такого указания уже нет.');
+  const key = clean.toLocaleLowerCase('ru-RU');
+  if (list.some(item => item.id !== id && item.text.toLocaleLowerCase('ru-RU') === key)) throw new Error('Такое указание уже есть в списке.');
+  return list.map(item => (item.id === id ? { ...item, text: clean, every: everyOf(every) } : item));
+}
+
+/** The same for a note pinned to this chat: the text and the cooldown change, its place in line and its `last` stay. */
+export function editPin(direction, pinId, { text, every = 0 }) {
+  const clean = clip(text, DIRECTION_LIMITS.text);
+  if (!clean) throw new Error('Впишите текст указания.');
+  const next = normalizeDirection(direction);
+  const pins = next.pins ?? [];
+  if (!pins.some(pin => pin.id === pinId)) throw new Error('Такого указания уже нет.');
+  const key = clean.toLocaleLowerCase('ru-RU');
+  if (pins.some(pin => pin.id !== pinId && pin.text.toLocaleLowerCase('ru-RU') === key)) throw new Error('Такое указание уже закреплено.');
+  return { ...next, pins: pins.map(pin => (pin.id === pinId ? { ...pin, text: clean, every: everyOf(every) } : pin)) };
+}
+
+/** Put a planned event into the chat's direction (core/event-plan.js decides the moment). */
+export function planEvent(direction, plans) {
+  const next = normalizeDirection(direction);
+  const { plans: _old, ...rest } = next;
+  const list = normalizePlans(plans);
+  return list.length ? { ...rest, plans: list } : rest;
+}
+
+/** The number of replies of the narrator so far: the counter every cooldown counts in. */
+export function replyCountOf(messages) {
+  return (Array.isArray(messages) ? messages : []).filter(message => message && !message.is_user && !message.is_system && String(message.mes ?? '').trim()).length;
+}
+
+/** Replies left before a saved note may be sent again (0 = it may). `every` 0 = no cooldown. */
+export function noteCooldownLeft(direction, noteId, every, replyCount) {
+  const last = direction?.uses?.[noteId];
+  if (last == null || !(every > 0)) return 0;
+  return Math.max(0, every - (replyCount - last));
+}
+
+/** A saved note went (or is queued to go) with the next reply: its cooldown starts. */
+export function markNoteUsed(direction, noteId, replyCount) {
+  const next = normalizeDirection(direction);
+  return { ...next, uses: { ...(next.uses ?? {}), [noteId]: Math.max(0, Math.round(replyCount)) } };
+}
+
+/** Pin a note to this chat: it goes with every reply (or with every `every`-th one) until it is unpinned. */
+export function pinNote(direction, { text, every = 0 }) {
+  const clean = clip(text, DIRECTION_LIMITS.text);
+  if (!clean) throw new Error('Впишите текст указания.');
+  const next = normalizeDirection(direction);
+  const pins = next.pins ?? [];
+  if (pins.some(pin => pin.text.toLocaleLowerCase('ru-RU') === clean.toLocaleLowerCase('ru-RU'))) {
+    return { ...next, pins: pins.map(pin => (pin.text.toLocaleLowerCase('ru-RU') === clean.toLocaleLowerCase('ru-RU') ? { ...pin, every: everyOf(every) } : pin)) };
+  }
+  if (pins.length >= DIRECTION_LIMITS.pins) throw new Error(`Закреплено уже ${DIRECTION_LIMITS.pins}: открепите лишнее.`);
+  return { ...next, pins: [...pins, { id: randomId('pin'), text: clean, every: everyOf(every), last: null }] };
+}
+
+export function unpinNote(direction, pinId) {
+  const next = normalizeDirection(direction);
+  const pins = (next.pins ?? []).filter(pin => pin.id !== pinId);
+  const { pins: _old, ...rest } = next;
+  return pins.length ? { ...rest, pins } : rest;
+}
+
+/** The same for a note pinned to ALL chats: when it went in THIS chat is in `direction.uses['pin:<id>']`. */
+export function globalPinLeft(direction, pin, replyCount) {
+  const last = direction?.uses?.[`pin:${pin.id}`];
+  if (last == null) return 0;
+  return Math.max(0, Math.max(1, pin.every) - (replyCount - last));
+}
+
+/** Replies left before a pinned note goes again: 0 = with the very next reply. */
+export function pinLeft(pin, replyCount) {
+  if (pin?.last == null) return 0;
+  return Math.max(0, Math.max(1, pin.every) - (replyCount - pin.last));
 }
 
 /**
@@ -115,25 +258,27 @@ export function armCue(direction, raw, knownIds = null) {
     return old.kind === cue.kind && old.kind !== 'custom' && (old.targetId ?? '') === (cue.targetId ?? '') && (old.eventId ?? '') === (cue.eventId ?? '');
   };
   const cues = (direction?.cues ?? []).filter(old => !clash(old));
-  return { cues: [...cues, cue].slice(-DIRECTION_LIMITS.cues) };
+  // The pinned notes, their cooldowns and the planned events ride along: arming a cue must not wipe them.
+  return keepRest(direction, [...cues, cue].slice(-DIRECTION_LIMITS.cues));
 }
 
 export function removeCue(direction, cueId) {
-  return { cues: (direction?.cues ?? []).filter(cue => cue.id !== cueId) };
+  return keepRest(direction, (direction?.cues ?? []).filter(cue => cue.id !== cueId));
 }
 
 /**
  * A generation is about to start. A new turn burns the cues of the last one,
  * counts down the waiting ones and puts the ready ones in force; a swipe or a
  * regeneration keeps those in force and adds the freshly armed ones.
- * → { direction, changed, fired: cues put in force now }
+ * → { direction, changed, fired: cues put in force now, firedPlans: planned events that came due (their cues are among `fired`) }
  */
-export function startGeneration(direction, type) {
+export function startGeneration(direction, type, { replyCount = 0, globalPins = [], nowAbs = null } = {}) {
   const cues = direction?.cues ?? [];
-  if (IGNORED.has(type)) return { direction: { cues }, changed: false, fired: [] };
+  if (IGNORED.has(type)) return { direction: keepRest(direction, cues), changed: false, fired: [], firedPlans: [] };
   const sameTurn = SAME_TURN.has(type);
   const next = [];
   const fired = [];
+  const firedPlans = [];
   for (const cue of cues) {
     if (!sameTurn && cue.used) continue; // the last turn's cue: done
     if (cue.wait > 0) {
@@ -143,8 +288,51 @@ export function startGeneration(direction, type) {
     if (!cue.used) fired.push(cue.id);
     next.push({ ...cue, used: true });
   }
-  const changed = next.length !== cues.length || next.some((cue, index) => cue.used !== cues[index]?.used || cue.wait !== cues[index]?.wait);
-  return { direction: { cues: next }, changed, fired };
+  // The pinned notes: each goes with this reply when its cooldown is over. A swipe or a regeneration redoes the same reply: it counts nothing,
+  // but a note that has NEVER gone yet (pinned a moment ago, and the reply is redone to see it work) goes with it.
+  const at = sameTurn ? Math.max(0, replyCount - 1) : replyCount;
+  const inForce = text => next.some(cue => cue.kind === 'note' && cue.used && cue.text === text);
+  let pins = direction?.pins ?? [];
+  let pinned = false;
+  pins = pins.map(pin => {
+    if (sameTurn ? pin.last != null : pinLeft(pin, at) > 0) return pin;
+    pinned = true;
+    if (!inForce(pin.text)) {
+      next.push({ id: `pinned-${pin.id}`, kind: 'note', text: pin.text, wait: 0, used: true });
+      fired.push(`pinned-${pin.id}`);
+    }
+    return { ...pin, last: at };
+  });
+  // The notes pinned to ALL chats: the same, but their own `last` lives in this chat's `uses` (each chat counts its own replies).
+  let uses = direction?.uses;
+  for (const pin of globalPins) {
+    const seen = uses?.[`pin:${pin.id}`];
+    if (sameTurn ? seen != null : globalPinLeft({ uses }, pin, at) > 0) continue;
+    uses = { ...(uses ?? {}), [`pin:${pin.id}`]: at };
+    pinned = true;
+    if (inForce(pin.text)) continue; // the same words are already going
+    next.push({ id: `pinned-${pin.id}`, kind: 'note', text: pin.text, wait: 0, used: true });
+    fired.push(`pinned-${pin.id}`);
+  }
+  // The planned events whose story moment has come turn into event cues of this reply. A swipe or a regeneration only redoes the same reply:
+  // what came due already sits among the cues in force, and the plans left are not touched.
+  let plans = direction?.plans ?? [];
+  let planned = false;
+  if (!sameTurn && plans.length) {
+    const split = duePlans(plans, nowAbs);
+    if (split.due.length) {
+      planned = true;
+      plans = split.rest;
+      for (const plan of split.due) {
+        const id = `planned-${plan.id}`;
+        next.push({ id, kind: 'event', wait: 0, used: true, ...(plan.text ? { text: plan.text } : {}), ...(plan.genre ? { genre: plan.genre, ...(plan.text ? {} : { text: EVENT_GENRES[plan.genre].label }) } : {}) });
+        fired.push(id);
+        firedPlans.push(plan);
+      }
+    }
+  }
+  const changed = pinned || planned || next.length !== cues.length || next.some((cue, index) => cue.used !== cues[index]?.used || cue.wait !== cues[index]?.wait);
+  return { direction: keepRest({ ...direction, pins, uses, plans }, next.slice(-DIRECTION_LIMITS.cues)), changed, fired, firedPlans };
 }
 
 export function activeCues(direction) {

@@ -1,6 +1,7 @@
 import { button, characterId, characterName, element } from '../helpers.js';
 import { icon } from '../icons.js';
-import { WARDROBE_CATEGORIES, WARDROBE_GENDERS, WARDROBE_SHELVES, cardLabel, cardsOf, composeOutfit, searchCards } from '../../core/index.js';
+import { WARDROBE_CATEGORIES, WARDROBE_GENDERS, WARDROBE_SHELVES, cardLabel, cardsOf, composeOutfit, personalPieces, searchCards } from '../../core/index.js';
+import { wardrobeFocus } from '../wardrobe-focus.js';
 import { fileToDataUrl, imageUrl } from '../../integration/wardrobe-images.js';
 import { normalizeLooksLimits } from '../../integration/world-prompt.js';
 
@@ -32,6 +33,13 @@ export function createWardrobePages(ctx) {
   // How the cards are ordered: by section (as always), what is worn first, by character (whose it is), newest first.
   let sortMode = 'section';
   let sortPerson = ''; // in the «by character» order: one person's things only ('' = everyone, grouped)
+  const CLOSETS = '__closets'; // the section «Шкафы»: whose pieces and outfits are in each character's closet, put together here
+  let closetFor = ''; // the card whose closet is open
+  let closetQuery = '';
+  let closetCat = '';
+  let closetShelfPick = '';
+  let closetGenderPick = '';
+  let closetOnly = false; // show only what is already in the closet
   const LOOKS = '__looks'; // the section «Образы»: outfits as collages of their pieces, and the board to put one together
   let editing = false; // the board of an outfit is open (a new one, or the one of `lookId`)
   let pickCat = ''; // the section of the picker on the board ('' = all)
@@ -326,11 +334,120 @@ export function createWardrobePages(ctx) {
     return pane;
   }
 
+  // ---- «Шкафы»: put together the closet of a character ---------------------------------------------
+
+  /** The closet of a card as the card keeps it: { cardIds, lookIds, ownIds }. */
+  const closetOfCard = card => ({ cardIds: [...(card?.closet?.cardIds ?? [])], lookIds: [...(card?.closet?.lookIds ?? [])], ownIds: [...(card?.closet?.ownIds ?? [])] });
+
+  /** Save a closet at once (every tick goes to the card, like the switches elsewhere on the page). */
+  function saveCloset(card, closet, done) {
+    const clean = { ...closet, ownIds: closet.ownIds.filter(id => closet.cardIds.includes(id)) };
+    return attempt(() => act('onLibraryUpdateCharacter', { cardId: card.id, changes: { closet: clean } }, 'library-update-character'), done);
+  }
+
+  function renderClosets() {
+    const pane = element('div', { className: 'ku-wgal ku-closets' });
+    const library = snapshot().locationLibrary?.characters ?? [];
+    const entityOf = new Map(Object.entries(snapshot().cardByEntity ?? {}).map(([entityId, card]) => [card.id, entityId]));
+    if (!library.length) { pane.append(element('p', { className: 'muted', text: 'В библиотеке пока нет карточек персонажей: сначала создайте карточку в окне «Карточки персонажей», и для неё здесь можно будет собрать шкаф.' })); return pane; }
+    const ordered = [...library].sort((left, right) => Number(entityOf.has(right.id)) - Number(entityOf.has(left.id)) || Number(Boolean(right.persona)) - Number(Boolean(left.persona)) || left.name.localeCompare(right.name, 'ru'));
+    if (!library.some(card => card.id === closetFor)) closetFor = ordered[0].id;
+    const card = library.find(item => item.id === closetFor);
+    const closet = closetOfCard(card);
+
+    // Who: every card of the library, those in this chat first.
+    const who = element('nav', { className: 'ku-closet-who', 'aria-label': 'Чей шкаф' });
+    for (const item of ordered) {
+      const count = (item.closet?.cardIds?.length ?? 0) + (item.closet?.lookIds?.length ?? 0);
+      const node = element('button', { type: 'button', className: `ku-wsb${item.id === closetFor ? ' on' : ''}`, 'aria-current': item.id === closetFor ? 'true' : null, title: entityOf.has(item.id) ? 'Карточка включена в этом чате' : 'Карточка не включена в этом чате' }, [
+        element('span', { text: `${entityOf.has(item.id) ? '● ' : ''}${item.name}${item.persona ? ' (персона)' : ''}` }), element('i', { text: String(count) })]);
+      node.addEventListener('click', () => { closetFor = item.id; render(); });
+      who.append(node);
+    }
+
+    const main = element('div', { className: 'ku-closet-main' });
+    const owner = entityOf.get(card.id) ?? '';
+    const taken = personalPieces({ characters: library });
+    const another = id => taken.has(id) && taken.get(id) !== card.id;
+    const everything = wardrobe().cards.filter(item => !another(item.id));
+    const looks = wardrobe().looks.filter(look => !look.cardIds.some(another));
+    main.append(element('div', { className: 'ku-row' }, [
+      element('h3', { text: `Шкаф: ${card.name}`, style: { margin: '0' } }),
+      element('span', { className: 'muted ku-small', text: `вещей ${closet.cardIds.length}, образов ${closet.lookIds.length}${owner ? '' : ' · карточка не включена в этом чате'}` }),
+    ]));
+    main.append(element('p', { className: 'muted ku-small', style: { margin: '0 0 6px' }, text: 'Нажимайте на вещи и образы, чтобы положить их в шкаф (повторное нажатие убирает). Это тот же шкаф, что в карточке персонажа. В чате герой выбирает одежду из него.' }));
+
+    // Filters and quick actions.
+    const search = element('input', { type: 'search', value: closetQuery, placeholder: 'Найти вещь', 'aria-label': 'Поиск вещи для шкафа', className: 'ku-search' });
+    search.addEventListener('change', () => { closetQuery = search.value; render(); });
+    const category = element('select', { 'aria-label': 'Раздел' }, [element('option', { value: '', text: 'Все разделы' }), ...WARDROBE_CATEGORIES.map(([id, label]) => element('option', { value: id, text: label, selected: id === closetCat }))]);
+    category.addEventListener('change', () => { closetCat = category.value; render(); });
+    const shelfSelect = element('select', { 'aria-label': 'Полка' }, [element('option', { value: '', text: 'Все полки' }), ...Object.entries(WARDROBE_SHELVES).map(([id, label]) => element('option', { value: id, text: `Полка: ${label}`, selected: id === closetShelfPick }))]);
+    shelfSelect.addEventListener('change', () => { closetShelfPick = shelfSelect.value; render(); });
+    const genderSelect = element('select', { 'aria-label': 'Пол вещей' }, [element('option', { value: '', text: 'Любой пол' }), ...Object.entries(WARDROBE_GENDERS).map(([id, label]) => element('option', { value: id, text: label, selected: id === closetGenderPick }))]);
+    genderSelect.addEventListener('change', () => { closetGenderPick = genderSelect.value; render(); });
+    const text = closetQuery.trim().toLocaleLowerCase('ru-RU');
+    const shown = everything.filter(item => (!closetCat || item.category === closetCat) && (!closetShelfPick || item.shelf === closetShelfPick) && (!closetGenderPick || item.gender === closetGenderPick)
+      && (!closetOnly || closet.cardIds.includes(item.id)) && (!text || `${cardLabel(item)} ${item.description ?? ''}`.toLocaleLowerCase('ru-RU').includes(text)));
+    const wornNow = owner ? (worn()[owner]?.cardIds ?? []).filter(id => everything.some(item => item.id === id)) : [];
+    const tie = (list, ids, on) => { const set = new Set(list); for (const id of ids) { if (on) set.add(id); else set.delete(id); } return [...set]; };
+    main.append(element('div', { className: 'ku-row ku-wtools' }, [
+      search, category, shelfSelect, genderSelect,
+      Object.assign(button(closetOnly ? 'Показаны только выбранные' : 'Только выбранные', `btn small${closetOnly ? ' primary' : ''}`, () => { closetOnly = !closetOnly; render(); }, 'Спрятать всё, чего ещё нет в шкафу'), {}),
+    ]));
+    main.append(element('div', { className: 'ku-row' }, [
+      button(`Положить всё показанное (${shown.length})`, 'btn small', () => saveCloset(card, { ...closet, cardIds: tie(closet.cardIds, shown.map(item => item.id), true) }, 'Вещи положены в шкаф'), 'Все вещи, которые видны сейчас по фильтрам'),
+      button('Убрать всё показанное', 'btn small', () => saveCloset(card, { ...closet, cardIds: tie(closet.cardIds, shown.map(item => item.id), false) }, 'Вещи убраны из шкафа')),
+      ...(owner ? [Object.assign(button(`Взять то, что надето сейчас (${wornNow.length})`, 'btn small', () => saveCloset(card, { ...closet, cardIds: tie(closet.cardIds, wornNow, true) }, 'Надетое положено в шкаф'), 'Вещи, которые на герое в этом чате'), { disabled: !wornNow.length })] : []),
+      ...(closet.cardIds.length || closet.lookIds.length ? [button('Очистить шкаф', 'btn small', () => saveCloset(card, { cardIds: [], lookIds: [], ownIds: [] }, 'Шкаф пуст'), 'Убрать из шкафа всё: вещи и образы')] : []),
+    ]));
+
+    // Outfits.
+    if (looks.length) {
+      main.append(element('p', { className: 'section-title', style: { margin: '10px 0 6px' }, text: `Образы · ${looks.length}` }));
+      const row = element('div', { className: 'ku-closet-looks' });
+      for (const look of looks) {
+        const on = closet.lookIds.includes(look.id);
+        const chip = element('button', { type: 'button', className: `ku-chip ku-knower${on ? ' seen' : ''}`, 'aria-pressed': String(on), title: `${look.cardIds.length} вещей` }, [`${on ? '✓ ' : ''}${look.name}`]);
+        chip.addEventListener('click', () => saveCloset(card, { ...closet, lookIds: tie(closet.lookIds, [look.id], !on) }, on ? `Образ «${look.name}» убран из шкафа` : `Образ «${look.name}» лёг в шкаф`));
+        row.append(chip);
+      }
+      main.append(row);
+    }
+
+    // Things: one tap puts a thing into the closet.
+    main.append(element('p', { className: 'section-title', style: { margin: '10px 0 6px' }, text: `Вещи · ${shown.length}` }));
+    const grid = element('div', { className: 'ku-tiles ku-closet-tiles' });
+    for (const item of shown.slice(0, 240)) {
+      const on = closet.cardIds.includes(item.id);
+      const tileNode = element('button', { type: 'button', className: `ku-tile ku-ctile${on ? ' in' : ''}`, 'aria-pressed': String(on), 'aria-label': `${cardLabel(item)}: ${on ? 'убрать из шкафа' : 'положить в шкаф'}` });
+      tileNode.append(item.image
+        ? element('img', { className: 'ku-pic', src: imageUrl(item.image), alt: '', loading: 'lazy', draggable: false })
+        : element('span', { className: 'ku-pic ku-nopic', 'aria-hidden': 'true' }, [icon('shirt'), element('span', { text: SECTION[item.category] })]));
+      tileNode.append(element('span', { className: 'ku-cap', text: cardLabel(item) }), element('span', { className: 'ku-closet-tick', 'aria-hidden': 'true', text: on ? '✓' : '' }));
+      tileNode.addEventListener('click', () => saveCloset(card, { ...closet, cardIds: tie(closet.cardIds, [item.id], !on) }));
+      grid.append(tileNode);
+    }
+    main.append(grid);
+    if (!shown.length) main.append(element('p', { className: 'muted ku-small', text: everything.length ? 'Под такие фильтры вещей нет.' : 'В гардеробе пока нет вещей: добавьте картинки в разделах слева.' }));
+    if (shown.length > 240) main.append(element('p', { className: 'muted ku-small', text: 'Показаны первые 240: сузьте поиск или выберите раздел.' }));
+    pane.append(element('div', { className: 'ku-closet-split' }, [who, main]));
+    return pane;
+  }
+
   function renderWardrobe() {
     const view = element('div', { className: 'ku-wardrobe' });
+    // The drawer asked for a closet: open this section on it.
+    if (wardrobeFocus.closets) {
+      section = CLOSETS;
+      if (wardrobeFocus.cardId) closetFor = wardrobeFocus.cardId;
+      wardrobeFocus.closets = false;
+      wardrobeFocus.cardId = '';
+    }
     view.append(sceneStrip());
     const things = section === THINGS;
     const looksTab = section === LOOKS;
+    const closetsTab = section === CLOSETS;
     const cards = wardrobe().cards;
     if (openId && !cards.some(card => card.id === openId)) { openId = ''; draft = null; }
     if (!openId) focusedId = '';
@@ -340,7 +457,7 @@ export function createWardrobePages(ctx) {
     search.addEventListener('change', () => { query = search.value; render(); });
     const auto = element('input', { type: 'checkbox', className: 'ku-switch', checked: describeOnUpload, 'aria-label': 'Описывать картинки сразу' });
     auto.addEventListener('change', () => { describeOnUpload = auto.checked; });
-    if (!things && !looksTab) view.append(element('div', { className: 'ku-row ku-wtools' }, [
+    if (!things && !looksTab && !closetsTab) view.append(element('div', { className: 'ku-row ku-wtools' }, [
       seg(Object.entries(WARDROBE_SHELVES), shelf, 'Полка', key => { shelf = key; picked.clear(); lookId = ''; target = ''; render(); }),
       seg(Object.entries(WARDROBE_GENDERS), gender, 'Женское, унисекс или мужское', key => { gender = key; render(); }),
       search,
@@ -374,10 +491,14 @@ export function createWardrobePages(ctx) {
     const thingsCount = (snapshot().locationLibrary?.items ?? []).length + (world().items ?? []).filter(item => !item.libraryId).length;
     const thingsNode = element('button', { type: 'button', className: `ku-wsb ku-wsb-things${things ? ' on' : ''}`, 'aria-current': things ? 'true' : null, title: 'Любые предметы, не одежда: телефон, оружие, ноутбук, портсигар… Библиотека и то, что есть только в этом чате' }, [element('span', { text: 'Вещи' }), ...fresh(snapshot().inbox?.things ?? 0), element('i', { text: String(thingsCount) })]);
     thingsNode.addEventListener('click', () => { section = THINGS; render(); });
-    sections.append(looksNode, thingsNode);
+    const closetsCount = (snapshot().locationLibrary?.characters ?? []).filter(item => item.closet?.cardIds?.length || item.closet?.lookIds?.length).length;
+    const closetsNode = element('button', { type: 'button', className: `ku-wsb ku-wsb-things${closetsTab ? ' on' : ''}`, 'aria-current': closetsTab ? 'true' : null, title: 'Шкафы персонажей: соберите, какие вещи и образы есть у каждого героя' }, [element('span', { text: 'Шкафы' }), element('i', { text: String(closetsCount) })]);
+    closetsNode.addEventListener('click', () => { section = CLOSETS; render(); });
+    sections.append(looksNode, thingsNode, closetsNode);
     body.append(sections);
     if (things) { body.append(renderThings()); view.append(body); return view; }
     if (looksTab) { body.append(renderLooksTab()); view.append(body); return view; }
+    if (closetsTab) { body.append(renderClosets()); view.append(body); return view; }
 
     const gallery = element('div', { className: 'ku-wgal' });
     const list = visibleCards();
@@ -796,6 +917,14 @@ export const WARDROBE_STYLE = `
 .ku-wsb i{font-style:normal;font-size:11px;opacity:.8}
 .ku-wsb .ku-wnew{margin-left:auto;padding:0 6px;border-radius:999px;background:var(--k-accent);color:var(--k-bg);font-size:10.5px;font-weight:800;line-height:16px}
 .ku-chatthings{margin-bottom:8px}
+.ku-closet-split{display:grid;grid-template-columns:200px minmax(0,1fr);gap:14px;align-items:start}
+@container (max-width:760px){.ku-closet-split{grid-template-columns:minmax(0,1fr)}}
+.ku-closet-who{display:flex;flex-direction:column;gap:1px;max-height:70vh;overflow-y:auto}
+.ku-closet-main{min-width:0;display:flex;flex-direction:column;gap:8px}
+.ku-closet-looks{display:flex;flex-wrap:wrap;gap:6px}
+.ku-ctile.in{border-color:var(--k-accent);box-shadow:0 0 0 2px var(--k-accent-soft)}
+.ku-closet-tick{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:var(--k-bg);color:var(--k-accent);border:1px solid var(--k-line)}
+.ku-ctile.in .ku-closet-tick{background:var(--k-accent);color:var(--k-bg);border-color:var(--k-accent)}
 .ku-wsb-things{margin-top:8px;border-top:1px solid var(--k-line);border-radius:0 0 8px 8px}
 .ku-wsb-things+.ku-wsb-things{margin-top:0;border-top:0;border-radius:8px}
 .ku-scenebar{display:flex;flex-wrap:wrap;align-items:center;gap:6px}

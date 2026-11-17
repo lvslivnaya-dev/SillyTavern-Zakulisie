@@ -482,8 +482,21 @@ export function startCharacters(doc, { context, settings, save, api = characterA
     const promptId = box.querySelector('[data-new="prompt"]')?.value ?? '';
     const promptText = promptId ? (promptList.find(item => item.id === promptId)?.text ?? '') : '';
     const avatar = await api.create(name);
-    // the text is written as JSON after the card is made: the form of the creation turns every line break into CRLF
-    if (promptText) await api.setField(doc, avatar, 'description', promptText);
+    // the text is written as JSON after the card is made: the form of the creation turns every line break into CRLF.
+    // It is written to the card file itself and READ BACK: a narrator must never be left with an empty description without a word.
+    if (promptText) {
+      let written = false;
+      for (let attempt = 0; attempt < 3 && !written; attempt += 1) {
+        try {
+          await api.setField(doc, avatar, 'description', promptText, { server: true });
+          const fresh = await api.full(avatar);
+          const same = text => String(text ?? '').split(String.fromCharCode(13)).join('').trim();
+          written = same(fieldValue(fresh, 'description')) === same(promptText);
+        } catch (error) { report('Промпт нарратора', error); }
+        if (!written) await new Promise(resolve => view.setTimeout(resolve, 400));
+      }
+      if (!written) globalThis.toastr?.error?.(`Нарратор «${name}» создан, но промпт в описание не записался. Откройте его и вставьте промпт вручную.`, 'Закулисье');
+    }
     moveToFolder(settings, avatar, box.querySelector('[data-new="folder"]').value, KIND);
     save();
     state.view = 'all';

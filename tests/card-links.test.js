@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { addFolder, addLibraryCharacter, applyOperation, createDefaultState, createEntity, createOperation, emptyLibrary } from '../src/core/index.js';
-import { entityForCard, linkCards } from '../src/integration/card-links.js';
+import { autoLinkNarratorCards, cardLinks, entityForCard, linkCards, unlinkCards } from '../src/integration/card-links.js';
 
 function chat(...names) {
   let state = createDefaultState();
@@ -58,4 +58,29 @@ test('карточка, вставшая на место другой у тог�
   const result = linkCards(start.state, two.library, [one.character.id, two.character.id]);
   assert.equal(result.linked.length, 2);
   assert.equal(result.replaced.length, 1, 'у героя одна карточка: вытесненная названа');
+});
+
+test('cards tied to the narrator switch on once when its chat opens; one switched off by hand stays off; other narrators are not touched', () => {
+  const { library, folder } = addFolder(emptyLibrary(), { name: 'Магическая битва' });
+  const yuta = addLibraryCharacter(library, { folderId: folder.id, name: 'Юта Оккоцу', narrators: ['Jujutsu.png', 'Jujutsu.png', ''] });
+  const gojo = addLibraryCharacter(yuta.library, { folderId: folder.id, name: 'Годжо Сатору', narrators: ['Jujutsu.png'] });
+  const cafe = addLibraryCharacter(gojo.library, { folderId: folder.id, name: 'Бариста', narrators: ['Cafe.png'] });
+  const lib = cafe.library;
+  assert.deepEqual(yuta.character.narrators, ['Jujutsu.png'], 'the narrators are tidy: unique, no empty ones');
+  const { state } = chat('Юта Оккоцу');
+  const opened = autoLinkNarratorCards(state, lib, 'Jujutsu.png');
+  assert.equal(opened.linked.length, 2, 'both cards of this narrator are on');
+  assert.equal(cardLinks(opened.state).size, 2);
+  assert.ok(![...cardLinks(opened.state).keys()].includes(cafe.character.id), 'the card of another narrator is not');
+  // switched off by hand: the next opening does not bring it back
+  const off = unlinkCards(opened.state, [yuta.character.id], lib);
+  const again = autoLinkNarratorCards(off, lib, 'Jujutsu.png');
+  assert.equal(again.linked.length, 0);
+  assert.equal(again.state, off);
+  assert.equal(cardLinks(again.state).has(yuta.character.id), false);
+  // no narrator (a group, no chat): nothing happens
+  assert.equal(autoLinkNarratorCards(state, lib, '').state, state);
+  // a card tied to a narrator LATER is taken at the next opening
+  const late = addLibraryCharacter(lib, { folderId: folder.id, name: 'Нанами', narrators: ['Jujutsu.png'] });
+  assert.equal(autoLinkNarratorCards(again.state, late.library, 'Jujutsu.png').linked.length, 1);
 });
