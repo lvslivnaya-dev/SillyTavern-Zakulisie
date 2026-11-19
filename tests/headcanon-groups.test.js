@@ -25,12 +25,14 @@ test('a group key is unordered and holds 2..8 characters', () => {
   assert.throws(() => headcanonKey([...'abcdefghi']), /не больше 8/);
 });
 
-test('group headcanons are listed with every name and picked only when the whole group is in the scene', () => {
+test('group headcanons are listed with every name and reach whoever of the group is in the scene', () => {
   const key = headcanonKey('a', 'b', 'c');
   const withGroup = { ...state, ui: { headcanons: addHeadcanons(state, key, ['Втроём делят одну пачку сигарет']).headcanons } };
   const [group] = listHeadcanonPairs(withGroup);
   assert.equal(group.label, 'Майки & Дракен & Баджи');
-  assert.deepEqual(selectHeadcanons(withGroup, { score: mentionScorer(withGroup, 'Майки и Дракен на мосту') }), []);
+  assert.deepEqual(selectHeadcanons(withGroup, { score: mentionScorer(withGroup, 'Майки и Дракен на мосту') }),
+    ['headcanon[Майки & Дракен & Баджи]: Втроём делят одну пачку сигарет'], 'two of the three are here: they still know it');
+  assert.deepEqual(selectHeadcanons(withGroup, { score: mentionScorer(withGroup, 'На мосту никого') }), [], 'nobody of the group is here');
   assert.deepEqual(selectHeadcanons(withGroup, { score: mentionScorer(withGroup, 'Майки, Дракен и Баджи на мосту') }),
     ['headcanon[Майки & Дракен & Баджи]: Втроём делят одну пачку сигарет']);
 });

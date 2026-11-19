@@ -8,7 +8,7 @@ import { createHandlers, parseInboxPath, treeParts, TREES } from '../server-plug
 import { INBOX_FOLDER, libraryDirectories, newLibraryFiles, placeFromLibraryPath } from '../src/integration/library-inbox.js';
 import { createLibraryCallbacks, createLocationLibraryStore } from '../src/integration/location-library-actions.js';
 import { imageUrl, isLibraryTreeImage, isTreeImage } from '../src/integration/wardrobe-images.js';
-import { addFolder, cleanImagePath, emptyLibrary } from '../src/core/index.js';
+import { addFolder, addLibraryCharacter, addLibraryItem, addLocation, cleanImagePath, emptyLibrary } from '../src/core/index.js';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64');
 const TREE = 'api/plugins/kulisy-images/library/';
@@ -94,14 +94,18 @@ test('paths: shelf and folders from where the picture lies; a name only when it 
   assert.match(placeFromLibraryPath('кот.png').problem, /Места/);
 });
 
-test('directories: the library\'s folders laid out for both shelves; persona folders and unfit names are left out', () => {
+test('directories: a library folder gets a folder on the computer only on the shelf where something lies in it; unfit names and the hidden home of the personas are left out', () => {
   let library = emptyLibrary();
   library = addFolder(library, { name: 'Кафе' }).library;
   const cafe = library.folders[0];
   library = addFolder(library, { name: 'Терраса', parentId: cafe.id }).library;
   library = addFolder(library, { name: 'Кафе: плохое?' }).library;
-  library = addFolder(library, { name: 'Персоны', persona: true }).library;
-  assert.deepEqual(libraryDirectories(library), ['Места', 'Места/Кафе', 'Места/Кафе/Терраса', 'Вещи', 'Вещи/Кафе', 'Вещи/Кафе/Терраса']);
+  library = addLibraryCharacter(library, { name: 'Рика', persona: true }).library;
+  const terrace = library.folders.find(folder => folder.name === 'Терраса');
+  assert.deepEqual(libraryDirectories(library), ['Места', 'Вещи'], 'empty folders make no folders on the computer');
+  library = addLocation(library, { name: 'Вечерняя терраса', folderId: terrace.id }).library;
+  library = addLibraryItem(library, { name: 'Плед', folderId: cafe.id }).library;
+  assert.deepEqual(libraryDirectories(library), ['Места', 'Места/Кафе', 'Места/Кафе/Терраса', 'Вещи', 'Вещи/Кафе']);
   assert.deepEqual(newLibraryFiles([{ public: `${TREE}Места/a.png` }, { public: `${TREE}Места/b.png` }], { locations: [{ image: `/${TREE}Места/a.png` }], items: [] }).map(file => file.public), [`${TREE}Места/b.png`]);
 });
 

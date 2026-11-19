@@ -37,7 +37,7 @@ export function startLoreEditor(doc, deps) {
 const DOCK_GAP = 8;
 const DOCK_MIN = 420;
 
-export function createLoreEditor(doc, { context, settings, save, api = loreApi, shared = {}, secondary = false, translate = translateText }) {
+export function createLoreEditor(doc, { context, settings, save, api = loreApi, shared = {}, bridge = null, secondary = false, translate = translateText }) {
   const view = doc.defaultView;
   const undo = [];
   const live = () => globalThis.SillyTavern?.getContext?.() ?? context;
@@ -212,7 +212,7 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
           <label class="pud-lelogic"><span>Основной ключ</span><select class="text_pole" data-f="selectiveLogic">${LOGIC.map(item => `<option value="${item.value}" ${Number(entry.selectiveLogic) === item.value ? 'selected' : ''}>${item.title}</option>`).join('')}</select></label>
           <div class="pud-field"><span>Вторичные ключи</span>${chips('keysecondary', valuesOf(entry, 'keysecondary'), 'вторичный ключ')}</div>
         </div>
-        <div class="pud-field pud-lecontent"><span class="pud-lehd">Содержимое<span class="pud-letools"><span data-tr-status></span><button type="button" class="menu_button" data-act="tr" title="Перевести содержимое записи на английский. Название, ключи и настройки не меняются">🌐 На английский</button><button type="button" class="menu_button" data-act="tr-undo" title="Вернуть текст, который был до перевода"${translated.has(trKey(entry.uid)) ? '' : ' hidden'}>↩ Оригинал</button></span></span><textarea class="text_pole" data-f="content" rows="12">${escapeHtml(entry.content ?? '')}</textarea></div>
+        <div class="pud-field pud-lecontent"><span class="pud-lehd">Содержимое<span class="pud-letools"><span data-tr-status></span><button type="button" class="menu_button" data-act="tr" title="Перевести содержимое записи на английский. Переводит: ${escapeHtml(bridge?.whoDoes?.('translation') ?? 'основная модель чата')}. Название, ключи и настройки не меняются">🌐 На английский</button><button type="button" class="menu_button" data-act="tr-undo" title="Вернуть текст, который был до перевода"${translated.has(trKey(entry.uid)) ? '' : ' hidden'}>↩ Оригинал</button></span></span><textarea class="text_pole" data-f="content" rows="12">${escapeHtml(entry.content ?? '')}</textarea></div>
         <small class="pud-tech pud-lecount"></small>
         <div class="pud-lepos">
           <label class="pud-field pud-lepos-where"><span>Куда вставлять</span><select class="text_pole" data-f="position">${POSITIONS.map(item => `<option value="${item.value}" ${position === item.value ? 'selected' : ''}>${item.title}</option>`).join('')}</select></label>
@@ -425,7 +425,8 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
     for (const button of edit.querySelectorAll('[data-act="tr"], [data-act="tr-undo"]')) button.disabled = true;
     trStatus('Перевожу…');
     try {
-      const result = await translate(live(), original, 'перевод записи лорбука…');
+      // the same model as the cards' translation: the auxiliary one when it is on for «Перевод», else the chat's own
+      const result = await translate(bridge?.routedContext?.('translation') ?? live(), original, 'перевод записи лорбука…');
       if (!state.data?.entries?.[uid]) return;
       translated.set(trKey(uid), original);
       setContentFor(uid, result);
@@ -637,7 +638,7 @@ export function createLoreEditor(doc, { context, settings, save, api = loreApi, 
   const openSecond = async (name, uid = null) => {
     if (secondary) return;
     await persist();
-    second ??= createLoreEditor(doc, { context, settings, save, api, shared: {}, secondary: true });
+    second ??= createLoreEditor(doc, { context, settings, save, api, shared: {}, bridge, secondary: true });
     await second.controller.open(name, uid);
   };
   const controller = {

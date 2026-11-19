@@ -143,6 +143,11 @@ export function startPalette(doc, { settings, save, shared = {}, generate }) {
           </button>
         </div>
         ${mine ? editorHtml(mine, openGroups, deleteArmed) : ''}`;
+      // the drawers of the pages that belong here: the palette of relations, the theme by mood
+      // they stand inside the same frame as «Сообщения в чате», «Кнопки и значки»…; no custom palette open: a frame of their own
+      let frame = tab.pane.querySelector('.pud-paledit');
+      if (!frame) { frame = doc.createElement('div'); frame.className = 'pud-paledit pud-palextra'; tab.pane.append(frame); }
+      shared.hub?.mountFolds?.('palette', frame);
     };
 
     /** Палитру поправили: перекрасить тему и её карточку, не трогая поля (чтобы не терялся фокус). */

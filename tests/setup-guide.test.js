@@ -45,35 +45,25 @@ dom.window.requestAnimationFrame = globalThis.requestAnimationFrame;
 const { mountChatOverlay } = await import('../src/integration/chat-overlay.js');
 const { createRelationshipStudio } = await import('../src/ui/studio.js');
 
-test('the banner above the message box: a link to the guide, «Позже» hides it for now, «Не напоминать здесь» asks to switch it off', () => {
+test('«Настройка» in the drawer: the steps of the guide, each one opens its page; no banner above the message box any more', () => {
   const calls = [];
-  const overlay = mountChatOverlay({ onOpenStudio: tab => calls.push(['studio', tab]), onSetupOff: () => calls.push(['off']), onTogglePresent: () => {}, onLeak: () => {} });
-  const view = setup => ({ chips: false, cast: [], leaks: [], setup });
+  const overlay = mountChatOverlay({ onOpenStudio: tab => calls.push(['studio', tab]), onTogglePresent: () => {}, onLeak: () => {}, onToggleOpen: () => {} });
+  const setup = { due: true, done: 1, total: 2, chat: 'a', steps: [{ id: 'persona', title: 'Выберите свою персону', tab: 'personas', required: true, done: true }, { id: 'characters', title: 'Соберите персонажей', tab: 'characters', required: true, done: false }] };
   try {
-    overlay.render(view({ due: false, done: 2, total: 2, chat: 'a' }));
-    assert.equal(document.getElementById('ku-setup-banner'), null, 'a chat that is set up gets nothing');
-    overlay.render(view({ due: true, done: 1, total: 2, chat: 'a', steps: [{ id: 'persona', title: 'Выберите свою персону', tab: 'personas', required: true, done: true }, { id: 'characters', title: 'Соберите персонажей', tab: 'characters', required: true, done: false }] }));
-    const banner = document.getElementById('ku-setup-banner');
-    assert.ok(banner, 'it shows even when nobody is on the stage yet');
-    assert.equal(banner.nextElementSibling.id, 'send_form', 'right above the message box');
-    assert.match(banner.textContent, /ещё не настроен \(обязательных шагов 1 из 2\)/);
-    const press = text => [...banner.querySelectorAll('button')].find(node => node.textContent === text).click();
-    press('Подробно');
-    assert.deepEqual(calls, [['studio', 'setup']]);
-    [...banner.querySelectorAll('button')].find(node => node.title === 'Соберите персонажей').click(); // an icon button: the name is its hint
+    overlay.render({ chips: true, cast: [{ id: 'z', name: 'Зоро', present: true }], leaks: [], setup, director: { open: true } });
+    assert.equal(document.getElementById('ku-setup-banner'), null, 'the reminder above the message box is gone');
+    const bar = document.getElementById('ku-scene-chips');
+    const tile = [...bar.querySelectorAll('.ku-tile')].find(item => item.textContent.includes('Настройка'));
+    assert.match(tile.textContent, /1\/2/, 'the tile shows the progress');
+    tile.click();
+    const card = bar.querySelector('.ku-dir-setup');
+    assert.match(card.textContent, /сделано: 1 из 2/);
+    const press = text => [...card.querySelectorAll('button')].find(node => node.textContent.includes(text)).click();
+    press('Соберите персонажей');
     assert.deepEqual(calls.at(-1), ['studio', 'characters'], 'a step opens its own page');
-    calls.length = 0;
-    press('×');
-    assert.deepEqual(calls.at(-1), ['off']);
-    press('Позже');
-    assert.equal(document.getElementById('ku-setup-banner'), null, 'put off');
-    overlay.render(view({ due: true, done: 1, total: 2, chat: 'a' }));
-    assert.equal(document.getElementById('ku-setup-banner'), null, 'it stays put off for this chat');
-    overlay.render(view({ due: true, done: 1, total: 2, chat: 'b' }));
-    assert.ok(document.getElementById('ku-setup-banner'), 'another chat is reminded');
-    overlay.render(view({ due: false, done: 2, total: 2, chat: 'b' }));
-    assert.equal(document.getElementById('ku-setup-banner'), null, 'it goes away when the steps are done');
-  } finally { overlay.destroy?.(); document.getElementById('ku-setup-banner')?.remove(); }
+    press('Подробно');
+    assert.deepEqual(calls.at(-1), ['studio', 'setup']);
+  } finally { overlay.destroy?.(); overlay.unmount?.(); document.getElementById('ku-scene-chips')?.remove(); }
 });
 
 test('the page «Настройка чата»: progress, every step with what to press, «Открыть страницу» goes to its page', async () => {

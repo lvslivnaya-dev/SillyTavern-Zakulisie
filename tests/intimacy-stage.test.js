@@ -182,7 +182,6 @@ test('the ladder in the drawer: stages are buttons, steps and the lock go out, t
   try {
     overlay.render(intimView({}));
     const bar = document.getElementById('ku-scene-chips');
-    tileOf(bar, 'Кубик').click();
     const ladder = () => [...document.querySelectorAll('#ku-scene-chips .ku-stage-chip')];
     assert.deepEqual(ladder().map(chip => chip.textContent), INTIMACY_STAGES.map(stage => `${stage.icon} ${stage.label}`));
     assert.match(document.getElementById('ku-scene-chips').textContent, /Лесенка не запущена/);
@@ -191,8 +190,8 @@ test('the ladder in the drawer: stages are buttons, steps and the lock go out, t
     // A running stage burns, shows the hint, and gets the lock and the end of the scene.
     overlay.render(intimView({ id: 'kiss', label: 'Поцелуи', hint: 'поцелуи и объятия' }));
     assert.deepEqual(ladder().filter(chip => chip.classList.contains('on')).map(chip => chip.textContent), ['💋 Поцелуи']);
-    assert.match(tileOf(bar, 'Кубик').textContent, /Поцелуи/);
-    const press = label => [...document.querySelectorAll('#ku-scene-chips button')].find(item => item.textContent.startsWith(label));
+    assert.match(bar.querySelector('.ku-dir-dice').textContent, /Поцелуи/);
+    const press = label => [...document.querySelectorAll('#ku-scene-chips .ku-dir-dice button')].find(item => item.textContent.startsWith(label));
     press('Дальше').click(); await settle();
     assert.deepEqual(calls.at(-1), { delta: 1 });
     press('◂ Назад').click(); await settle();
@@ -217,7 +216,7 @@ test('the ladder in the drawer: stages are buttons, steps and the lock go out, t
   }
 });
 
-test('the dice tab on the side panel: the ladder is a column, a held pick can be let through, the note is saved', async () => {
+test('the dice in «Сцена» on the side panel: the ladder is a column, a held pick can be let through, the note is saved', async () => {
   const calls = [];
   const overlay = mountChatOverlay({
     onTogglePresent: () => {}, onLeak: () => {},
@@ -236,11 +235,10 @@ test('the dice tab on the side panel: the ladder is a column, a held pick can be
   try {
     overlay.render(intim(false));
     const bar = document.getElementById('ku-scene-chips');
-    assert.match(tileOf(bar, 'Кубик').textContent, /выбрано/, 'the rail tab shows the state of the roll');
-    tileOf(bar, 'Кубик').click();
+    tileOf(bar, 'Сцена').click();
     assert.deepEqual(calls.at(-1), ['open', true], 'the tab unfolds the folded panel');
     overlay.render(intim(true));
-    assert.match(bar.querySelector('.ku-dir-head').textContent, /Кубик близости/);
+    assert.match(bar.querySelector('.ku-dir-head').textContent, /Сцена/);
     assert.ok(bar.querySelector('.ku-dice-cols.with-ladder .ku-dice-ladder .ku-stage-chip'), 'the ladder is its own column');
     assert.ok(bar.querySelector('.ku-dice-foot [data-ku-action="dir-dice-roll"]'), 'the roll buttons sit in the footer');
     // The pick from a later stage is held back and shown dashed.
@@ -256,10 +254,10 @@ test('the dice tab on the side panel: the ladder is a column, a held pick can be
     field().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
     assert.deepEqual(calls.at(-1), ['stage', { note: 'тихо, без слов' }]);
-    // The tab that is on, pressed again, folds the panel; a calm scene has no dice tab.
-    tileOf(bar, 'Кубик').click();
+    // The tab that is on, pressed again, folds the panel; a calm scene has no dice.
+    tileOf(bar, 'Сцена').click();
     assert.deepEqual(calls.at(-1), ['open', false]);
     overlay.render({ ...intim(true), sceneMode: 'calm', dice: null });
-    assert.equal(tileOf(bar, 'Кубик'), undefined);
+    assert.equal(bar.querySelector('.ku-dir-dice'), null);
   } finally { overlay.unmount(); }
 });

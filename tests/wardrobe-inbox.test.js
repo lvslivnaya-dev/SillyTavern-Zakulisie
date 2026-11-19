@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHandlers, parseInboxPath, treeParts, INBOX } from '../server-plugin/kulisy-images/index.mjs';
-import { inboxDirectories, nameFromFile, newTreeFiles, placeFromPath, treeDirFor } from '../src/integration/wardrobe-inbox.js';
+import { allInboxDirectories, inboxDirectories, nameFromFile, newTreeFiles, placeFromPath, treeDirFor } from '../src/integration/wardrobe-inbox.js';
 import { createWardrobeCallbacks, createWardrobeStore } from '../src/integration/wardrobe-actions.js';
 import { imageUrl, isTreeImage, treeDirOf } from '../src/integration/wardrobe-images.js';
 import { cleanImagePath } from '../src/core/index.js';
@@ -31,7 +31,7 @@ async function setUp() {
   const pictures = tempDir('kulisy-pics-');
   const handlers = createHandlers({ platform: 'linux' });
   await call(handlers.folder, request(user, { body: { folder: pictures } }));
-  await call(handlers.treePrepare, request(user, { body: { dirs: inboxDirectories() } }));
+  await call(handlers.treePrepare, request(user, { body: { dirs: allInboxDirectories() } }));
   return { user, pictures, handlers, tree: path.join(pictures, INBOX) };
 }
 
@@ -41,12 +41,12 @@ test('plugin: the tree is created once; nothing outside it is made', async () =>
   const handlers = createHandlers({ platform: 'linux' });
   assert.equal((await call(handlers.treeList, request(user))).statusCode, 409, 'no folder yet');
   await call(handlers.folder, request(user, { body: { folder: pictures } }));
-  const prepared = await call(handlers.treePrepare, request(user, { body: { dirs: [...inboxDirectories(), '../evil', 'a/../../b', 'Персона/./x'] } }));
-  assert.equal(prepared.body.created, inboxDirectories().length);
+  const prepared = await call(handlers.treePrepare, request(user, { body: { dirs: [...allInboxDirectories(), '../evil', 'a/../../b', 'Персона/./x'] } }));
+  assert.equal(prepared.body.created, allInboxDirectories().length);
   assert.ok(fs.existsSync(path.join(pictures, INBOX, 'Персона', 'Женское', 'Верх')));
   assert.ok(fs.existsSync(path.join(pictures, INBOX, 'Персонажи', 'Мужское', 'Татуировки')));
   assert.equal(fs.existsSync(path.join(pictures, 'evil')), false);
-  assert.equal((await call(handlers.treePrepare, request(user, { body: { dirs: inboxDirectories() } }))).body.created, 0);
+  assert.equal((await call(handlers.treePrepare, request(user, { body: { dirs: allInboxDirectories() } }))).body.created, 0);
 });
 
 test('plugin: list, serve, save, move and delete pictures of the tree — the file stays in the folder', async () => {
@@ -108,8 +108,8 @@ test('paths: the folder gives shelf, gender and section; a file name becomes the
   assert.equal(treeDirFor({ shelf: 'persona', gender: 'unisex', category: 'nails' }), 'Персона/Унисекс/Маникюр');
   assert.equal(treeDirOf(`${TREE}Персона/Унисекс/Маникюр/a.png`), 'Персона/Унисекс/Маникюр');
   assert.equal(isTreeImage(`/${TREE}x.png`), true);
-  assert.equal(new Set(inboxDirectories()).size, 2 * 3 * 16 + 1, 'the tree plus «Вещи» for the library things');
-  assert.ok(inboxDirectories().includes('Вещи'));
+  assert.equal(new Set(allInboxDirectories()).size, 2 * 3 * 16 + 1, 'the whole tree plus «Вещи» for the library things');
+  assert.deepEqual(inboxDirectories(), ['Вещи'], 'only «Вещи» is made up front: the sections appear when they are opened');
   assert.deepEqual(newTreeFiles([{ path: 'Вещи/a.jpg', public: 'x/Вещи/a.jpg' }], []), [], 'things are not wardrobe cards');
   assert.deepEqual(newTreeFiles([{ public: `${TREE}a.png` }, { public: `${TREE}b.png` }], [{ image: `/${TREE}a.png` }]).map(file => file.public), [`${TREE}b.png`]);
 });

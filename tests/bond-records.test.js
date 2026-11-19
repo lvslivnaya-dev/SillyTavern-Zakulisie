@@ -1,4 +1,4 @@
-/** Records between characters: one kind with a type, tied to cards, an AU, sent when everyone is on stage. */
+/** Records between characters: one kind with a type, tied to cards, sent when everyone is on stage. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { addBond, addFolder, addLibraryCharacter, buildBondsPrompt, cleanBonds, emptyLibrary, normalizeLibrary, removeBond, selectBonds, updateBond } from '../src/core/index.js';
@@ -23,24 +23,25 @@ test('a record has a type, a text and cards; the tidy-up fixes the rest', () => 
 test('a record is changed, switched off and removed in the library', () => {
   const { library, ran, suzu } = sample();
   const { library: one, bond } = addBond(library, { type: 'memory', text: 'Они вместе ходили на фестиваль', cardIds: [ran.id, suzu.id] });
-  const off = updateBond(one, bond.id, { off: true, au: ['au1'] });
-  assert.deepEqual([off.bonds[0].off, off.bonds[0].au], [true, ['au1']]);
+  const off = updateBond(one, bond.id, { off: true });
+  assert.equal(off.bonds[0].off, true);
   assert.equal(updateBond(off, bond.id, { off: false }).bonds[0].off, undefined);
   assert.equal(removeBond(one, bond.id).bonds.length, 0);
   assert.throws(() => updateBond(one, 'nope', { text: 'x' }), /нет/);
 });
 
-test('it goes out when everyone it is tied to is on stage and its AU is on', () => {
+test('it goes out when at least one of those it is tied to is on stage', () => {
   const { library, ran, suzu, mikey } = sample();
   let lib = addBond(library, { type: 'headcanon', text: 'Ран провожает её домой', cardIds: [ran.id, suzu.id] }).library;
-  lib = addBond(lib, { type: 'memory', text: 'Общий фестиваль', cardIds: [ran.id, suzu.id], au: ['univer'] }).library;
-  lib = addBond(lib, { type: 'tension', text: 'Спор о деньгах', cardIds: [mikey.id], au: [] }).library;
-  const pick = (here, au = []) => selectBonds(lib.bonds, { presentCardIds: here, activeAu: au }).map(bond => bond.text);
-  assert.deepEqual(pick([ran.id]), [], 'one of the two is missing');
-  assert.deepEqual(pick([ran.id, suzu.id]), ['Ран провожает её домой'], 'the one with an AU waits');
-  assert.deepEqual(pick([ran.id, suzu.id], ['univer']), ['Ран провожает её домой', 'Общий фестиваль']);
-  assert.deepEqual(pick([ran.id, suzu.id, mikey.id], ['mafia']), ['Ран провожает её домой', 'Спор о деньгах'], 'another AU is on');
-  const switchedOff = updateBond(lib, lib.bonds[0].id, { off: true });
+  lib = addBond(lib, { type: 'memory', text: 'Общий фестиваль', cardIds: [ran.id, suzu.id] }).library;
+  lib = addBond(lib, { type: 'tension', text: 'Спор о деньгах', cardIds: [mikey.id] }).library;
+  const pick = here => selectBonds(lib.bonds, { presentCardIds: here }).map(bond => bond.text).sort();
+  assert.deepEqual(pick([ran.id]), ['Общий фестиваль', 'Ран провожает её домой'], 'the other one is away, the one who is here still remembers');
+  assert.deepEqual(pick([]), [], 'nobody of them is here');
+  assert.deepEqual(pick([ran.id, suzu.id]), ['Общий фестиваль', 'Ран провожает её домой']);
+  assert.deepEqual(pick([ran.id, suzu.id, mikey.id]), ['Общий фестиваль', 'Ран провожает её домой', 'Спор о деньгах']);
+  let switchedOff = lib;
+  for (const bond of lib.bonds.filter(item => item.cardIds.includes(ran.id))) switchedOff = updateBond(switchedOff, bond.id, { off: true });
   assert.deepEqual(selectBonds(switchedOff.bonds, { presentCardIds: [ran.id, suzu.id] }), []);
 });
 
@@ -51,7 +52,9 @@ test('the block says who it is about, by the names of the cards', () => {
   const block = buildBondsPrompt(lib.bonds, { presentCardIds: [ran.id, suzu.id], cardNames: names });
   assert.match(block, /^\[BONDS/);
   assert.match(block, /memory\[Ран, Судзу\]: Они помнят дождь/);
-  assert.equal(buildBondsPrompt(lib.bonds, { presentCardIds: [ran.id], cardNames: names }), '', 'nothing to say: no block');
+  assert.equal(buildBondsPrompt(lib.bonds, { presentCardIds: [], cardNames: names }), '', 'nobody of them is here: no block');
+  assert.match(buildBondsPrompt(lib.bonds, { presentCardIds: [ran.id], cardNames: names }), /memory\[Ран, Судзу\]/, 'one of the group is enough');
+  assert.equal(buildBondsPrompt(lib.bonds, { presentCardIds: [suzu.id], personaCardId: suzu.id, cardNames: names }), '', 'the persona alone brings nothing');
 });
 
 test('after loading, a record keeps only cards that still exist, and one with none left goes', () => {
@@ -63,20 +66,10 @@ test('after loading, a record keeps only cards that still exist, and one with no
   assert.equal(normalizeLibrary(emptyLibrary()).bonds, undefined, 'no records: no field');
 });
 
-test('a section of a card can be for some AU only: kept in the tidy-up, and for a persona it waits until the AU is on', async () => {
-  const { makeSection, buildPersonaPrompt } = await import('../src/core/index.js');
-  assert.deepEqual(makeSection({ kind: 'visual', text: 'x', au: ['u1', 'u1', ''] }).au, ['u1']);
-  assert.equal(makeSection({ kind: 'visual', text: 'x', au: [] }).au, undefined, 'none: for all');
-  const card = { name: 'Рика', sections: [makeSection({ kind: 'visual', title: 'Visual', text: 'Рыжая' }), makeSection({ kind: 'other', title: 'Univer', text: 'Студентка', au: ['univer'] })], records: [] };
-  assert.doesNotMatch(buildPersonaPrompt(card, { activeAu: [] }), /Студентка/);
-  assert.match(buildPersonaPrompt(card, { activeAu: ['univer'] }), /Студентка/);
-  assert.match(buildPersonaPrompt(card, { activeAu: [] }), /Рыжая/, 'a section with no AU always goes');
-});
-
 test('records between characters travel with their cards: exported with a folder, tied to the new cards on import, no repeats', async () => {
   const { exportLibrary, importLibrary } = await import('../src/core/index.js');
   const { library, ran, suzu } = sample();
-  const lib = addBond(library, { type: 'memory', text: 'Они помнят дождь', cardIds: [ran.id, suzu.id], au: ['au1'] }).library;
+  const lib = addBond(library, { type: 'memory', text: 'Они помнят дождь', cardIds: [ran.id, suzu.id] }).library;
   const folderId = lib.folders[0].id;
   const file = JSON.parse(JSON.stringify(exportLibrary(lib, folderId)));
   assert.equal(file.bonds.length, 1);

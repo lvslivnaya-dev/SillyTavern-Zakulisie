@@ -3,6 +3,8 @@ import { icon } from '../icons.js';
 import { nextSceneText } from '../../integration/chronicle-actions.js';
 import { GATE_ABSENT, GATE_NAMED, GATE_SECTIONS, GATE_WHEN, GATE_WORLD, SCENE_MODE_LABELS } from '../../integration/lore-gate.js';
 import { readable } from '../../integration/prompt-overview.js';
+import { DRAWER_TILES } from '../../integration/chat-overlay.js';
+import { MOVED_SECTIONS } from '../layout.js';
 
 /** Settings page: section menu + rows with switches; narrow panels stack the menu on top. */
 export const SETTINGS_STYLE = `
@@ -18,7 +20,7 @@ export const SETTINGS_STYLE = `
 .set-group{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--rs-muted);margin-top:6px}
 .set-list{border:1px solid var(--rs-line);border-radius:14px;background:var(--rs-panel);overflow:hidden}
 .set-item+.set-item{border-top:1px solid var(--rs-line)}
-.set-row{display:flex;align-items:center;gap:12px;padding:11px 14px;min-height:46px}
+.set-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:11px 14px;min-height:46px}
 .set-select{width:100%;max-width:100%;min-width:0;margin:0;font:inherit;color:var(--rs-text);background:var(--rs-inset);border:1px solid var(--rs-line);border-radius:8px;padding:5px 8px}
 .set-row.wide{flex-wrap:wrap}.set-row.wide .set-label{flex:1 1 0;min-width:0}.set-row.wide .set-select{flex:1 1 100%;order:3}
 .set-row.gate-rule{display:grid;grid-template-columns:minmax(120px,1fr) minmax(0,1.5fr) minmax(0,1.1fr);align-items:center}
@@ -27,10 +29,11 @@ export const SETTINGS_STYLE = `
 @container (max-width:640px){.set-row.gate-rule{grid-template-columns:1fr}}
 .set-seg{display:flex;flex-wrap:wrap;gap:6px}
 .set-pill.gate-off{color:var(--rs-muted);text-decoration:line-through}
-.set-label{flex:1;min-width:0;font-size:13.5px}
+.set-label{flex:1 1 150px;min-width:min(150px,100%);font-size:13.5px}
 .set-hint{margin:-4px 14px 10px;font-size:12px;line-height:1.45;color:var(--rs-muted)}
-.set-help{width:24px;height:24px;min-height:24px;padding:0;border-radius:50%;border:1px solid var(--rs-line);background:transparent;color:var(--rs-muted);font:inherit;font-size:11px;font-weight:700;cursor:pointer;flex:0 0 auto}
-.set-help[aria-expanded=true]{border-color:var(--rs-accent);color:var(--rs-accent)}
+.set-help{position:relative;display:inline-grid;place-items:center;width:18px;height:18px;margin-left:8px;border-radius:50%;border:1px solid var(--rs-line);background:transparent;color:var(--rs-muted);font-size:11px;font-weight:700;cursor:help;vertical-align:middle}
+.set-help:hover,.set-help:focus-visible{border-color:var(--rs-accent);color:var(--rs-accent);outline:none}
+.set-help:hover::after,.set-help:focus-visible::after{content:attr(data-tip);position:absolute;z-index:20;left:-8px;top:calc(100% + 8px);width:min(320px,70vw);padding:9px 11px;border-radius:9px;background:var(--rs-panel);color:var(--rs-text);border:1px solid var(--rs-accent);box-shadow:0 8px 24px var(--k-shadow);font-size:12px;font-weight:400;line-height:1.45;text-align:left;white-space:normal;pointer-events:none}
 .set-switch{appearance:none;-webkit-appearance:none;width:38px;height:22px;border-radius:22px;background:var(--rs-track);border:1px solid var(--rs-line);position:relative;margin:0;flex:0 0 auto;cursor:pointer}
 .set-switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--rs-muted);transition:left .15s}
 .set-switch:checked{background:var(--rs-accent);border-color:var(--rs-accent)}
@@ -51,6 +54,8 @@ export const SETTINGS_STYLE = `
 .set-module-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .set-pills{display:flex;gap:6px;flex-wrap:wrap;flex:1}
 .set-pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;border:1px solid var(--rs-line);color:var(--rs-muted)}
+.set-back{align-self:flex-start;border:0;background:transparent;color:var(--rs-accent);font:inherit;font-size:13px;font-weight:700;cursor:pointer;padding:2px 0}
+.set-module{cursor:pointer}
 .set-link{border:0;background:transparent;color:var(--rs-accent);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;padding:4px 0}
 .set-total{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:12px 14px;border-radius:14px;background:color-mix(in srgb,var(--rs-accent) 12%,transparent)}
 .set-total strong{font-size:20px}
@@ -178,7 +183,7 @@ export function createSystemPages(ctx) {
 
   const SETTINGS_SECTIONS = [
     ['modules', 'Модули', 'grid'],
-    ['behaviour', 'Как работает', 'bolt'],
+    ['behaviour', 'Автоматика', 'bolt'],
     ['relations', 'Отношения', 'heart'],
     ['scene', 'Знания и сцена', 'stage'],
     ['chronicle', 'Хроника и сжатие', 'list'],
@@ -192,20 +197,18 @@ export function createSystemPages(ctx) {
   const tokens = value => `~${Math.round(Number(value) || 0).toLocaleString('ru-RU')}`;
   const change = patch => act('onSettingsChange', { settings: patch }, 'settings-change');
 
-  /** A row: label, optional "?" that unfolds a one-line hint, and the control on the right. */
+  /** A row: the label with a small "?" right after it (the explanation shows when you point at it, no clicking), and the control on the right. */
   function settingRow(label, control, hint = '') {
     // A drop-down with long options gets a line of its own under the label, instead of squeezing the label into a column.
-    const wide = control?.classList?.contains('set-select');
-    const row = element('div', { className: `set-row${wide ? ' wide' : ''}` }, [element('span', { className: 'set-label', text: label })]);
+    const wide = Boolean(control?.matches?.('select,.set-select'));
+    if (wide) control.classList.add('set-select');
+    const name = element('span', { className: 'set-label' }, [element('span', { text: label })]);
     if (hint) {
-      const note = element('p', { className: 'set-hint', text: hint, hidden: true });
-      const help = button('?', 'set-help', () => { note.hidden = !note.hidden; help.setAttribute('aria-expanded', String(!note.hidden)); }, `Подробнее: ${label}`);
-      help.setAttribute('aria-expanded', 'false');
-      row.append(help);
-      row.append(control);
-      return element('div', { className: 'set-item' }, [row, note]);
+      const help = element('span', { className: 'set-help', text: '?', tabIndex: 0, role: 'note', 'aria-label': `${label}: ${hint}` });
+      help.dataset.tip = hint;
+      name.append(help);
     }
-    row.append(control);
+    const row = element('div', { className: `set-row${wide ? ' wide' : ''}` }, [name, control]);
     return element('div', { className: 'set-item' }, [row]);
   }
 
@@ -243,11 +246,13 @@ export function createSystemPages(ctx) {
   }
 
   function moduleCard({ iconName, title, subtitle, on, onToggle, pills, section }) {
-    const card = element('div', { className: `set-module${on ? '' : ' off'}` });
+    const card = element('div', { className: `set-module${on === false ? ' off' : ''}` });
+    // the whole card opens its page, not only the little «Настроить»
+    card.addEventListener('click', event => { if (!event.target.closest('input, label, button')) { settingsSection = section; ctx.render(); } });
     const head = element('div', { className: 'set-module-head' }, [
       element('span', { className: 'set-module-icon' }, [icon(iconName)]),
       element('div', { className: 'set-module-title' }, [element('strong', { text: title }), element('span', { className: 'muted', text: subtitle })]),
-      toggle(title, on, onToggle),
+      ...(on === null ? [] : [toggle(title, on, onToggle)]),
     ]);
     const foot = element('div', { className: 'set-module-foot' }, [
       element('div', { className: 'set-pills' }, pills.map(text => element('span', { className: 'set-pill', text }))),
@@ -284,6 +289,16 @@ export function createSystemPages(ctx) {
           on: chronicle.enabled === true, onToggle: value => act('onChronicleSettings', { changes: { enabled: value } }),
           pills: [`промпт ${tokens(snap.chronicleTokens)}`, 'свои запросы к модели'],
         }),
+        moduleCard({
+          iconName: 'book', title: 'Суфлёр лорбуков', subtitle: 'какие разделы анкет уходят модели', section: 'loregate',
+          on: current.loreGate?.enabled === true, onToggle: value => change({ loreGate: { enabled: value } }),
+          pills: [current.loreGate?.enabled === true ? 'отбирает по сцене' : 'отбирает таверна, по ключам'],
+        }),
+        moduleCard({
+          iconName: 'bolt', title: 'Автоматика', subtitle: 'что Закулисье делает само и как выглядит шторка', section: 'behaviour',
+          on: null, onToggle: () => {},
+          pills: [current.autoTrack !== false ? 'ответы проверяются' : 'проверка выключена'],
+        }),
       ]),
       element('div', { className: 'set-total' }, [
         element('span', { className: 'muted', text: 'Сейчас в промпт' }),
@@ -301,9 +316,9 @@ export function createSystemPages(ctx) {
         switchRow('Проверять ответы сами', 'autoTrack', 'После каждого ответа бота анализатор сам записывает отношения, знания и сцену.', current),
         switchRow('Летописец отдельным запросом', 'knowledgeSeparateRequest', 'Знания и сцена уйдут вторым запросом. Дороже, но слабые модели реже путаются в большом ответе.', current),
         switchRow('Спрашивать о крупных скачках', 'confirmLargeChanges', 'Если шкала меняется сильнее порога, Закулисье спросит, применять ли.', current),
-        settingRow('Порог скачка', threshold),
-        switchRow('Напоминание о настройке чата', 'setupReminder', 'Над полем ввода в чате, где ещё не выбрана персона или нет героев, появляется плашка со ссылкой на пошаговую инструкцию («Система → Настройка чата»). Пропадает сама, когда обязательные шаги сделаны.', current),
+        settingRow('Порог скачка', threshold, 'Насколько сильно должна измениться шкала за один ответ, чтобы Закулисье спросило, применять ли это. Работает вместе с «Спрашивать о крупных скачках».'),
         settingRow('Сторона рейки сцены', railSideSelect(current), 'Рейка с плитками сцены стоит у левого или у правого края окна браузера. Панели окон обходят её.'),
+        settingRow('Кнопки шторки', drawerTilesControl(current), 'Какие кнопки показывать в колонке шторки. «Сцена» есть всегда. Выключенная кнопка просто пропадает, её данные никуда не деваются.'),
         switchRow('Пульт сцены над вводом', 'sceneChips', 'Шторка над полем ввода: кто на сцене, «пнуть» персонажа, событие сцены. Развёрнутая, она закрывается только стрелкой. Под ответами — отметки утечек и ляпов.', current),
         settingRow('💤 Молчит, ответов', numberInput('Молчит, ответов', current.directorSilenceAfter ?? 4, 0, 50, value => change({ directorSilenceAfter: value })), 'Если персонаж на сцене столько ответов подряд не упомянут, его чип тускнеет и показывает 💤. Сам никого не пинает. 0 — не считать.'),
         switchRow('Alt+1…9 — пнуть', 'directorHotkeys', 'Alt и цифра: персонаж с этим номером на сцене вступает в следующем ответе. Ещё раз — пинок снят.', current),
@@ -311,6 +326,17 @@ export function createSystemPages(ctx) {
         switchRow('Несколько окон сразу', 'studioMulti', 'Окна Закулисья открываются панелями по бокам чата: можно держать два сразу (первое справа, второе слева). Выключено: одно окно за раз.', current),
       ),
     ];
+  }
+
+  function drawerTilesControl(current) {
+    const hidden = new Set(current.drawerHidden ?? []);
+    const box = element('div', { className: 'set-tiles' }, DRAWER_TILES.map(tile => {
+      const label = element('label', { className: 'set-tile' }, [toggle(tile.label, !hidden.has(tile.id), value => change({ drawerTile: { id: tile.id, show: value } })), element('span', { text: tile.label })]);
+      label.style.cssText = 'display:flex;align-items:center;gap:8px';
+      return label;
+    }));
+    box.style.cssText = 'display:flex;flex-direction:column;gap:6px;align-items:flex-start';
+    return box;
   }
 
   function railSideSelect(current) {
@@ -496,7 +522,11 @@ export function createSystemPages(ctx) {
 
   function renderSettings() {
     const current = ctx.snapshot.settings || {};
-    const nav = element('nav', { className: 'set-nav', 'aria-label': 'Разделы настроек' }, SETTINGS_SECTIONS.map(([id, label, iconName]) => {
+    // An embedded page may show only some of the sections (the settings window of the tavern shares them out between its buttons).
+    const allowed = options.embedPage?.sections ?? null;
+    const sections = allowed ? SETTINGS_SECTIONS.filter(([id]) => allowed.includes(id)) : SETTINGS_SECTIONS;
+    if (allowed && sections.length && !sections.some(([id]) => id === settingsSection)) settingsSection = sections[0][0];
+    const nav = element('nav', { className: 'set-nav', 'aria-label': 'Разделы настроек' }, sections.map(([id, label, iconName]) => {
       const node = element('button', { type: 'button', className: settingsSection === id ? 'on' : '', 'aria-current': settingsSection === id ? 'page' : null }, [icon(iconName), element('span', { text: label })]);
       node.addEventListener('click', () => { settingsSection = id; ctx.render(); });
       return node;
@@ -509,12 +539,21 @@ export function createSystemPages(ctx) {
       case 'chronicle': body = sectionChronicle(); break;
       case 'loregate': body = sectionLoreGate(current); break;
       case 'prompt': body = sectionPrompt(); break;
-      case 'models': body = [heading('Модели и API'), renderAuxApi(), renderVisionApi(), renderEmbeddings()]; break;
+      case 'models': body = [heading('Модели и API'), renderAuxApi(), renderTranslateApi(), renderVisionApi(), renderEmbeddings()]; break;
       case 'data': body = [heading('Данные'), renderMove(), renderCleaner(), renderImageStorage(), renderHoraeImport(), renderDataTransfer()]; break;
       case 'diagnostics': body = [heading('Диагностика'), renderDiagnostics()]; break;
       default: body = sectionModules(current);
     }
-    return element('div', { className: 'set-shell' }, [nav, element('div', { className: 'set-body' }, body)]);
+    // «Модули» of the hub window: the cards ARE the menu. Pressing one opens its page right here, with a way back; no side menu inside.
+    const cards = Boolean(allowed) && sections.some(([id]) => id === 'modules');
+    if (cards) {
+      if (settingsSection !== 'modules') {
+        const back = button('← Все модули', 'set-back', () => { settingsSection = 'modules'; ctx.render(); }, 'Вернуться к карточкам модулей');
+        return element('div', { className: 'set-shell' }, [element('div', { className: 'set-body' }, [back, ...body])]);
+      }
+      return element('div', { className: 'set-shell' }, [element('div', { className: 'set-body' }, body)]);
+    }
+    return element('div', { className: 'set-shell' }, [...(sections.length > 1 ? [nav] : []), element('div', { className: 'set-body' }, body)]);
   }
 
   // ---- Что получает модель -----------------------------------------------------
@@ -646,11 +685,11 @@ export function createSystemPages(ctx) {
     return `Включено: ${info.enabled}, подобрано к текущей сцене: ${info.picked}. Отбор: ${info.method === 'semantic' ? 'по смыслу' : 'оба участника пары упомянуты в последних сообщениях (персона — всегда)'}. Подбор обновляется перед каждой генерацией.${info.note ? ` ${info.note}` : ''}`;
   }
 
-  /** Semantic choice of headcanons: a model in the browser or an embeddings API. */
+  /** Semantic choice of headcanons, records and the chronicle: a model in the browser or an embeddings API. */
   function renderEmbeddings() {
     const config = { ...(ctx.snapshot.settings?.embeddings ?? {}) };
     const card = element('div', { className: 'card settings', style: { marginTop: '14px' } }, [
-      element('h3', { text: 'Смысловой поиск хедканонов' }),
+      element('h3', { text: 'Смысловой поиск: хедканоны, записи, хроника' }),
       element('p', { className: 'muted', style: { fontSize: '11px', marginTop: '0' }, text: 'Перед каждой генерацией к сцене подбираются хедканоны, близкие ей по смыслу, — даже если имён в тексте нет. Выключено — подбор по упоминаниям участников пары.' }),
     ]);
     const field = (label, control, hint) => element('div', { className: 'field' }, [
@@ -681,9 +720,16 @@ export function createSystemPages(ctx) {
     const commonBlock = element('div', {}, [
       field('Порог сходства (0 — просто брать самые близкие)', threshold, 'Хедканоны с меньшим сходством со сценой не отправляются. Сколько отправлять — «Сколько хедканонов к сцене» выше.'),
     ]);
+    const recordsLimit = element('input', { type: 'number', min: 0, max: 40, step: 1, value: config.recordsLimit ?? 6, 'aria-label': 'Сколько записей выбирать по смыслу' });
+    const chronicleLimit = element('input', { type: 'number', min: 0, max: 40, step: 1, value: config.chronicleLimit ?? 4, 'aria-label': 'Сколько старых сводок хроники выбирать по смыслу' });
+    commonBlock.append(
+      field('Записей по смыслу (0 — сколько влезет в бюджет)', recordsLimit, 'Воспоминания, напряжения и записи из библиотеки: сначала сцена решает, кто знает и кто на месте, потом из подошедших остаются столько самых близких к последним постам. Закреплённые идут всегда.'),
+      field('Старых сводок хроники по смыслу (0 — сколько влезет)', chronicleLimit, 'Две последние сводки и закреплённые идут всегда, из остальных остаются самые близкие к сцене, в порядке истории.'),
+    );
     const collect = () => ({
       mode: mode.value, localModel: localModel.value, format: format.value,
       url: url.value, key: key.value, model: model.value, threshold: Number(threshold.value),
+      recordsLimit: Number(recordsLimit.value), chronicleLimit: Number(chronicleLimit.value),
     });
     const sync = () => {
       localBlock.hidden = mode.value !== 'local';
@@ -715,6 +761,9 @@ export function createSystemPages(ctx) {
       element('h3', { text: 'Вспомогательный API' }),
       element('p', { className: 'muted', style: { fontSize: '11px', marginTop: '0' }, text: 'Анализ и генерация расширения могут идти через отдельную, более дешёвую модель, не нагружая основной API.' }),
     ]);
+    // Who does what right now (as saved): so it is clear which model translates, analyses and writes.
+    const whoList = Object.entries(facade.invoke('onAuxPurposes', {}) ?? {}).map(([key, label]) => element('li', {}, [element('b', { text: `${label}: ` }), String(facade.invoke('onWhoDoes', { purpose: key }) ?? '')]));
+    if (whoList.length) card.append(element('div', { className: 'field' }, [element('label', { text: 'Кто что делает сейчас' }), element('ul', { className: 'muted', style: { fontSize: '12px', margin: '0', paddingLeft: '18px' } }, whoList)]));
     const field = (label, control, hint) => element('div', { className: 'field' }, [
       element('label', { text: label }), control, ...(hint ? [element('p', { className: 'muted', style: { fontSize: '11px', margin: '0' }, text: hint })] : []),
     ]);
@@ -795,6 +844,74 @@ export function createSystemPages(ctx) {
       setStatus('Вспомогательный API сохранён');
     });
     card.append(field('Режим', mode), profileBlock, customBlock, commonBlock, element('div', { className: 'row', style: { marginTop: '10px' } }, [save, test]));
+    return card;
+  }
+
+  /** The model for translation: one for every translation there is. The same fields as the auxiliary API: a profile or a URL, a key, a model, a check. */
+  function renderTranslateApi() {
+    const own = { mode: 'off', ...(ctx.snapshot.settings?.translate ?? {}) };
+    const card = element('div', { className: 'card settings', style: { marginTop: '14px' } }, [
+      element('h3', { text: 'Модель для перевода' }),
+      element('p', { className: 'muted', style: { fontSize: '11px', marginTop: '0' }, text: 'Одна модель на весь перевод на английский: карточки персонажей, гардероб, локации и вещи, записи лорбука. Модель не выбрана: переводит модель основного профиля (модель чата).' }),
+      element('p', { className: 'ku-note', style: { fontSize: '12px', margin: '0 0 8px', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--rs-accent, var(--SmartThemeQuoteColor))' }, text: '⚠ Обратите внимание: вспомогательная модель переводом не занимается. Если здесь ничего не выбрано, переводит модель основного профиля.' }),
+    ]);
+    const field = (label, control, hint) => element('div', { className: 'field' }, [
+      element('label', { text: label }), control, ...(hint ? [element('p', { className: 'muted', style: { fontSize: '11px', margin: '0' }, text: hint })] : []),
+    ]);
+    const mode = element('select', { 'aria-label': 'Режим модели для перевода' });
+    for (const [value, text] of [['off', 'Не выбрана: переводит модель основного профиля'], ['profile', 'Профиль подключения SillyTavern'], ['custom', 'Свой URL (OpenAI-совместимый)']]) {
+      mode.append(element('option', { value, text, selected: own.mode === value }));
+    }
+    const profileSelect = element('select', { 'aria-label': 'Профиль для перевода' });
+    const fillProfiles = () => {
+      const profiles = facade.invoke('onAuxProfiles', {}) ?? [];
+      profileSelect.replaceChildren(element('option', { value: '', text: profiles.length ? 'Выберите профиль' : 'Профилей нет' }),
+        ...profiles.map(profile => element('option', { value: profile.id, text: profile.name, selected: profile.id === own.profileId })));
+    };
+    fillProfiles();
+    const profileBlock = element('div', {}, [
+      field('Профиль', profileSelect, 'Профиль создаётся в Connection Manager (значок вилки в верхней панели таверны). Ключ хранится в секретах SillyTavern.'),
+      button('Обновить список профилей', 'btn', fillProfiles),
+    ]);
+    const url = element('input', { type: 'text', value: own.url ?? '', placeholder: 'https://api.openai.com/v1', 'aria-label': 'URL API перевода' });
+    const key = element('input', { type: 'password', value: own.key ?? '', autocomplete: 'off', 'aria-label': 'Ключ API перевода' });
+    const reveal = button('👁', 'icon', () => { key.type = key.type === 'password' ? 'text' : 'password'; }, 'Показать или скрыть ключ');
+    const modelList = element('datalist', { id: nextControlId('rs-tr-models') });
+    const model = element('input', { type: 'text', value: own.model ?? '', 'aria-label': 'Модель для перевода' });
+    model.setAttribute('list', modelList.id);
+    const fetchModels = button('Получить модели', 'btn', async () => {
+      fetchModels.disabled = true;
+      try {
+        const models = await facade.invoke('onFetchAuxModels', { url: url.value, key: key.value });
+        modelList.replaceChildren(...models.map(id => element('option', { value: id })));
+        setStatus(`Моделей найдено: ${models.length}: выберите в поле «Модель»`);
+      } catch (error) { setStatus(error?.message || 'Не удалось получить список моделей', true); }
+      finally { fetchModels.disabled = false; }
+    });
+    const customBlock = element('div', {}, [
+      field('URL API', url, 'Базовый адрес OpenAI-совместимой точки, например https://api.openai.com/v1'),
+      field('Ключ API', element('div', { className: 'row', style: { flexWrap: 'nowrap' } }, [key, reveal]), 'Хранится в настройках расширений SillyTavern на этом сервере. Запросы идут через сервер SillyTavern.'),
+      field('Модель', element('div', { className: 'row', style: { flexWrap: 'nowrap' } }, [model, fetchModels]), 'Заполните URL и ключ, затем получите список моделей.'),
+      modelList,
+    ]);
+    const maxTokens = element('input', { type: 'number', min: 256, max: 32000, value: own.maxTokens ?? 4096, 'aria-label': 'Максимум токенов ответа перевода' });
+    const common = field('Максимум токенов ответа', maxTokens, 'Длинная запись переводится по частям; модели с размышлениями тратят токены и на них.');
+    const collect = () => ({ mode: mode.value, profileId: profileSelect.value, url: url.value, key: key.value, model: model.value, maxTokens: Number(maxTokens.value) });
+    const sync = () => { profileBlock.hidden = mode.value !== 'profile'; customBlock.hidden = mode.value !== 'custom'; common.hidden = mode.value === 'off'; };
+    mode.addEventListener('change', sync);
+    sync();
+    const test = button('Проверить', 'btn', async () => {
+      test.disabled = true;
+      setStatus('Проверяю модель для перевода…');
+      try { setStatus(await facade.invoke('onTestTranslate', { translate: collect() })); }
+      catch (error) { setStatus(error?.message || 'Модель для перевода не ответила', true); }
+      finally { test.disabled = false; }
+    });
+    const save = button('Сохранить', 'btn primary', () => {
+      act('onSettingsChange', { settings: { translate: collect() } }, 'settings-change');
+      setStatus('Модель для перевода сохранена');
+    });
+    card.append(field('Режим', mode), profileBlock, customBlock, common, element('div', { className: 'row', style: { marginTop: '10px' } }, [save, test]));
     return card;
   }
 
@@ -1217,6 +1334,8 @@ export function createSystemPages(ctx) {
   /** Jump to a settings section (from «Сейчас», the chronicle page). */
   /** Open a section of the settings; `focus`: the aria-label of a field to show (scrolled to, selected, lit up). */
   function openSettingsSection(id, { focus = '' } = {}) {
+    // The settings live in the settings window of the tavern now: the Studio sends the link there.
+    if (!options.embedPage && MOVED_SECTIONS[id]) { try { if (options.onMoved?.(MOVED_SECTIONS[id], { section: id, focus }) === true) return; } catch (error) { console.error('[Kulisy] Could not open the setting.', error); } }
     settingsSection = id;
     ctx.setTab('settings');
     if (!focus) return;

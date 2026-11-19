@@ -135,10 +135,20 @@ test('the chronicler reads quests: tolerant parse, proposals only for what exist
   const api = { state: () => state };
   const hints = questProposals(world, api);
   // «найти сестру» exists by name; the unknown step and quest are dropped.
-  assert.deepEqual(hints.map(hint => hint.kind), ['new', 'step', 'end']);
+  // The end of a quest with a step still open is not proposed: a step toward the goal is not the goal.
+  assert.deepEqual(hints.map(hint => hint.kind), ['new', 'step']);
   assert.equal(hints[0].name, 'Тайный долг');
   assert.equal(hints[1].stepText, 'расспросить соседей');
-  assert.equal(hints[2].status, 'done');
+  // Every step shown done in the same reply and a fact behind it: now it may be proposed. Without a fact it is not.
+  const finished = parseWorld({ quests: {
+    steps: quest.steps.map(step => ({ questId: 'q1', stepId: step.id })),
+    ended: [{ questId: 'q1', status: 'done', note: 'нашлась' }],
+  } });
+  assert.equal(questProposals(finished, api).find(hint => hint.kind === 'end')?.status, 'done');
+  const noFact = parseWorld({ quests: { steps: finished.quests.steps, ended: [{ questId: 'q1', status: 'done', note: '' }] } });
+  assert.ok(!questProposals(noFact, api).some(hint => hint.kind === 'end'), 'done with no fact behind it is dropped');
+  const lost = parseWorld({ quests: { ended: [{ questId: 'q1', status: 'failed', note: '' }] } });
+  assert.equal(questProposals(lost, api).find(hint => hint.kind === 'end')?.status, 'failed', 'a lost quest needs no steps');
   // A step already done is not proposed again; a flashback proposes nothing.
   const ticked = op(state, 'quest.step', { questId: 'q1', stepId: quest.steps[0].id, done: true });
   assert.ok(!questProposals(world, { state: () => ticked }).some(hint => hint.kind === 'step'));

@@ -3,13 +3,15 @@
  * player of the page (ui/media-dock.js) without leaving the tavern. It lives in the extension settings, shared by all chats.
  *
  * library = { version: 1, items: [item] }
- * item    = { id, title, url, note, pinned, service, mood }
+ * item    = { id, title, url, note, pinned, service, mood, image? }
+ *            image   — a cover of your own for the gallery view (only the look: nothing else uses it);
  *            service — what parseMediaLink made of the url ('youtube', 'spotify', …, 'file' for a direct file, 'link' = cannot be embedded);
  *            mood    — a free word or phrase for the scene mood it suits (the player may offer it when the scene changes).
  *
  * Pure: no DOM, no SillyTavern. Every function returns a new library and never mutates its input.
  */
 import { uniqueId } from './ids.js';
+import { cleanImagePath } from './wardrobe.js';
 
 export const MEDIA_VERSION = 1;
 export const MEDIA_LIMITS = Object.freeze({ items: 500, title: 120, url: 600, note: 400, mood: 60 });
@@ -75,6 +77,7 @@ function cleanItem(raw) {
     mood: clip(raw?.mood, MEDIA_LIMITS.mood),
     pinned: raw?.pinned === true,
     service: parsed.service,
+    ...(cleanImagePath(raw?.image) ? { image: cleanImagePath(raw.image) } : {}),
   };
 }
 

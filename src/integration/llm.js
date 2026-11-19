@@ -12,12 +12,13 @@ export const AUX_PURPOSES = Object.freeze({
   analysis: 'Анализ ответов и истории',
   discovery: 'Поиск персонажей',
   generation: 'Генерация факторов, целей и хедканонов',
-  translation: 'Перевод карточек на английский',
   cardgen: 'Написание разделов карточек',
 });
 
 export function auxEnabledFor(settings, purpose) {
   const aux = settings?.aux ?? {};
+  // translation has a model of its own (settings.translate), whatever the auxiliary mode is
+  if (purpose === 'translation') return Boolean(settings?.translate?.mode && settings.translate.mode !== 'off'); // not chosen: the chat's own model, never the auxiliary one
   return (aux.mode === 'profile' || aux.mode === 'custom') && aux.purposes?.[purpose] !== false;
 }
 
@@ -52,7 +53,9 @@ export function foldSystem(messages) {
 }
 
 async function routedGenerate(context, settings, options, purpose) {
-  const aux = settings.aux;
+  // the translation model of its own is a profile of the connection manager; the fallback to the chat's model stays as for the rest
+  const own = purpose === 'translation' && settings.translate?.mode && settings.translate.mode !== 'off';
+  const aux = own ? { ...settings.aux, ...settings.translate } : settings.aux;
   try {
     return await auxGenerate(context, aux, foldSystem(toMessages(options.prompt)));
   } catch (error) {

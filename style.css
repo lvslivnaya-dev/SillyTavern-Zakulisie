@@ -39,7 +39,7 @@
 }
 #ku-scene-chips:not(.open) .ku-dir-head { cursor: pointer; }
 #ku-scene-chips:not(.open) .ku-dir-head:hover { background: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent); }
-#ku-scene-chips.open .ku-dir-head { flex-wrap: wrap; border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 50%, transparent); }
+#ku-scene-chips.open .ku-dir-head { flex: none; overflow: visible; flex-wrap: wrap; border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 50%, transparent); }
 #ku-scene-chips .ku-dir-arrow {
   flex: none;
   width: 28px;
@@ -335,7 +335,7 @@
 #ku-scene-chips.ku-side-right .ku-rail .ku-strip { border-left: none; border-right: 3px solid transparent; }
 #ku-scene-chips.ku-side-right .ku-rail .ku-tile.on,
 #ku-scene-chips.ku-side-right .ku-rail .ku-strip.on { border-right-color: var(--SmartThemeQuoteColor); }
-#ku-scene-chips .ku-rail { flex: 0 0 64px; width: 64px; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; }
+#ku-scene-chips .ku-rail { flex: 0 0 78px; width: 78px; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; }
 #ku-scene-chips .ku-rail-toggle { position: relative; flex: none; min-height: 36px; border: none; border-radius: 0; background: none; color: var(--SmartThemeBodyColor); font: inherit; font-size: 1.1em; cursor: pointer; opacity: .8; }
 #ku-scene-chips .ku-rail-toggle:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 16%, transparent); opacity: 1; }
 #ku-scene-chips .ku-rail-badge { position: absolute; top: 3px; right: 9px; min-width: 16px; padding: 0 4px; border-radius: 999px; background: var(--SmartThemeQuoteColor); color: var(--SmartThemeBlurTintColor); font-size: .7em; line-height: 16px; }
@@ -347,7 +347,7 @@
 #ku-scene-chips .ku-rail .ku-strip.on { border-left-color: var(--SmartThemeQuoteColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 16%, transparent); }
 #ku-scene-chips .ku-rail .ku-tile.kick { margin-top: auto; }
 #ku-scene-chips .ku-rail .ku-tile-val { display: none; }
-#ku-scene-chips .ku-rail .ku-tile-name { font-size: .64em; letter-spacing: .02em; opacity: .85; }
+#ku-scene-chips .ku-rail .ku-tile-name { font-size: .66em; letter-spacing: 0; overflow-wrap: anywhere; line-height: 1.1; opacity: .85; }
 #ku-scene-chips .ku-rail .ku-tile-stack { display: contents; }
 #ku-scene-chips .ku-rail .ku-strip { flex-direction: column; justify-content: center; }
 #ku-scene-chips .ku-rail .ku-strip-val { max-width: 100%; font-size: .68em; }
@@ -382,17 +382,6 @@
 .ku-setup-banner .ku-sb-tick { position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--SmartThemeQuoteColor); }
 
 /* The strip above the message box: the scene in one glance and what goes to the model with the next post. */
-.ku-scene-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; width: calc(100% - 12px); box-sizing: border-box; margin: 0 6px 4px; padding: 4px 12px; border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 92%, transparent); backdrop-filter: blur(var(--SmartThemeBlurStrength, 10px)); color: var(--SmartThemeBodyColor); font: inherit; font-size: calc(var(--mainFontSize) * 0.8); text-align: left; cursor: pointer; }
-.ku-scene-strip:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, var(--SmartThemeBlurTintColor)); }
-.ku-scene-strip .ku-ss-item { white-space: nowrap; opacity: .85; }
-.ku-scene-strip .ku-ss-stage { color: var(--SmartThemeQuoteColor); opacity: 1; font-weight: 600; }
-.ku-scene-strip .ku-ss-out { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; flex: 1 1 auto; }
-.ku-scene-strip .ku-ss-tag { max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; padding: 2px 10px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, transparent); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, transparent); }
-.ku-scene-strip .ku-ss-none { opacity: .6; }
-.ku-scene-strip .ku-ss-curtain { margin-left: auto; padding: 0 8px; border-radius: 10px; font-size: .85em; opacity: .75; cursor: pointer; white-space: nowrap; border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent); }
-.ku-scene-strip .ku-ss-curtain:hover { opacity: 1; border-color: var(--SmartThemeQuoteColor); }
-.ku-scene-strip .ku-ss-ver { margin-left: auto; font-size: .85em; opacity: .5; }
-.ku-scene-strip .ku-ss-last { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; opacity: .8; border-top: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent); padding-top: 3px; }
 /* кнопки плашек над полем ввода: как остальные кнопки Закулисья, а не серые системные */
 .ku-setup-banner .ku-dir-btn, #ku-au-banner .ku-dir-btn {
   min-height: 30px; padding: 3px 14px; border-radius: 12px; font: inherit; cursor: pointer;
@@ -421,11 +410,12 @@
 .ku-setup-banner .ku-sb-steps { gap: 10px; margin: 2px 0 6px; }
 .ku-setup-banner .ku-sb-steps + .ku-dir-btn { margin-top: 4px; }
 
-/* The second rail: the tools' tabs, and the little buttons of Закулисье at its foot. Same width as the first one. */
-#ku-scene-chips .ku-rail2 { flex: 0 0 64px; width: 64px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent); }
-#ku-scene-chips.ku-side-right .ku-rail2 { border-left: none; border-right: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent); }
-#ku-scene-chips .ku-rail2 > .ku-rail-r { flex: 1 1 auto; min-height: 0; width: auto; }
-#ku-scene-chips .ku-panel { width: min(340px, calc(100vw - 150px)); }
+/* The column of tabs: the rail with the tiles, and the little buttons of Закулисье at its foot. */
+#ku-scene-chips .ku-rail2 { flex: 0 0 78px; width: 78px; display: flex; flex-direction: column; min-height: 0; }
+#ku-scene-chips .ku-rail2 > .ku-rail { flex: 1 1 auto; min-height: 0; width: auto; }
+#ku-scene-chips .ku-rail-sep { flex: none; height: 1px; margin: 4px 10px; background: color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent); }
+#ku-scene-chips .ku-rail-grow { flex: 1 1 auto; min-height: 4px; }
+#ku-scene-chips .ku-panel { width: min(340px, calc(100vw - 100px)); }
 
 /* The tab «Плеер» of the drawer: what plays now, a search, and a list that scrolls by itself. */
 #ku-scene-chips .pud-pane-host:has(> .pud-media-pane) { height: 100%; }
@@ -491,7 +481,7 @@
 .ku-wr-chip:hover { border-color: var(--SmartThemeQuoteColor); }
 .ku-wr-chip.on { border-color: var(--SmartThemeQuoteColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 22%, transparent); }
 .ku-wr-search { width: 100%; box-sizing: border-box; margin: 0 0 8px; }
-.ku-wr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.ku-wr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; max-height: max(340px, calc(100dvh - 330px)); overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
 .ku-wr-item, .ku-wr-worn { position: relative; cursor: pointer; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; min-width: 0; }
 .ku-wr-row .ku-wr-worn { width: 84px; }
 .ku-wr-tile { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 4px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 80%, transparent); background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 60%, transparent); }
@@ -541,8 +531,46 @@
 .ku-wx-lab { font-size: .62em; opacity: .7; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ku-wx-ico { font-size: 1.15em; }
 .ku-wx-t { font-size: .68em; opacity: .85; min-height: 1em; }
-.ku-wx-temp { width: 4.6em; flex: 0 0 4.6em; }
+/* градусы и описание — одной высоты, даже когда описание переносится на вторую строку */
+#ku-scene-chips .ku-weather-fold .ku-dir-field { align-items: stretch; }
+#ku-scene-chips .ku-weather-fold .ku-dir-field > .ku-dir-input { margin: 0; min-height: 2.2em; box-sizing: border-box; }
+#ku-scene-chips .ku-dir-input.ku-wx-temp { width: 3.6em; flex: 0 0 3.6em; text-align: center; padding-left: 4px; padding-right: 4px; }
+/* «Сбросить» стоит под галочкой «Держать», календарь — маленькой кнопкой в правом нижнем углу */
+.ku-wx-tools { flex-direction: column; align-items: flex-start; }
+.ku-wx-corner { justify-content: flex-end; }
 .ku-wx-kinds { flex-wrap: wrap; }
 
 /* Длинный текст в полях шторки переносится на новую строку и растёт вниз, а не уходит вбок */
 #ku-scene-chips textarea.ku-dir-wrap { resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.3; min-height: 2.2em; box-sizing: border-box; }
+#ku-scene-chips .ku-wx-kinds .ku-wx-kind { font-size: 1.25em; min-width: 44px; padding: 6px 10px; }
+#ku-scene-chips .ku-dir-favs { flex: 1 1 auto; min-height: 120px; display: flex; flex-direction: column; gap: 6px; }
+#ku-scene-chips .ku-dir-favlist { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 2px; }
+#ku-scene-chips .ku-dir-favrow { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 70%, transparent); }
+#ku-scene-chips .ku-dir-favname { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+#ku-scene-chips .ku-dir-favname > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ku-scene-chips .ku-star { min-width: 34px; }
+#ku-scene-chips .ku-media-tab > .pud-media-pane { flex: 1 1 auto; height: auto; min-height: 0; }
+#ku-scene-chips .pud-media-hint { margin: 0; font-size: .82em; opacity: .65; }
+#ku-scene-chips .ku-song-how { padding: 2px 6px 6px 12px; }
+/* The dice in the narrow drawer: one column, the ladder as a wrapping row, labels over their chips, fields as wide as the panel. */
+#ku-scene-chips .ku-dice-cols.with-ladder { grid-template-columns: minmax(0, 1fr); }
+#ku-scene-chips .ku-dice-ladder { padding: 0 0 8px; border-right: none; border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor) 60%, transparent); }
+#ku-scene-chips .ku-dice-ladder .ku-dice-chips { flex-direction: row; }
+#ku-scene-chips .ku-dice-ladder .ku-dir-row { flex-direction: row; flex-wrap: wrap; align-items: center; }
+#ku-scene-chips .ku-dir-dice .ku-dice-label { flex: 0 0 100%; padding-top: 0; font-size: .85em; opacity: .85; }
+#ku-scene-chips .ku-dir-dice .ku-dice-chips { flex: 1 1 0; }
+#ku-scene-chips .ku-dir-dice .ku-dir-field { flex-wrap: wrap; }
+#ku-scene-chips .ku-dir-dice .ku-dir-field > textarea, #ku-scene-chips .ku-dir-dice .ku-dir-field > input { flex: 1 1 100%; min-width: 0; width: 100%; box-sizing: border-box; }
+#ku-scene-chips .ku-dir-dice .ku-dice-hint { font-size: .8em; line-height: 1.35; opacity: .7; }
+#ku-scene-chips .ku-dir-dice .ku-dice-foot .ku-dir-row { flex-wrap: wrap; }
+/* круглая картинка героя на кнопке шторки (если он есть в библиотеке карточек) */
+/* «На сцене» одними иконками: крупные лица по 4 в ряд, имя в подсказке при наведении */
+#ku-scene-chips .ku-dir-cast.icons { gap: 6px; }
+#ku-scene-chips .ku-dir-cast.icons .ku-chip { position: relative; width: 76px; height: 76px; min-height: 0; padding: 0; gap: 0; border-radius: 14px; justify-content: center; overflow: visible; }
+#ku-scene-chips .ku-dir-cast.icons .ku-chip .ku-chip-ava { width: 100%; height: 100%; margin: 0; border-radius: inherit; }
+#ku-scene-chips .ku-dir-cast.icons .ku-chip:not(.on) .ku-chip-ava { opacity: .55; }
+#ku-scene-chips .ku-chip-initial { font-size: 28px; font-weight: 700; line-height: 1; }
+#ku-scene-chips .ku-dir-cast.icons .ku-chip-badge { position: absolute; right: -3px; bottom: -3px; margin: 0; }
+#ku-scene-chips .ku-dir-cast.icons .ku-dir-caption { flex-basis: 100%; }
+#ku-scene-chips .ku-dir-cast.icons .ku-dir-btn { align-self: center; }
+#ku-scene-chips .ku-chip-ava { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; margin-right: 6px; vertical-align: middle; }

@@ -1,4 +1,5 @@
-import { button, characterId, characterName, downloadJson, element } from '../helpers.js';
+import { button, characterId, characterName, downloadJson, element, infoDot } from '../helpers.js';
+import { wardrobeFocus } from '../wardrobe-focus.js';
 import { icon } from '../icons.js';
 import { cardIsEnglish, cardRussianSections, textIsRussian, AU_FIELDS, CARD_SECTION_KINDS, CARD_WHEN, auIsEmpty, auPrompt, auSummary, folderAu, normalizeAu, sameAu, KEY_REGEX_MODES, tidyAlias, WARDROBE_CATEGORIES, WARDROBE_GENDERS, WARDROBE_SHELVES, cardLabel, folderPath, personalPieces, folderWithDescendants, keyFromRegex, keyToRegex, listExport, selectFromExport, makeSection, normalizeAlias, searchLibraryCharacters, searchLibraryItems, searchLocations, splitKeys } from '../../core/index.js';
 import { GATE_SECTIONS, GATE_WHEN } from '../../integration/lore-gate.js';
@@ -52,9 +53,13 @@ export function createLibraryPages(ctx) {
   let personaMode = false;
   const KIND = () => (personaMode ? KINDS.personas : KINDS[kind]);
   let s = shelves.places;
-  let describeOnUpload = false;
+  const DESCRIBE_KEY = 'kulisy.describeOnUpload';
+  // «Описывать сразу» is remembered across reloads (browser storage; when it is blocked the switch just starts off).
+  let describeOnUpload = (() => { try { return globalThis.localStorage?.getItem(DESCRIBE_KEY) === '1'; } catch { return false; } })();
+  const rememberDescribe = value => { describeOnUpload = value; try { globalThis.localStorage?.setItem(DESCRIBE_KEY, value ? '1' : '0'); } catch { /* storage blocked: the choice lives until reload */ } };
   /** Set while the card editor is drawn inside another window (the persona window): no overlay, no close, no folder, a gear instead. */
   let embed = null;
+  let savedAt = 0; // when the open card was last saved (for the «Сохранено» mark of the embedded editor)
 
   const things = () => kind === 'items';
   const cards = () => kind === 'characters';
@@ -63,8 +68,8 @@ export function createLibraryPages(ctx) {
   const entriesOf = () => (cards() ? (library().characters ?? []).filter(card => Boolean(card.persona) === personaMode) : things() ? library().items ?? [] : library().locations);
   const linkedSet = () => new Set((personaMode ? [snapshot().personaCardId].filter(Boolean) : cards() ? snapshot().linkedCharacterIds : things() ? snapshot().linkedItemIds : snapshot().linkedLocationIds) ?? []);
   const pathText = id => folderPath(library(), id).map(step => step.name).join(' › ');
-  /** The folders of this shelf: the personas have their own (and a hidden one for cards with no folder), the other shelves do not see them. */
-  const foldersOf = () => library().folders.filter(folder => (personaMode ? folder.persona && !folder.hidden : !folder.persona));
+  /** The folders are one tree for every shelf, the persona cards too (only the hidden home of cards with no folder is left out). */
+  const foldersOf = () => library().folders.filter(folder => !folder.hidden);
 
   /** Run an action; a synchronous error lands in the status line too. */
   async function attempt(work, done) {
@@ -111,6 +116,14 @@ export function createLibraryPages(ctx) {
   }
 
   /** New entries from pictures, in the open folder. */
+  let whoCache = { at: 0, text: '' };
+  /** Who translates now, for the hint of the button (asked once in a while, not on every redraw). */
+  const modelOfTranslation = () => {
+    if (!whoCache.text || Date.now() - whoCache.at > 15000) {
+      try { whoCache = { at: Date.now(), text: String(invoke('onWhoDoes', { purpose: 'translation' }) ?? 'основная модель чата') }; } catch { whoCache = { at: Date.now(), text: 'основная модель чата' }; }
+    }
+    return whoCache.text;
+  };
   async function addPictures(files) {
     if (!s.folderId) { setStatus('Сначала откройте папку слева: туда лягут картинки.', true); return; }
     const images = files.filter(file => /^image\//.test(file.type)).slice(0, 30);
@@ -215,10 +228,9 @@ export function createLibraryPages(ctx) {
       } catch (error) { setStatus(error?.message || 'Не удалось выгрузить', true); }
     }, s.folderId ? 'Выгрузить эту папку (локации, вещи и карточки)' : 'Выгрузить всю библиотеку (локации, вещи и карточки)');
     const auto = element('input', { type: 'checkbox', className: 'ku-switch', checked: describeOnUpload, 'aria-label': 'Описывать картинки сразу' });
-    auto.addEventListener('change', () => { describeOnUpload = auto.checked; });
+    auto.addEventListener('change', () => rememberDescribe(auto.checked));
     view.append(element('div', { className: 'ku-row ku-wtools' }, [
       search,
-      ...(personaMode ? [] : [filePicker('+ Картинки', { className: 'btn primary small', disabled: !s.folderId, title: needFolder || (cards() ? 'Каждая картинка — новая карточка с этим портретом' : ''), onFiles: addPictures })]),
       addEmpty,
       ...(!cards() && !personaMode && snapshot().libraryInbox?.available ? [button(inboxBusy ? 'Забираю…' : 'Из папки', 'btn small', importInbox, 'Забрать картинки, которые вы положили в папку «Библиотека» на компьютере (Места / Вещи → папки библиотеки)')] : []),
       button(s.selecting ? 'Готово' : 'Выбрать', s.selecting ? 'btn primary small' : 'btn small', () => { s.selecting = !s.selecting; s.picked.clear(); render(); }, `Отметить несколько: ${cards() ? 'карточки' : things() ? 'вещи' : 'локации'}, чтобы перенести их в другую папку, перевести на английский или удалить`),
@@ -226,7 +238,7 @@ export function createLibraryPages(ctx) {
       // Always on the page (not only when something is Russian): it checks the whole shelf and translates what is left.
       Object.assign(button(s.job ? 'Идёт перевод…' : 'Проверить записи на перевод и перевести непереведённое', 'btn small', () => attempt(() => withJob('Проверяю записи…', progress => invoke('onLibraryTranslateMissing', { kind: cards() ? 'characters' : things() ? 'items' : 'places', persona: personaMode, folderId: s.folderId, onProgress: progress })),
         result => (result && result.done?.length ? `Проверено записей: ${result.checked}, переведено: ${result.done.length}${result.failed?.length ? `, не удалось: ${result.failed.length}` : ''}` : '')),
-      (s.folderId ? 'Работает на открытую папку (и папки внутри неё). ' : 'Папка не открыта: работает на всю полку. ') + 'Просмотреть записи: что уже на английском, оставить как есть; всё, что ещё на русском (разделы карточек, описание и черты локаций вместе с подлокациями), перевести моделью. Перед переводом будет один вопрос'), { disabled: Boolean(s.job) }),
+      (s.folderId ? 'Работает на открытую папку (и папки внутри неё). ' : 'Папка не открыта: работает на всю полку. ') + `Переводит: ${modelOfTranslation()}. ` + 'Просмотреть записи: что уже на английском, оставить как есть; всё, что ещё на русском (разделы карточек, описание и черты локаций вместе с подлокациями), перевести моделью. Перед переводом будет один вопрос'), { disabled: Boolean(s.job) }),
       importMenu,
       exportButton,
       ...(cards() ? [] : [element('label', { className: 'ku-inline ku-small', title: 'Сразу просить модель описать новые картинки (тратит запрос на каждую)' }, [auto, 'описывать сразу'])]),
@@ -263,7 +275,7 @@ export function createLibraryPages(ctx) {
     const create = () => attempt(async () => {
       let folderId = s.newFolder;
       if (folderId === '__new') {
-        const made = await invoke('onLibraryAddFolder', { name: s.newFolderName, parentId: '', ...(personaMode ? { persona: true } : {}) });
+        const made = await invoke('onLibraryAddFolder', { name: s.newFolderName, parentId: '' });
         folderId = made.id;
       }
       const entry = cards()
@@ -311,7 +323,7 @@ export function createLibraryPages(ctx) {
     walk('', 0);
     const name = element('input', { type: 'text', placeholder: s.folderId ? 'Подпапка…' : 'Новая папка…', 'aria-label': 'Название новой папки' });
     const add = () => attempt(async () => {
-      const folder = await invoke('onLibraryAddFolder', { name: name.value, parentId: s.folderId, ...(personaMode ? { persona: true } : {}) });
+      const folder = await invoke('onLibraryAddFolder', { name: name.value, parentId: s.folderId });
       if (folder?.id) s.folderId = folder.id;
     }, 'Папка создана');
     name.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); add(); } });
@@ -1041,16 +1053,22 @@ ${add}` : (d.fields[field.id] || add);
         ...(snapshot().narratorNow?.avatar && !chosen.includes(snapshot().narratorNow.avatar) ? [button(`+ ${snapshot().narratorNow.name || 'этот чат'}`, 'btn small', () => { draft.narrators = [...chosen, snapshot().narratorNow.avatar]; render(); }, 'Добавить нарратора открытого чата')] : []),
       ]);
     })();
+    // The long explanation of the names folds under a «?» that stands at the end of the note under the field (not alone on a line of its own).
+    const namesMore = element('p', { className: 'ku-hint keep', text: 'Имя и «другие имена» — как героя зовут в постах: имя, фамилия, клички, прозвища. Через запятую. Английские варианты и знаки сами убираются. Склонения каждого слова пишутся слева в разделе «Имена»: оттуда модель берёт написание и падежи, а карточка узнаёт героя в постах. В одной папке имена не повторяются, в разных можно.' });
+    const aliasNote = element('span', { className: 'ku-hint ku-cfield-note', text: 'Сюда пишите все обращения к персонажу, включая клички, имя в разных вариациях, фамилию и прочее, по чему к персонажу обращаются.' });
+    aliasNote.append(infoDot(namesMore, 'Подробнее про имена'));
     const top = element('header', { className: 'ku-ctop' }, [
       element('div', { className: 'ku-cport-box' }, [portraitFrame(entry, portrait), refBox(entry)]),
       element('div', { className: 'ku-ctop-main' }, [
-        element('div', { className: 'ku-cfields' }, [nameInput, aliasInput, genderPick, birthPick, ...(folderPick ? [folderPick] : [])]),
+        element('div', { className: 'ku-cfields' }, [
+          element('div', { className: 'ku-cfield' }, [nameInput, element('span', { className: 'ku-hint ku-cfield-note', text: 'Сюда вписываете ТОЛЬКО то слово, по которому к персонажу обращаются чаще всего.' })]),
+          element('div', { className: 'ku-cfield' }, [aliasInput, aliasNote, namesMore]),
+          genderPick, birthPick, ...(folderPick ? [folderPick] : [])]),
         ...(narratorsRow ? [narratorsRow] : []),
         ...(writing ? [writing] : []),
         ...(translateFailed ? [translateFailed] : []),
         ...(leaveNotice ? [leaveNotice] : []),
         ...(auNotice ? [auNotice] : []),
-        element('p', { className: 'ku-hint', text: 'Имя и «другие имена» — как героя зовут в постах: имя, фамилия, клички, прозвища. Через запятую. Английские варианты и знаки сами убираются. Склонения каждого слова пишутся слева в разделе «Имена»: оттуда модель берёт написание и падежи, а карточка узнаёт героя в постах. В одной папке имена не повторяются, в разных можно.' }),
       ]),
       element('div', { className: 'ku-ctop-tools' }, emb ? (emb.onGear ? [Object.assign(element('button', { type: 'button', className: 'ku-ib ku-gear', 'aria-label': 'Настройки персоны в таверне', title: 'Настройки персоны в таверне' }, [icon('gear')]), { onclick: emb.onGear })] : []) : [
         Object.assign(element('button', { type: 'button', className: 'ku-ib', 'aria-label': 'Свернуть', title: 'Свернуть окно: карточка останется открытой, а запись (если идёт) продолжится' }, [icon('minimize')]), { onclick: () => ctx.minimize?.() }),
@@ -1173,43 +1191,6 @@ ${add}` : (d.fields[field.id] || add);
       node.addEventListener('click', onClick);
       return node;
     };
-    /** The AU of the chat: a button with a caption, and the little window over it that switches them (the same list as the cards' sections and records use). */
-    const auList = () => snapshot().personaCards?.au ?? [];
-    const auOn = () => new Set(snapshot().personaAu ?? []);
-    const auButton = () => {
-      const count = auList().filter(item => auOn().has(item.id)).length;
-      const node = element('button', { type: 'button', className: `ku-cfoot-tool ku-cfoot-au${s.auOpen ? ' on' : ''}`, 'aria-expanded': String(Boolean(s.auOpen)),
-        title: count ? `АУ этого чата: включено ${count}. Тексты карточек с меткой АУ уходят рассказчику, только когда нужное АУ включено.` : 'АУ этого чата: сейчас не выбрано ни одного. Тексты карточек с меткой АУ в чат не уходят.' }, [
-        element('span', { className: 'ku-au-text', text: 'АУ' }),
-        ...(count ? [element('span', { className: 'ku-au-badge', text: String(count) })] : (auList().length ? [element('span', { className: 'ku-au-badge warn', text: '!' })] : [])),
-      ]);
-      node.addEventListener('click', () => { s.auOpen = !s.auOpen; render(); });
-      return node;
-    };
-    const auWindow = () => {
-      const on = auOn();
-      const box = element('div', { className: 'ku-aupop', role: 'dialog', 'aria-label': 'АУ этого чата' }, [
-        element('div', { className: 'ku-row' }, [
-          element('strong', { text: 'АУ этого чата' }),
-          element('span', { className: 'ku-push' }),
-          Object.assign(element('button', { type: 'button', className: 'ku-ib', 'aria-label': 'Закрыть', title: 'Закрыть' }, [icon('close')]), { onclick: () => { s.auOpen = false; render(); } }),
-        ]),
-        element('p', { className: 'ku-hint', text: 'Включённые АУ играет этот чат: разделы и записи карточек с этой меткой уходят рассказчику. Без метки уходит всегда. Можно включить несколько сразу.' }),
-      ]);
-      if (!auList().length) box.append(element('p', { className: 'ku-hint', text: 'АУ пока нет. Добавьте первое, например «Универ» или «Мафия».' }));
-      for (const item of auList()) {
-        const check = element('input', { type: 'checkbox', className: 'set-switch', checked: on.has(item.id), 'aria-label': `АУ «${item.name}» включено в этом чате` });
-        check.addEventListener('change', () => attempt(() => act('onPersonaAuToggle', { id: item.id, on: check.checked }, 'persona-au-toggle'), check.checked ? `АУ «${item.name}» включено` : `АУ «${item.name}» выключено`));
-        box.append(element('div', { className: 'ku-fact' }, [
-          element('label', { className: 'ku-fact-text' }, [check, ` ${item.name}`]),
-          button('×', 'btn icon small', () => attempt(() => act('onPersonaAuRemove', { id: item.id }, 'persona-au-remove'), 'АУ удалено'), `Удалить АУ «${item.name}» (метка пропадёт и с карточек)`),
-        ]));
-      }
-      const name = element('input', { type: 'text', placeholder: 'Название нового АУ', 'aria-label': 'Название нового АУ' });
-      box.append(element('div', { className: 'ku-row' }, [name, button('Добавить', 'btn small', () => attempt(async () => { await act('onPersonaAuAdd', { name: name.value }, 'persona-au-add'); name.value = ''; }, 'АУ добавлено'))]));
-      return box;
-    };
-
     /** The foot of a persona's card: whether she is the one you wear (nothing to switch: the worn persona is the persona of the chat), and whether her card goes to the model. */
     const personaFoot = card => {
       if (!personaMode) return [];
@@ -1242,9 +1223,13 @@ ${add}` : (d.fields[field.id] || add);
       ...personaFoot(entry),
       element('span', { className: 'ku-cfoot-tools', role: 'group', 'aria-label': 'Разделы карточки' }, [
         footTool('letter', 'Имена и склонения: как героя зовут в постах и в каких падежах', s.selSection === NAMES, () => { s.selSection = NAMES; render(); }),
-        footTool('shirt', 'Шкаф: комплекты и вещи героя', s.selSection === CLOSET, () => { s.selSection = CLOSET; s.closetFirst = null; render(); }),
+        footTool('shirt', 'Шкаф: комплекты и вещи героя (большое окно гардероба)', false, () => {
+          // The big window of the wardrobe on this card's closet; the small pane inside the card stays only as a fallback.
+          if (emb?.onCloset) { wardrobeFocus.closets = true; wardrobeFocus.cardId = entry.id; emb.onCloset(entry.id); return; }
+          if (ctx.setTab) { wardrobeFocus.closets = true; wardrobeFocus.cardId = entry.id; ctx.setTab('wardrobe'); return; }
+          s.selSection = CLOSET; s.closetFirst = null; render();
+        }),
         footTool('bars', 'Размеры: сколько знаков занимает каждый раздел', Boolean(s.showSizes), () => { s.showSizes = !s.showSizes; render(); }, true),
-        auButton(),
       ]),
       ...(linked || personaMode ? [] : [attachChoice(entry)]),
       element('span', { className: 'ku-push' }),
@@ -1257,7 +1242,11 @@ ${add}` : (d.fields[field.id] || add);
           if (removed) { s.openId = ''; forget(); }
         }),
       }),
-      button('Сохранить', 'btn primary', () => attempt(async () => { await persist(); s.openId = ''; }, 'Карточка сохранена')),
+      // Inside another window (the persona's) the card stays open, so the save has to show itself: the button says «Сохранено» for a few seconds.
+      button(emb && savedAt && Date.now() - savedAt < 3000 ? '✓ Сохранено' : 'Сохранить', 'btn primary', () => attempt(async () => {
+        await persist();
+        if (emb) { savedAt = Date.now(); setTimeout(() => { try { render(); } catch { /* the window is gone */ } }, 3100); } else s.openId = '';
+      }, 'Карточка сохранена')),
     ]);
 
     // ---- Language and the note the card came from
@@ -1319,7 +1308,6 @@ ${add}` : (d.fields[field.id] || add);
     const stripNote = strip.querySelector('.ku-cstrip-note');
     if (stripNote && strip.firstElementChild) strip.firstElementChild.title = stripNote.textContent;
     dialog.append(top, strip, element('div', { className: 'ku-cbodybox' }, [nav, pane]), ...(clearPanel ? [clearPanel] : []), foot);
-    if (s.auOpen) foot.append(auWindow());
     queueMicrotask(restore);
     setTimeout(restore, 0);
     layer.append(dialog);
@@ -1692,25 +1680,8 @@ ${add}` : (d.fields[field.id] || add);
         { disabled: personaMode && ['visual', 'voice', 'private'].includes(section.kind) }),
     ]);
 
-    // The AU the section is written for (the list is the persona's: one for all chats); the chat says which are on.
-    const auAll = snapshot().personaCards?.au ?? [];
-    // One small button with the count instead of a row of chips: the choice opens in a little window of ticks.
-    const auCount = (section.au ?? []).length;
-    const auHere = section.kind !== 'private' && auAll.length > 0;
-    const auButtonHere = auHere ? Object.assign(element('button', { type: 'button', className: `btn small ku-secau${s.secAuOpen ? ' on' : ''}${auCount ? ' set' : ''}`, 'aria-expanded': String(Boolean(s.secAuOpen)),
-      title: auCount ? 'Раздел уходит модели только в выбранных АУ' : 'Раздел уходит во всех АУ. Нажмите, чтобы привязать к определённым' }, ['АУ', auCount ? element('span', { className: 'ku-au-badge', text: String(auCount) }) : null]), { onclick: () => { s.secAuOpen = !s.secAuOpen; render(); } }) : null;
-    const auRow = auHere && s.secAuOpen ? element('div', { className: 'ku-aupop ku-secaupop', role: 'group', 'aria-label': 'В каких АУ раздел отправляется' }, [
-      element('strong', { text: 'В каких АУ раздел отправляется' }),
-      element('p', { className: 'ku-hint', text: 'Ни одного: во всех АУ. Раздел для АУ ждёт, пока оно не включено в этом чате (кнопка «АУ» внизу карточки).' }),
-      ...auAll.map(item => {
-        const on = (section.au ?? []).includes(item.id);
-        const box = element('input', { type: 'checkbox', checked: on, 'aria-label': item.name });
-        box.addEventListener('change', () => { section.au = box.checked ? [...(section.au ?? []), item.id] : (section.au ?? []).filter(id => id !== item.id); if (!section.au.length) delete section.au; render(); });
-        return element('label', { className: 'ku-fact-text' }, [box, ` ${item.name}`]);
-      }),
-    ]) : (section.kind === 'private' ? element('p', { className: 'ku-hint', text: 'Это раздел для генерации факторов отношений: модель читает его, когда пишет факторы линии с этим героем. Модели в чат он не уходит.' }) : null);
+    const auRow = section.kind === 'private' ? element('p', { className: 'ku-hint', text: 'Это раздел для генерации факторов отношений: модель читает его, когда пишет факторы линии с этим героем. Модели в чат он не уходит.' }) : null;
 
-    if (auButtonHere) tools.append(auButtonHere);
     return element('div', { className: 'ku-cpane' }, [
       element('div', { className: 'ku-ctitlerow' }, [titleHead, ...(chip ? [chip] : []),
         ...(section.kind === 'private' ? [] : [element('label', { className: 'ku-inline ku-secoff', title: 'Выключенный раздел остаётся в карточке, но рассказчик его не получает' }, [toggle(!section.off, `Раздел «${section.title || CARD_SECTION_KINDS[section.kind]}» включён`, on => { if (on) delete section.off; else section.off = true; render(); }), element('span', { className: 'ku-small', text: section.off ? 'Выключен' : 'Включён' })])]),
@@ -2029,7 +2000,7 @@ ${add}` : (d.fields[field.id] || add);
     const entry = entriesOf().find(card => card.id === cardId);
     if (!entry) return element('p', { className: 'muted ku-small', text: 'У этой персоны ещё нет карточки.' });
     s.openId = entry.id;
-    embed = { onGear: options.onGear };
+    embed = { onGear: options.onGear, onCloset: options.onCloset };
     try { return renderCardEditor(entry); }
     finally { embed = null; }
   }
@@ -2112,8 +2083,11 @@ export const LIBRARY_STYLE = `
 .ku-cport-x:hover{background:var(--k-warn)}
 .ku-cnoport{display:grid;place-items:center;font-size:44px;font-weight:700;color:var(--k-accent)}
 .ku-ctop-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:8px}
-.ku-cfields{display:flex;gap:10px;flex-wrap:wrap}
+.ku-cfields{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}
 .ku-cfields input,.ku-cfields select{flex:1 1 200px;min-width:0;min-height:42px}
+.ku-cfield{flex:1 1 200px;min-width:0;display:flex;flex-direction:column;gap:4px}
+.ku-cfield input{flex:none;width:100%}
+.ku-cfield-note{font-size:11.5px;line-height:1.35}
 .ku-cfields .ku-cgender{flex:0 1 150px}
 .ku-cbirth{display:flex;align-items:center;gap:6px;flex:0 0 auto}
 .ku-cnarr{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
@@ -2182,7 +2156,7 @@ export const LIBRARY_STYLE = `
 .ku-notesbar.stale{border-color:var(--k-accent)}
 .ku-cnav-title{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ku-cdot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--k-accent)}
-.ku-cdot.empty{background:transparent;border:2px solid var(--k-muted);box-sizing:border-box}
+.ku-cdot.empty{background:transparent;border:2px solid var(--k-muted);box-sizing:border-box;padding:0;min-width:0;border-radius:50%} /* the studio's global .empty (padding 28px) used to blow this dot up to a big circle */
 .ku-cnavbox .ku-push{flex:1 1 auto;min-height:10px}
 .ku-cnavbox .btn{margin-top:6px;min-height:40px}
 .ku-cpane{flex:1 1 auto;min-width:0;box-sizing:border-box;padding:22px 28px;display:flex;flex-direction:column;gap:22px;overflow:auto}
@@ -2246,14 +2220,7 @@ export const LIBRARY_STYLE = `
 .ku-cfoot{position:relative}
 .ku-cfoot>.btn{align-self:center}
 .ku-cfoot>.ku-chip{align-self:center}
-.ku-cfoot-au{width:auto;gap:6px;padding:0 14px;font-weight:800;font-size:14px;letter-spacing:.02em}
-.ku-au-badge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--k-accent);color:var(--k-bg);font-size:11px;line-height:18px;text-align:center}
-.ku-au-badge.warn{background:var(--k-warn)}
-.ku-aupop{position:absolute;right:24px;bottom:calc(100% + 8px);z-index:6;width:min(360px,calc(100% - 32px));max-height:min(420px,70vh);overflow:auto;display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--k-line);border-radius:14px;background:var(--k-bg);box-shadow:0 18px 50px var(--k-shadow)}
-.ku-aupop .ku-hint{margin:0}
 .ku-pstate{white-space:nowrap}
-.ku-secau{gap:6px}.ku-secau.set,.ku-secau.on{border-color:var(--k-accent);color:var(--k-accent)}
-.ku-secaupop{position:static;width:auto;max-width:420px;margin:0 0 10px;box-shadow:none}
 .ku-cfoot-tools{display:flex;gap:8px;align-items:stretch}
 .ku-cfoot-tool,.ku-cfoot-del{flex:0 0 auto;width:auto;height:auto;aspect-ratio:1/1;align-self:stretch;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--k-line);border-radius:12px;background:var(--k-inset);color:var(--k-muted);cursor:pointer;transition:color .15s ease,border-color .15s ease,background-color .15s ease}
 .ku-cfoot-tool .ku-ico,.ku-cfoot-del .ku-ico{width:21px;height:21px}

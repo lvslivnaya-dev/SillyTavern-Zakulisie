@@ -1,11 +1,17 @@
 import { isDead } from './knowledge.js';
 import { collectRecords } from './records.js';
+import { relativeScores } from './semantic.js';
 
 /** The newest `limit` records of a line plus every pinned one (in list order); null limit = the kind is off. */
-function compactItems(items, limit) {
+function compactItems(items, limit, similarity = null) {
   if (limit == null) return '';
   const live = items.filter(item => !item.disabled);
-  const fresh = new Set(limit > 0 ? live.filter(item => !item.pinned).slice(-limit) : []);
+  const loose = live.filter(item => !item.pinned);
+  // The newest by default; with meaning, the ones closest to the scene (the newer of equals).
+  const picked = similarity && limit > 0 && loose.length > limit
+    ? loose.map((item, order) => ({ item, order, near: similarity(item) })).sort((left, right) => (right.near ?? -1) - (left.near ?? -1) || right.order - left.order).slice(0, limit).map(entry => entry.item)
+    : loose.slice(-Math.max(0, limit));
+  const fresh = new Set(limit > 0 ? picked : []);
   return live.filter(item => item.pinned || fresh.has(item)).map((item) => item.text || item.label || item.id).filter(Boolean).join(' | ');
 }
 
@@ -37,6 +43,17 @@ function describeScale(id, value) {
   return hint ? `(${value < 0 && hints.neg ? hints.neg : hint})` : '';
 }
 
+/**
+ * Does a record matter in this scene? It does when someone who knows it (knownBy, else the people it is about) is on stage or named;
+ * a record about nobody in particular is chat-wide and always matters. No scene given: everything matters.
+ */
+function inScene(sceneSet, item, fallback = [], personaId = '') {
+  if (!sceneSet) return true;
+  const who = [...new Set([...(item.knownBy ?? []), ...(item.participantIds ?? []), ...((item.knownBy ?? item.participantIds ?? []).length ? [] : fallback)])]
+    .filter(id => id !== personaId); // the persona is always in the scene: she alone does not bring a memory of someone who is away
+  return !who.length || who.some(id => sceneSet.has(id));
+}
+
 /** Select a compact relationship context string for a runtime prompt. */
 export function selectRuntimePrompt(state, options = {}) {
   if (!state || typeof state !== 'object') throw new TypeError('State is required');
@@ -48,6 +65,9 @@ export function selectRuntimePrompt(state, options = {}) {
   const tensionLimit = includeKind.tensions ? Math.max(0, options.tensionLimit ?? 3) : null;
   const maxRelationships = Math.max(0, options.maxRelationships ?? Infinity);
   const personaId = state.ui?.personaId || '';
+  const sceneSet = options.sceneIds ? new Set(options.sceneIds) : null;
+  // options.similarity(item) → 0..1 closeness to the scene by meaning (embeddings), or null: ranks what already fits the scene.
+  const similarity = typeof options.similarity === 'function' ? options.similarity : null;
 
   // Strongest feelings first (lines toward the persona get a bonus), so a budget cut drops the faintest lines.
   const weight = relation => Object.entries(relation.scales || {})
@@ -76,8 +96,10 @@ export function selectRuntimePrompt(state, options = {}) {
       .join(',');
     const fields = [`${from}>${to}`, scales];
     if (relation.stage) fields.push(`stage=${relation.stage}`);
-    const memories = compactItems(relation.memories, memoryLimit);
-    const tensions = compactItems(relation.tensions, tensionLimit);
+    // What the one who feels it remembers (or the people who know it) matters only when one of them is in the scene.
+    const heard = item => inScene(sceneSet, item, [relation.from, relation.to], personaId);
+    const memories = compactItems((relation.memories ?? []).filter(heard), memoryLimit, similarity);
+    const tensions = compactItems((relation.tensions ?? []).filter(heard), tensionLimit, similarity);
     if (memories) fields.push(`mem=${memories}`);
     if (tensions) fields.push(`ten=${tensions}`);
     const factors = options.includeFactors === false ? '' : (relation.factors || []).slice(0, 6)
@@ -88,14 +110,14 @@ export function selectRuntimePrompt(state, options = {}) {
   }
 
   // Shared records and secret pair records, ranked by intensity and freshness.
-  const candidates = [];
+  let candidates = [];
   for (const kind of ['memories', 'tensions']) {
     if (!includeKind[kind]) continue;
-    for (const item of collectRecords(state, kind).filter(item => !item.relationshipId && !item.disabled)) {
+    for (const item of collectRecords(state, kind).filter(item => !item.relationshipId && !item.disabled && inScene(sceneSet, item, [], personaId))) {
       const participants = item.participantIds.map(id => state.entities[id]?.name || id).join(',') || 'all';
       candidates.push({ item, line: `shared-${kind}[${participants}]=${clip(item.text)}${describeKnownBy(state, item)}` });
     }
-    for (const item of collectRecords(state, kind).filter(item => item.relationshipId && !item.disabled)) {
+    for (const item of collectRecords(state, kind).filter(item => item.relationshipId && !item.disabled && inScene(sceneSet, item, [], personaId))) {
       const annotation = describeKnownBy(state, item);
       if (annotation) candidates.push({ item, line: `secret-${kind}=${clip(item.text)}${annotation}` });
     }
@@ -110,11 +132,23 @@ export function selectRuntimePrompt(state, options = {}) {
     const freshness = total > 1 ? rank / (total - 1) : 1;
     candidate.score = (Number(candidate.item.intensity) || 3) + 4 * freshness;
   });
+  // Meaning: the records that fit the scene (who is there, who knows) are chosen by closeness to the last posts. options.semanticLimit = how many
+  // unpinned ones stay (the closest; 0 = no cut, all go while the budget lasts); the rest still rank by meaning, strength and freshness.
+  if (similarity) {
+    const near = relativeScores(candidates, candidate => similarity(candidate.item));
+    for (const candidate of candidates) candidate.score += 6 * (near(candidate) ?? 0);
+    const limit = Math.max(0, Math.floor(Number(options.semanticLimit) || 0));
+    const unpinned = candidates.filter(candidate => !candidate.item.pinned);
+    if (limit && unpinned.length > limit && unpinned.some(candidate => near(candidate) != null)) {
+      const stay = new Set([...unpinned].sort((left, right) => (near(right) ?? -1) - (near(left) ?? -1) || right.score - left.score).slice(0, limit));
+      candidates = candidates.filter(candidate => candidate.item.pinned || stay.has(candidate));
+    }
+  }
 
   const ruleLines = [];
   // Who has not met whom lives in the knowledge block (knowledge-prompt.js), with the persona rule.
   // options.sceneIds: who is in the coming scene. A triangle is sent only when two of its three are there.
-  const sceneIds = options.sceneIds ? new Set(options.sceneIds) : null;
+  const sceneIds = sceneSet;
   for (const triangle of state.ui?.triangles ?? []) {
     if (triangle.resolved) continue;
     if (sceneIds && [triangle.centerId, triangle.firstId, triangle.secondId].filter(id => sceneIds.has(id)).length < 2) continue;

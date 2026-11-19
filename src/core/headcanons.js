@@ -77,16 +77,23 @@ function sameText(left, right) {
   return normalizeText(left).toLocaleLowerCase('ru-RU') === normalizeText(right).toLocaleLowerCase('ru-RU');
 }
 
-/** Add facts, skipping empty and duplicate ones. Returns { headcanons, added, ids }. */
+/**
+ * Add facts, skipping empty and duplicate ones. A fact is a text, or { text, knownBy: [ids] } — who knows it (default: the members of the group;
+ * the others were not there and must not talk as if they were). Returns { headcanons, added, ids }.
+ */
 export function addHeadcanons(state, key, texts, { source = 'manual', messageId } = {}) {
   const ids = [];
+  const members = headcanonPairIds(key);
   const headcanons = updateHeadcanons(state, key, entry => {
-    for (const raw of texts) {
+    for (const given of texts) {
+      const raw = typeof given === 'object' && given ? given.text : given;
       const text = normalizeText(raw);
       if (!text || entry.items.some(item => sameText(item.text, text))) continue;
       const id = uniqueId('headcanon');
+      const known = [...new Set((Array.isArray(given?.knownBy) ? given.knownBy : []).map(String).filter(Boolean))].slice(0, 20);
       entry.items.push({
         id, text, enabled: true, source, createdAt: new Date().toISOString(),
+        ...(known.length && known.some(who => !members.includes(who)) ? { knownBy: known } : {}),
         ...(messageId != null ? { messageId: String(messageId) } : {}),
       });
       ids.push(id);
@@ -140,8 +147,8 @@ export function selectHeadcanons(state, { score, limit = 8, maxCharacters = 1200
   for (const pair of listHeadcanonPairs(state)) {
     for (const item of pair.items) {
       if (item.enabled === false) continue;
-      // Pinned: sent whenever its pair is in the scene (pinnedFor), past the ranking and the limit.
-      if (item.pinned && (!pinnedFor || pinnedFor(pair))) { pinned.push({ pair, item }); continue; }
+      // Pinned: sent whenever someone who knows it is in the scene (pinnedFor), past the ranking and the limit.
+      if (item.pinned && (!pinnedFor || pinnedFor(pair, item))) { pinned.push({ pair, item }); continue; }
       const value = score ? score(item, pair) : 1;
       if (value > 0) candidates.push({ pair, item, value });
     }
@@ -150,7 +157,10 @@ export function selectHeadcanons(state, { score, limit = 8, maxCharacters = 1200
   const lines = [];
   let size = 0;
   for (const candidate of [...pinned, ...candidates.slice(0, Math.max(0, limit))]) {
-    const line = `headcanon[${candidate.pair.label}]: ${candidate.item.text}`;
+    // Who knows it: the group itself, unless the fact says more people do.
+    const knownBy = (candidate.item.knownBy ?? []).filter(id => state.entities?.[id]);
+    const extra = knownBy.filter(id => !candidate.pair.ids.includes(id)).map(id => state.entities[id].name);
+    const line = `headcanon[${candidate.pair.label}${extra.length ? ` + known to ${extra.join(', ')}` : ''}]: ${candidate.item.text}`;
     if (size + line.length + 1 > maxCharacters) continue;
     lines.push(line);
     size += line.length + 1;

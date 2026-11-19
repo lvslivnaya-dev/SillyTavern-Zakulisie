@@ -19,12 +19,26 @@ export const HUB_TABS = [
   { id: 'bg', title: 'Фон', icon: 'image', drawer: 'backgrounds-button', content: 'Backgrounds' },
 ];
 
+/**
+ * Кнопки меню, внутри которых вкладки: одна кнопка слева, а сами страницы переключаются рядом, вверху.
+ * Страницы остаются прежними (их делают другие модули), группа только собирает их под одну кнопку.
+ * labels: как назвать вкладку внутри группы, если на странице название другое.
+ */
+export const HUB_GROUPS = [
+  { id: 'tavern', block: 'native', title: 'Таверна', icon: 'sliders', hint: 'Родные настройки таверны', members: ['ai', 'api', 'format', 'user', 'wand'] },
+  { id: 'helpers', block: 'sliva', title: 'Помощники', icon: 'chat', hint: 'Ассистенты, кнопки пресета, промпты, повторы', members: ['assistants', 'chips', 'prompts', 'repeats', 'k-names'] },
+  { id: 'diag', block: 'sliva', title: 'Диагностика и проверки', icon: 'chart', hint: 'История, диагностика, проверка ответов', members: ['k-journal', 'k-diagnostics', 'k-checks'] },
+  { id: 'look', block: 'visual', title: 'Оформление', icon: 'wand', hint: 'Пресеты, фон, палитра, иконки', members: ['vpresets', 'bg', 'palette', 'icons'] },
+];
+
 /** Блок «Родные настройки»: то, что есть в самой таверне (порядок — как здесь). */
 export const NATIVE_TABS = ['ai', 'api', 'format', 'user', 'wand'];
 /** Блок «Сливовые приблуды»: всё своё от Закулисья. Неизвестные вкладки попадают сюда же, в конец. */
-export const SLIVA_TABS = ['chips', 'assistants', 'prompts', 'peek', 'repeats', 'threads', 'mood', 'sounds', 'relgraph'];
+export const SLIVA_TABS = ['assistants', 'chips', 'prompts', 'repeats', 'k-names', 'k-modules', 'k-journal', 'k-diagnostics', 'k-checks', 'k-models', 'k-prompt', 'k-data', 'k-dice', 'relgraph', 'threads', 'mood', 'peek'];
 /** Блок «Визуал»: идёт после своих приблуд и перед ссылками. */
-export const VISUAL_TABS = ['vpresets', 'bg', 'palette', 'moodtheme', 'icons'];
+export const VISUAL_TABS = ['vpresets', 'bg', 'palette', 'icons'];
+
+
 
 export const HUB_LINKS = [
   { title: 'Документация', icon: 'doc', href: 'https://docs.sillytavern.app/' },
@@ -41,18 +55,31 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
   if (!holder) return () => {};
   const view = doc.defaultView;
   const undo = [];
+  const shownHooks = new Map(); // page id -> what to do when the page comes on show
 
   const hub = createWindow(doc, {
     id: 'hub', title: 'Закулисье', icon: 'compact', width: 940,
     store: settings.windows, save,
     // своя метка pud-open, а не openIcon: таверна снимает openIcon со всех иконок, когда открывает свою шторку
-    onToggle: open => doc.getElementById(HUB_BUTTON_ID)?.firstElementChild.classList.toggle('pud-open', open),
+    onToggle: open => {
+      doc.getElementById(HUB_BUTTON_ID)?.firstElementChild.classList.toggle('pud-open', open);
+      if (open) shownHooks.get(tabs.querySelector('[data-tab].on')?.dataset.tab)?.();
+    },
   });
   undo.push(() => hub.destroy());
   hub.element.classList.add('pud-hub');
-  hub.body.innerHTML = `<nav class="pud-tabs" role="tablist"></nav><div class="pud-panes"></div>`;
+  hub.body.innerHTML = `<nav class="pud-tabs" role="tablist"></nav><div class="pud-panes"><div class="pud-subbar" role="tablist" hidden></div></div>`;
   const tabs = hub.body.querySelector('.pud-tabs');
   const panes = hub.body.querySelector('.pud-panes');
+  const subbar = panes.querySelector('.pud-subbar');
+  const lastOf = new Map(); // group → the page that was open in it last
+  const folds = new Map(); // folded page id → { into, details }
+  const hosts = new Map(); // page id → the element where its folds stand
+  const placeFolds = into => {
+    const host = hosts.get(into);
+    if (!host) return;
+    for (const fold of folds.values()) if (fold.into === into) host.append(fold.details);
+  };
 
   // кнопка на верхней панели
   const button = doc.createElement('div');
@@ -75,7 +102,33 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
       tab.classList.toggle('on', on);
       tab.setAttribute('aria-selected', String(on));
     }
-    for (const pane of panes.children) pane.hidden = pane.dataset.pane !== id;
+    for (const pane of panes.children) if (pane.dataset?.pane) pane.hidden = pane.dataset.pane !== id;
+    // a button with tabs inside: lit while one of its pages is open; the pages are listed on the bar above them
+    const group = groupOfTab(id);
+    for (const head of tabs.querySelectorAll('[data-group]')) {
+      const on = head.dataset.group === group?.id;
+      head.classList.toggle('on', on);
+      head.setAttribute('aria-selected', String(on));
+    }
+    if (group) lastOf.set(group.id, id);
+    drawSubbar(group, id);
+    if (!hub.element.hidden) shownHooks.get(id)?.();
+  };
+  const groupOfTab = id => HUB_GROUPS.find(group => group.members.includes(id)) ?? null;
+  const presentMembers = group => group.members.filter(member => tabs.querySelector(`[data-tab="${member}"]`));
+  const drawSubbar = (group, active) => {
+    const list = group ? presentMembers(group) : [];
+    subbar.hidden = list.length < 2;
+    subbar.replaceChildren(...(list.length < 2 ? [] : list.map(member => {
+      const item = doc.createElement('button');
+      item.type = 'button';
+      item.dataset.sub = member;
+      item.classList.toggle('on', member === active);
+      item.setAttribute('role', 'tab');
+      item.textContent = group.labels?.[member] ?? tabs.querySelector(`[data-tab="${member}"] span`)?.textContent ?? member;
+      item.addEventListener('click', () => select(member));
+      return item;
+    })));
   };
   const addTab = (id, title, iconName) => {
     const tab = doc.createElement('button');
@@ -193,6 +246,25 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
     }
     return heads.get(key);
   };
+  /** The buttons with tabs inside: they stand in the place of their first page, the pages' own buttons are hidden. */
+  const groupHeads = new Map();
+  const headOfGroup = group => {
+    if (!groupHeads.has(group.id)) {
+      const head = doc.createElement('button');
+      head.type = 'button';
+      head.dataset.group = group.id;
+      head.setAttribute('role', 'tab');
+      head.title = group.hint;
+      head.innerHTML = `${icon(group.icon)}<span></span>`;
+      head.querySelector('span').textContent = group.title;
+      head.addEventListener('click', () => {
+        const list = presentMembers(group);
+        select(list.includes(lastOf.get(group.id)) ? lastOf.get(group.id) : list[0]);
+      });
+      groupHeads.set(group.id, head);
+    }
+    return groupHeads.get(group.id);
+  };
   const regroup = () => {
     const all = [...tabs.children].filter(el => el.dataset?.tab);
     const byId = id => all.find(tab => tab.dataset.tab === id);
@@ -208,6 +280,17 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
       tabs.insertBefore(head, links);
       for (const tab of list) tabs.insertBefore(tab, links);
     }
+    // each group: one button at the place of its first page
+    for (const group of HUB_GROUPS) {
+      const present = presentMembers(group).map(byId);
+      const head = headOfGroup(group);
+      for (const tab of present) tab.classList.add('pud-grouped');
+      if (!present.length) { head.remove(); continue; }
+      tabs.insertBefore(head, present[0]);
+    }
+    // the open page may have joined a group after all: show the bar
+    const current = tabs.querySelector('[data-tab].on')?.dataset.tab;
+    if (current) { const group = groupOfTab(current); for (const head of tabs.querySelectorAll('[data-group]')) head.classList.toggle('on', head.dataset.group === group?.id); drawSubbar(group, current); }
   };
   regroup();
 
@@ -220,6 +303,29 @@ export function startHub(doc, { settings, save, stopAll, shared = {} }) {
       return { pane, remove: () => { tab?.remove(); pane.remove(); regroup(); } };
     },
     open(tabId) { if (tabId) select(tabId); hub.open(); },
+    /**
+     * A drawer inside another page (like «Кнопки и значки» inside the palette) instead of a tab of its own.
+     * The page `into` says where its drawers stand (mountFolds); the drawer's body is `pane`.
+     */
+    addFold(id, title, into) {
+      const details = doc.createElement('details');
+      details.className = 'pud-palgroup pud-foldpage';
+      details.dataset.foldPage = id;
+      const summary = doc.createElement('summary');
+      summary.textContent = title;
+      const pane = doc.createElement('section');
+      pane.className = 'pud-fold-body';
+      details.append(summary, pane);
+      folds.set(id, { into, details });
+      placeFolds(into);
+      return { pane, remove: () => { folds.delete(id); details.remove(); } };
+    },
+    /** The page `into` says where the drawers that belong to it stand (call again after redrawing the page). */
+    mountFolds(into, host) { hosts.set(into, host); placeFolds(into); },
+    /** What to do when a page comes on show (a page that is drawn only while it is looked at). */
+    onShow(id, fn) { shownHooks.set(id, fn); },
+    /** The page is on show now: its tab is open and the window is not hidden. */
+    isShown: id => !hub.element.hidden && panes.querySelector(`[data-pane="${id}"]`)?.hidden === false,
   };
   undo.push(() => { delete shared.hub; });
 

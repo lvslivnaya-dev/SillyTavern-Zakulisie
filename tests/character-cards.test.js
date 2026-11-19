@@ -632,7 +632,7 @@ test('«Мир → Карточки»: a gallery with a switch per card; the she
     const navs = () => [...shadow.querySelectorAll('.ku-cnav')];
     const nav = title => navs().find(node => node.querySelector('.ku-cnav-title').textContent === title);
     assert.equal(navs().length, 9); // nine sections; the names and the closet are small buttons in the footer
-    assert.equal(shadow.querySelectorAll('.ku-cfoot-tool').length, 5, 'names, the closet, the sizes, the AU and the eraser: square buttons of the footer');
+    assert.equal(shadow.querySelectorAll('.ku-cfoot-tool').length, 4, 'names, the closet, the sizes and the eraser: square buttons of the footer');
     assert.equal(shadow.querySelector('.ku-cnav.on .ku-cnav-title').textContent, 'Basic Info', 'the first section is open');
     assert.equal(shadow.querySelector('.ku-ctitlerow .ku-ctitle-edit').value, 'Basic Info', 'the heading is the name of the section and can be typed over');
     assert.match(shadow.querySelector('.ku-ctitlerow').textContent, /сейчас уходит в запрос/);
@@ -966,26 +966,13 @@ test('the closet of a card: sets and things of the wardrobe are ticked, saved wi
   try {
     shadow.querySelector('.ku-place-open').click();
     assert.ok(shadow.querySelector('.ku-cfoot-tool[aria-label^="Шкаф"]'), 'the closet is an icon beside the switch: it never hides below the sections');
+    // The closet button opens the BIG wardrobe window on this card's closet (as the drawer's «Шкаф» does), not a small pane inside the card.
+    const { wardrobeFocus } = await import('../src/ui/wardrobe-focus.js');
     shadow.querySelector('.ku-cfoot-tool[aria-label^="Шкаф"]').click();
-    assert.match(shadow.querySelector('.ku-cpane').textContent, /Комплекты[\s\S]*Форма[\s\S]*Вещи/);
-    shadow.querySelector('input[aria-label="Комплект «Форма» у героя"]').click();
-    assert.ok(byText('Надеть'), 'a tied set can be put on at once');
-    byText('Надеть').click();
     await flush();
-    assert.deepEqual(calls.find(call => call[0] === 'onWear')[1], { entityId: 'mikey', cardIds: set.look.cardIds, mode: 'replace' });
-    // Ticking a thing does not move it: the order is the one of the moment the closet was opened.
-    const caps = () => [...shadow.querySelectorAll('.ku-closet-tile .ku-closet-cap')].map(node => node.textContent);
-    const before = caps();
-    [...shadow.querySelectorAll('.ku-closet-tile')][1].click();
-    assert.deepEqual(caps(), before, 'the tiles stay where they were');
-    assert.equal(shadow.querySelectorAll('.ku-closet-tile.on').length, 1);
-    [...shadow.querySelectorAll('.ku-closet-tile')][1].click();
-    shadow.querySelector('.ku-closet-tile').click();
-    byText('Сохранить').click();
-    await flush();
-    const saved = calls.find(call => call[0] === 'onLibraryUpdateCharacter')[1].changes.closet;
-    assert.deepEqual(saved.lookIds, [set.look.id]);
-    assert.equal(saved.cardIds.length, 1);
+    assert.ok(shadow.querySelector('.ku-wardrobe'), 'the wardrobe page is open');
+    assert.match(shadow.querySelector('.ku-closets')?.textContent ?? '', /Китель/, 'on its closets section');
+    assert.equal(wardrobeFocus.closets, false, 'the request was taken by the wardrobe page');
   } finally { studio.destroy?.(); }
 });
 

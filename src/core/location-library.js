@@ -102,7 +102,7 @@ export function normalizeLibrary(input) {
     const name = cleanText(raw?.name, LIBRARY_LIMITS.name);
     if (!id || !name || folderIds.has(id) || library.folders.length >= LIBRARY_LIMITS.folders) continue;
     folderIds.add(id);
-    library.folders.push({ id, name, ...(raw.parentId ? { parentId: String(raw.parentId) } : {}), ...(raw.persona ? { persona: true } : {}), ...(raw.persona && raw.hidden ? { hidden: true } : {}), ...(auIsEmpty(raw.au) ? {} : { au: normalizeAu(raw.au) }) });
+    library.folders.push({ id, name, ...(raw.parentId ? { parentId: String(raw.parentId) } : {}), ...(raw.persona && raw.hidden ? { persona: true, hidden: true } : {}), ...(auIsEmpty(raw.au) ? {} : { au: normalizeAu(raw.au) }) });
   }
   for (const folder of library.folders) {
     if (folder.parentId && (!folderIds.has(folder.parentId) || !noLoop(library.folders, folder.parentId, folder.id))) delete folder.parentId;
@@ -158,14 +158,7 @@ export function normalizeLibrary(input) {
     cardIds.add(id);
     library.characters.push(characterEntry(id, shelfOf(raw), name, raw));
   }
-  // A folder that holds only persona cards belongs to the shelf of personas (an earlier version made them in a plain «Персоны» folder).
-  for (const folder of library.folders) {
-    if (folder.persona) continue;
-    const inside = library.characters.filter(card => card.folderId === folder.id);
-    const other = library.locations.some(item => item.folderId === folder.id) || library.items.some(item => item.folderId === folder.id)
-      || library.characters.some(card => card.folderId === folder.id && !card.persona) || library.folders.some(item => item.parentId === folder.id);
-    if (inside.length && !other) { folder.persona = true; if (!folder.parentId && folder.name === PERSONA_HOME_NAME) folder.hidden = true; }
-  }
+  // Folders are shared by every shelf, personas included: only the hidden home of the persona cards keeps its mark (an earlier version kept folders apart for personas).
   // Records between characters: only those whose cards are still there.
   const have = new Set(library.characters.map(card => card.id));
   const bonds = cleanBonds(input.bonds).map(bond => ({ ...bond, cardIds: bond.cardIds.filter(id => have.has(id)) })).filter(bond => bond.cardIds.length);
@@ -314,11 +307,11 @@ function itemEntry(id, folderId, name, raw) {
 
 // ---- Folders --------------------------------------------------------------
 
-export function addFolder(library, { name, parentId = '', persona = false } = {}) {
+export function addFolder(library, { name, parentId = '' } = {}) {
   const next = clone(library);
   if (next.folders.length >= LIBRARY_LIMITS.folders) throw new RangeError('Слишком много папок');
   if (parentId && !next.folders.some(folder => folder.id === parentId)) throw new RangeError('Такой папки нет');
-  const folder = { id: uniqueId('folder'), name: requireName(name), ...(parentId ? { parentId } : {}), ...(persona ? { persona: true } : {}) };
+  const folder = { id: uniqueId('folder'), name: requireName(name), ...(parentId ? { parentId } : {}) };
   next.folders.push(folder);
   return { library: next, folder };
 }
@@ -748,7 +741,7 @@ export function refreshLibraryCharacter(library, cardId, draft) {
   const old = new Map(card.sections.map(section => [section.title.toLocaleLowerCase('ru-RU'), section]));
   card.sections = normalizeSections(sectionsFromParts(draft.sections).map(section => {
     const had = old.get(section.title.toLocaleLowerCase('ru-RU'));
-    return had ? { ...section, id: had.id, ...(had.when ? { when: had.when } : {}), ...(had.keys ? { keys: had.keys } : {}), ...(had.au ? { au: had.au } : {}) } : section;
+    return had ? { ...section, id: had.id, ...(had.when ? { when: had.when } : {}), ...(had.keys ? { keys: had.keys } : {}), } : section;
   }));
   card.aliases = cleanCardAliases([...card.aliases, ...cleanCardAliases(draft.aliases, { latin: false })])
     .filter(alias => alias.toLocaleLowerCase('ru-RU') !== card.name.toLocaleLowerCase('ru-RU'));

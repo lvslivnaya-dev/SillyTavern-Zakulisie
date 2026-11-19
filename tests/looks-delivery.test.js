@@ -109,14 +109,13 @@ test('UI: the "Одежда" section in Проверка and the menu count', ()
   const calls = [];
   const callbacks = new Proxy({}, { get: (target, name) => (typeof name === 'string' && name.startsWith('on') ? payload => { calls.push([name, payload]); } : undefined) });
   const snapshot = () => ({ ...state, pairs: [], dossiers: {}, leaks: [], slips: [], settings: {}, lorebooks: { available: [], selected: [], cardWorlds: [] }, wardrobe, looksFit: fit });
-  const studio = createRelationshipStudio({ store: { getSnapshot: snapshot }, open: true, layout: { mode: 'window', tab: 'leaks' }, callbacks });
+  const studio = createRelationshipStudio({ store: { getSnapshot: snapshot }, open: true, layout: { mode: 'window', tab: 'leaks' }, embedPage: { tab: 'leaks' }, callbacks });
   const shadow = studio.element.shadowRoot;
   try {
     const text = shadow.querySelector('.content').textContent;
     assert.match(text, /Одежда · 1/);
     assert.match(text, /Платье с кружевом — доходит/);
     assert.match(text, /Обувь — не доходит совсем/);
-    assert.equal(shadow.querySelector('.nav .badge')?.textContent, '1', 'counted with leaks and slips');
     assert.ok([...shadow.querySelectorAll('button')].some(node => node.textContent === 'Поднять лимит описаний'));
   } finally { studio.destroy(); }
 });

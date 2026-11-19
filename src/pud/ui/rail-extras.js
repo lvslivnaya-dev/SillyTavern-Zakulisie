@@ -17,7 +17,7 @@ export const sidebarOf = rail => {
   return bar;
 };
 
-export const railHost = rail => rail.querySelector(':scope > .ku-rail') ?? rail;
+export const railHost = rail => rail.querySelector('.ku-rail') ?? rail;
 
 /**
  * @param {Document} doc

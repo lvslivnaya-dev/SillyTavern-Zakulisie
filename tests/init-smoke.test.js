@@ -27,6 +27,7 @@ test('init() starts without throwing and without console errors', async () => {
     const controller = await module.init();
     assert.ok(controller, 'init returns the controller');
     assert.equal(await module.init(), controller, 'a second init reuses it');
+    await new Promise(resolve => setTimeout(resolve, 600)); // the drawer redraws on a timer: a broken view builder shows up only then
   } finally { console.error = original; }
   assert.deepEqual(errors, [], errors.join(' | '));
 });

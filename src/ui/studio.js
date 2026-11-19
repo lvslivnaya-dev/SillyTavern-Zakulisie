@@ -6,7 +6,7 @@ import {
 import { hostThemeCss } from './theme.js';
 import { icon } from './icons.js';
 import { looksIssues } from '../integration/world-prompt.js';
-import { DOCK_WIDTH, NAV_GROUPS, NAV_TABS, PENDING_TABS, RELATION_TABS, clampDockWidth, effectiveMode, normalizeLayout, windowOf, WINDOWS } from './layout.js';
+import { DOCK_WIDTH, MOVED_SECTIONS, MOVED_TABS, NAV_GROUPS, NAV_TABS, PENDING_TABS, RELATION_TABS, clampDockWidth, effectiveMode, normalizeLayout, windowOf, WINDOWS } from './layout.js';
 import { createDialogs } from './pages/dialogs.js';
 import { createCharactersPage } from './pages/characters.js';
 import { createOverviewPage } from './pages/overview.js';
@@ -32,7 +32,7 @@ import { QUESTS_STYLE, createQuestsPages } from './pages/quests.js';
 
 const STYLE = `
 ${hostThemeCss('--rs-bg:var(--k-bg);--rs-panel:var(--k-panel);--rs-inset:var(--k-inset);--rs-track:var(--k-track);--rs-line:var(--k-line);--rs-text:var(--k-text);--rs-muted:var(--k-muted);--rs-accent:var(--k-accent);--rs-danger:var(--k-danger);--rs-backdrop:var(--k-backdrop)')}
-*,*:before,*:after{box-sizing:border-box}.backdrop.embedded{position:static;inset:auto;z-index:auto;background:none;padding:0;display:block;height:100%}.studio.embed{width:100%;height:100%;border:0;border-radius:0;box-shadow:none;background:transparent;backdrop-filter:none;display:block;overflow:hidden}.embed-content{height:100%;overflow:hidden;display:flex;flex-direction:column}.embed-content>.ku-wlayer{flex:1 1 auto;min-height:0;height:auto}.studio.single{grid-template-columns:minmax(0,1fr)}.studio.single .sidebar{display:none}.backdrop{position:fixed;inset:0;z-index:2147483000;background:var(--rs-backdrop);display:grid;place-items:center;padding:clamp(8px,2vw,28px)}.backdrop[hidden]{display:none}.studio{width:min(1640px,100%);height:min(980px,100%);background:var(--rs-bg);backdrop-filter:blur(var(--k-blur));border:1px solid var(--rs-line);border-radius:18px;box-shadow:0 30px 90px var(--k-shadow);display:grid;grid-template-columns:240px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);overflow:hidden}.header{grid-column:1/-1;min-height:72px;border-bottom:1px solid var(--rs-line);display:flex;align-items:center;gap:14px;padding:14px 18px}.brand{margin-right:auto}.brand strong{display:block;font:700 20px/1.1 var(--k-font)}.brand span,.muted{color:var(--rs-muted);font-size:12px}.sidebar{border-right:1px solid var(--rs-line);padding:16px;overflow:auto}.content{min-width:0;overflow:auto;padding:clamp(16px,3vw,34px)}button,input,select,textarea{font:inherit}.btn,.nav button,.icon{border:1px solid var(--rs-line);background:var(--rs-panel);color:var(--rs-text);border-radius:9px;min-height:40px;padding:8px 12px;cursor:pointer}.btn:hover,.nav button:hover,.nav button.active{border-color:var(--rs-accent);background:color-mix(in srgb,var(--rs-panel) 86%,var(--rs-accent))}.btn.primary{background:color-mix(in srgb,var(--rs-accent) 30%,var(--rs-panel));border-color:var(--rs-accent);color:var(--rs-text);font-weight:700}.icon{width:42px;padding:6px;font-size:20px}.nav{display:grid;gap:7px;margin-bottom:24px}.nav button{text-align:left}.section-title{font:700 11px/1.2 inherit;letter-spacing:.13em;text-transform:uppercase;color:var(--rs-muted);margin:0 0 9px}.characters{display:grid;gap:7px}.character{display:flex;align-items:center;gap:9px;padding:8px;border-radius:9px;background:var(--rs-inset)}.avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;background:color-mix(in srgb,var(--rs-line) 70%,var(--rs-bg));display:grid;place-items:center;font-weight:700}.character span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:26px}.field{display:grid;gap:6px;min-width:160px}.field.grow{flex:1}.field label{font-size:12px;color:var(--rs-muted)}select,input,textarea{width:100%;color:var(--rs-text);background:color-mix(in srgb,var(--rs-inset) 70%,var(--SmartThemeChatTintColor));border:1px solid var(--rs-line);border-radius:8px;padding:9px}textarea{min-height:90px;resize:vertical}.hero{margin-bottom:24px}.hero h2{font:700 clamp(24px,4vw,42px)/1.1 var(--k-font);margin:0 0 7px}.grid{display:grid;grid-template-columns:repeat(2,minmax(240px,1fr));gap:14px}.card{background:var(--rs-panel);border:1px solid var(--rs-line);border-radius:13px;padding:16px}.card h3{margin:0 0 14px;font-size:15px}.metric{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,2fr) 58px;gap:12px;align-items:center;margin:13px 0}.metric output{text-align:right;font-variant-numeric:tabular-nums;color:var(--rs-accent);font-weight:700}input[type=range]{padding:0;accent-color:var(--rs-accent)}.stack{display:grid;gap:10px}.item{border:1px solid var(--rs-line);border-radius:10px;padding:12px;background:color-mix(in srgb,var(--rs-inset) 80%,var(--rs-bg))}.item-head{display:flex;gap:10px;justify-content:space-between;margin-bottom:6px}.item p{margin:0;white-space:pre-wrap;color:color-mix(in srgb,var(--rs-text) 85%,transparent)}.item time{color:var(--rs-muted);font-size:11px}.empty{border:1px dashed var(--rs-line);border-radius:10px;padding:28px;text-align:center;color:var(--rs-muted)}.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.journal-row{display:grid;grid-template-columns:150px minmax(120px,1fr) 2fr;gap:13px;border-bottom:1px solid var(--rs-line);padding:12px 3px}.settings{max-width:760px}.settings .field{margin:14px 0}.danger{color:var(--rs-danger)}.status{min-height:18px;color:var(--rs-muted);font-size:12px;margin-left:auto}
+*,*:before,*:after{box-sizing:border-box}.backdrop.embedded{position:static;inset:auto;z-index:auto;background:none;padding:0;display:block;height:100%}.studio.embed{width:100%;height:100%;border:0;border-radius:0;box-shadow:none;background:transparent;backdrop-filter:none;display:block;overflow:hidden}.embed-content{height:100%;overflow:hidden;display:flex;flex-direction:column}.embed-content>.ku-wlayer{flex:1 1 auto;min-height:0;height:auto}.embed-content>.page-embed{flex:1 1 auto;min-height:0;overflow:auto;padding:4px 2px 24px}.studio.single{grid-template-columns:minmax(0,1fr)}.studio.single .sidebar{display:none}.backdrop{position:fixed;inset:0;z-index:2147483000;background:var(--rs-backdrop);display:grid;place-items:center;padding:clamp(8px,2vw,28px)}.backdrop[hidden]{display:none}.studio{width:min(1640px,100%);height:min(980px,100%);background:var(--rs-bg);backdrop-filter:blur(var(--k-blur));border:1px solid var(--rs-line);border-radius:18px;box-shadow:0 30px 90px var(--k-shadow);display:grid;grid-template-columns:240px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);overflow:hidden}.header{grid-column:1/-1;min-height:72px;border-bottom:1px solid var(--rs-line);display:flex;align-items:center;gap:14px;padding:14px 18px}.brand{margin-right:auto}.brand strong{display:block;font:700 20px/1.1 var(--k-font)}.brand span,.muted{color:var(--rs-muted);font-size:12px}.sidebar{border-right:1px solid var(--rs-line);padding:16px;overflow:auto}.content{min-width:0;overflow:auto;padding:clamp(16px,3vw,34px)}button,input,select,textarea{font:inherit}.btn,.nav button,.icon{border:1px solid var(--rs-line);background:var(--rs-panel);color:var(--rs-text);border-radius:9px;min-height:40px;padding:8px 12px;cursor:pointer}.btn:hover,.nav button:hover,.nav button.active{border-color:var(--rs-accent);background:color-mix(in srgb,var(--rs-panel) 86%,var(--rs-accent))}.btn.primary{background:color-mix(in srgb,var(--rs-accent) 30%,var(--rs-panel));border-color:var(--rs-accent);color:var(--rs-text);font-weight:700}.icon{width:42px;padding:6px;font-size:20px}.nav{display:grid;gap:7px;margin-bottom:24px}.nav button{text-align:left}.section-title{font:700 11px/1.2 inherit;letter-spacing:.13em;text-transform:uppercase;color:var(--rs-muted);margin:0 0 9px}.characters{display:grid;gap:7px}.character{display:flex;align-items:center;gap:9px;padding:8px;border-radius:9px;background:var(--rs-inset)}.avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;background:color-mix(in srgb,var(--rs-line) 70%,var(--rs-bg));display:grid;place-items:center;font-weight:700}.character span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:26px}.field{display:grid;gap:6px;min-width:160px}.field.grow{flex:1}.field label{font-size:12px;color:var(--rs-muted)}select,input,textarea{width:100%;color:var(--rs-text);background:color-mix(in srgb,var(--rs-inset) 70%,var(--SmartThemeChatTintColor));border:1px solid var(--rs-line);border-radius:8px;padding:9px}textarea{min-height:90px;resize:vertical}.hero{margin-bottom:24px}.hero h2{font:700 clamp(24px,4vw,42px)/1.1 var(--k-font);margin:0 0 7px}.grid{display:grid;grid-template-columns:repeat(2,minmax(240px,1fr));gap:14px}.card{background:var(--rs-panel);border:1px solid var(--rs-line);border-radius:13px;padding:16px}.card h3{margin:0 0 14px;font-size:15px}.metric{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,2fr) 58px;gap:12px;align-items:center;margin:13px 0}.metric output{text-align:right;font-variant-numeric:tabular-nums;color:var(--rs-accent);font-weight:700}input[type=range]{padding:0;accent-color:var(--rs-accent)}.stack{display:grid;gap:10px}.item{border:1px solid var(--rs-line);border-radius:10px;padding:12px;background:color-mix(in srgb,var(--rs-inset) 80%,var(--rs-bg))}.item-head{display:flex;gap:10px;justify-content:space-between;margin-bottom:6px}.item p{margin:0;white-space:pre-wrap;color:color-mix(in srgb,var(--rs-text) 85%,transparent)}.item time{color:var(--rs-muted);font-size:11px}.empty{border:1px dashed var(--rs-line);border-radius:10px;padding:28px;text-align:center;color:var(--rs-muted)}.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.journal-row{display:grid;grid-template-columns:150px minmax(120px,1fr) 2fr;gap:13px;border-bottom:1px solid var(--rs-line);padding:12px 3px}.settings{max-width:760px}.settings .field{margin:14px 0}.danger{color:var(--rs-danger)}.status{min-height:18px;color:var(--rs-muted);font-size:12px;margin-left:auto}
 @media(max-width:760px){.backdrop{padding:0}.studio{height:100dvh;border-radius:0;grid-template-columns:1fr;grid-template-rows:auto auto minmax(0,1fr)}.header{min-height:62px}.sidebar{border-right:0;border-bottom:1px solid var(--rs-line);padding:8px 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}.nav{display:flex;margin:0}.nav button{white-space:nowrap;min-height:44px}.characters,.sidebar .section-title{display:none}.content{padding:16px;-webkit-overflow-scrolling:touch}.grid{grid-template-columns:1fr}.metric{grid-template-columns:90px minmax(100px,1fr) 48px}.journal-row{grid-template-columns:1fr}.header{gap:8px;padding:10px 12px}.brand span{display:none}.btn,.nav button{min-height:44px;font-size:14px}.header .btn:not(.primary){display:none}.mobile-tools{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;justify-content:flex-end}.mobile-tools .btn{display:inline-flex;min-height:36px;font-size:12px;padding:6px 10px}.mobile-tools .icon{width:36px;min-height:36px;font-size:16px}.busy-pill{max-width:100%;overflow:hidden;text-overflow:ellipsis}}
 `;
 
@@ -55,7 +55,9 @@ export function createRelationshipStudio(options = {}) {
   let selectedPairId = options.activePairId || snapshot.activePairId || pairId(snapshot.activePair);
   // Window or docked panel, and the last tab: kept in extension settings via onLayoutChange.
   const layout = normalizeLayout({ tab: options.initialTab, ...options.layout });
-  let tab = layout.tab;
+  // An embedded page: one page of the Studio (a settings section, the history…) drawn inside the settings window of the tavern.
+  const pageSpec = options.embedPage ?? null;
+  let tab = pageSpec?.tab ?? layout.tab;
   /** Small buttons a page puts in the header beside the cross: tab → () => [{ title, icon, onClick }]. */
   const headerTools = {};
   /** The window of the top bar the Studio shows now: its own tabs only. */
@@ -359,7 +361,7 @@ export function createRelationshipStudio(options = {}) {
   const panel = element('section', { className: 'studio', tabIndex: -1 });
   backdrop.append(panel);
   // Embedded: not a window but the editor of one persona card inside another window (options.container); nothing else is drawn.
-  const embedded = Boolean(options.embedCard);
+  const embedded = Boolean(options.embedCard || pageSpec);
   let embedCardId = '';
   /** Docked panels may stand on either side of the chat; two of them share the width (several windows at once). */
   let side = options.side === 'left' ? 'left' : 'right';
@@ -400,12 +402,20 @@ export function createRelationshipStudio(options = {}) {
   }
 
   function saveLayout() {
+    if (pageSpec) return; // an embedded page is not the Studio window: it keeps no layout
     try { facade.invoke('onLayoutChange', { mode: layout.mode, tab, width: layout.width, open: isOpen, folded: layout.folded }); }
     catch (error) { console.error('[Kulisy] Could not save the Studio layout.', error); }
   }
 
+  /** A page that lives in the settings window of the tavern now: open it there (true when it was handled). */
+  function sendMoved(id, extra = {}) {
+    if (pageSpec || !MOVED_TABS[id]) return false;
+    try { return options.onMoved?.(MOVED_TABS[id], extra) === true; } catch (error) { console.error('[Kulisy] Could not open the page in the settings window.', error); return false; }
+  }
+
   function setTab(id) {
     if (id === 'weather') id = 'calendar'; // the weather lives on the calendar page
+    if (sendMoved(id)) return;
     if (id !== tab) lastStatus = { message: '', danger: false };
     tab = id;
     scope = windowOf(id);
@@ -574,11 +584,25 @@ export function createRelationshipStudio(options = {}) {
 
   function render() {
     if (resizing) { renderDeferred = true; return; }
+    // an embedded page that is not on show (another tab of the settings window is open) is not drawn: it is redrawn when shown
+    if (pageSpec && options.isVisible && !options.isVisible()) { pageStale = true; return; }
     keepScroll(drawPanel);
   }
 
+  let pageStale = false;
+  function drawPage() {
+    pageStale = false;
+    const pages = { leaks: renderChecks, dice: renderDice, names: renderNames, lorebooks: renderLorebooks, setup: renderSetup, journal: renderJournal, settings: renderSettings };
+    const content = element('main', { className: 'content page-embed' });
+    try { content.append(pages[tab]?.() ?? element('div', { className: 'empty', text: 'Страница не найдена.' })); }
+    catch (error) { console.error('[Kulisy] The embedded page failed.', error); content.append(element('div', { className: 'empty', text: 'Не получилось показать страницу.' })); }
+    panel.replaceChildren(element('main', { className: 'embed-content' }, [content]));
+    collapseHints(panel);
+  }
+
   function drawPanel() {
-    if (embedded) { panel.replaceChildren(element('main', { className: 'embed-content' }, [renderEmbeddedCard(embedCardId, { onGear: options.onGear })])); collapseHints(panel); return; }
+    if (pageSpec) { drawPage(); return; }
+    if (embedded) { panel.replaceChildren(element('main', { className: 'embed-content' }, [renderEmbeddedCard(embedCardId, { onGear: options.onGear, onCloset: options.onCloset })])); collapseHints(panel); return; }
     applyMode();
     panel.classList.toggle('single', scope.tabs.length === 1);
     const pair = getPair(snapshot, selectedPairId);
@@ -649,6 +673,9 @@ export function createRelationshipStudio(options = {}) {
     requestAnimationFrame(() => sheet.querySelector('.factors-close')?.focus({ preventScroll: true }));
   }
 
+  /** The pages the analysis of the chat is about; on the others (wardrobe, places, calendar, media…) the two buttons are not shown. */
+  const ANALYSIS_TABS = new Set(['scene', 'characters', 'chronicle', 'events', 'secrets', 'overview', 'headcanons', 'triangles']);
+
   function renderHeader() {
     const brand = element('div', { className: 'brand' }, [
       element('strong', { text: options.title || scope.title }),
@@ -693,7 +720,7 @@ export function createRelationshipStudio(options = {}) {
     // A phone has no room beside the chat, so it never docks.
     modeButton.hidden = isPhone();
     return element('header', { className: 'header' }, [
-      brand, busyPill, historyButton, analyzeButton,
+      brand, busyPill, ...(ANALYSIS_TABS.has(tab) ? [historyButton, analyzeButton] : []),
       element('span', { className: `status${lastStatus.danger ? ' danger' : ''}`, role: 'status', 'aria-live': 'polite', text: lastStatus.message }),
       modeButton,
       ...(headerTools[tab]?.() ?? []).map(tool => iconOnly(button('', 'icon', tool.onClick, tool.title), tool.icon)),
@@ -928,6 +955,8 @@ export function createRelationshipStudio(options = {}) {
 
   function onKeyDown(event) {
     if (!isOpen) return;
+    // Embedded in another window (the persona card): Esc is that window's business, it must not hide just the card half of it.
+    if (embedded) return;
     // Docked, the chat is in use too: keys typed there (Esc in the message box,
     // Tab between fields) are not the Studio's business.
     const insideStudio = event.composedPath?.().includes(host);
@@ -1003,6 +1032,7 @@ export function createRelationshipStudio(options = {}) {
     /** Open on one page; `entityId` focuses the things page (or the dossier) on a character. */
     show(id, { entityId } = {}) {
       if (id === 'personas') { options.onOpenPersonas?.(); return; }
+      if (sendMoved(id)) return;
       if (id === 'items') { ctx.focusItems?.(entityId); ctx.openWardrobeThings?.(); if (isOpen) render(); else open(); return; }
       if (id === 'characters' && entityId) { ctx.openDossier?.(entityId, 'items'); }
       else if (TABS.some(([tabId]) => tabId === id)) { tab = id; scope = windowOf(id); saveLayout(); emit('scope', {}); }
@@ -1010,6 +1040,7 @@ export function createRelationshipStudio(options = {}) {
     },
     /** Open one window of the top bar (on its last page, or on `tabId`). */
     showWindow(windowId, tabId) {
+      if (windowId === 'settings') { if (!sendMoved(MOVED_TABS[tabId] ? tabId : 'settings')) windowId = 'scene'; else return; }
       const target = WINDOWS.find(item => item.id === windowId) ?? scope;
       scope = target;
       tab = target.tabs.includes(tabId) ? tabId : (target.tabs.includes(tab) ? tab : target.tabs[0]);
@@ -1025,10 +1056,13 @@ export function createRelationshipStudio(options = {}) {
       applyMode();
     },
     /** Embedded mode: show the card of this id (a card of the persona library). */
-    showCard(cardId) { embedCardId = String(cardId ?? ''); if (isOpen) render(); },
+    showCard(cardId) { embedCardId = String(cardId ?? ''); if (embedded) { isOpen = true; backdrop.hidden = false; } if (isOpen) render(); }, // embedded: always visible, even after something hid it
     isOpen: () => isOpen,
+    /** An embedded page: draw it again (it was not drawn while hidden). */
+    refresh() { if (pageSpec) { pageStale = false; render(); } },
+    isStale: () => pageStale,
     /** Open a section of the settings, optionally showing one field (see system.js openSettingsSection). */
-    openSettings(section, options) { if (!isOpen) open(); ctx.openSettingsSection?.(section, options); },
+    openSettings(section, settingsOptions) { if (!pageSpec && MOVED_SECTIONS[section]) { try { if (options.onMoved?.(MOVED_SECTIONS[section], { section, focus: settingsOptions?.focus ?? '' }) === true) return; } catch (error) { console.error('[Kulisy] Could not open the setting.', error); } } if (!isOpen) open(); ctx.openSettingsSection?.(section, settingsOptions); },
     update(value) { snapshot = normalizeSnapshot(value || facade.read()); facade.setLocal(snapshot); if (isOpen) render(); },
     selectPair(value) { selectedPairId = typeof value === 'string' ? value : pairId(value); if (isOpen) render(); },
     destroy() { close(); cleanups.splice(0).forEach((cleanup) => cleanup()); host.remove(); emit('destroy', {}); },

@@ -7,7 +7,7 @@
  */
 import { report } from '../core/guard.js';
 import {
-  PEEK_FACES, PEEK_KINDS, defaultPeekSettings, decide, noteActivity, pickLine, holdMs, pruneMeals, clockParts, zoneOf,
+  PEEK_FACES, PEEK_KINDS, commentFace, defaultPeekSettings, decide, noteActivity, pickLine, holdMs, pruneMeals, clockParts, zoneOf,
   buildCommentMessages, cleanComment, commentDue, commentTokens, bubbleMaxWidth, countWords, tidyMessage, normalizeReminders, newReminder,
 } from '../core/peek.js';
 import { findPlace, currentWeather } from '../core/peek-weather.js';
@@ -21,7 +21,6 @@ const SCALE = 0.42;
 const TICK_MS = 30 * 1000;
 const WEATHER_REFRESH_MS = 30 * 60 * 1000;
 const COMMENT_BACKOFF_MS = 10 * 60 * 1000;
-const COMMENT_FACES = ['wink', 'wink', 'normal', 'happy'];
 const escapeHtml = text => String(text ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -50,6 +49,7 @@ export function startPeek(doc, { context, settings, save, shared = {} }) {
   root.innerHTML = `
     <div class="pud-peek-clip"><img class="pud-peek-img" alt="" draggable="false"></div>
     <div class="pud-peek-bubble" role="status">
+      <button type="button" class="pud-peek-x" data-do="close" title="Закрыть" aria-label="Закрыть облачко">×</button>
       <span class="pud-peek-emoji" aria-hidden="true"></span><span class="pud-peek-text"></span>
       <div class="pud-peek-menu" hidden>
         <button type="button" data-do="thanks">Спасибо!</button>
@@ -144,6 +144,7 @@ export function startPeek(doc, { context, settings, save, shared = {} }) {
     const action = event.target.closest?.('[data-do]')?.dataset.do;
     if (action) {
       const c = cfg();
+      // «Закрыть»: просто прячет облачко, ничего не откладывает
       if (action === 'later') c.snoozeUntil = Date.now() + 30 * 60 * 1000;
       if (action === 'quiet') c.snoozeUntil = Date.now() + 3 * 60 * 60 * 1000;
       if (action === 'later' || action === 'quiet') persist();
@@ -243,7 +244,7 @@ export function startPeek(doc, { context, settings, save, shared = {} }) {
       if (liveContext().chatId !== chatId && !force) { commentStatus = ''; return; }
       commentStatus = `Последний комментарий: ${countWords(text)} слов.`;
       persist();
-      if (force || !shown) show({ text, face: COMMENT_FACES[Math.floor(Math.random() * COMMENT_FACES.length)], emoji: '' });
+      if (force || !shown) show({ text, face: commentFace(raw), emoji: '' });
     } catch (error) {
       commentBackoffUntil = Date.now() + COMMENT_BACKOFF_MS;
       commentStatus = `Не вышло: ${String(error?.message ?? error)}`;
@@ -315,7 +316,7 @@ export function startPeek(doc, { context, settings, save, shared = {} }) {
     if (cs) cs.textContent = commentStatus;
   }
 
-  const FACE_NAMES = { normal: 'обычная', sleepy: 'сонная', happy: 'радостная', cold: 'мёрзнет', hungry: 'голодная', wink: 'подмигивает', sad: 'грустная', stern: 'строгая' };
+  const FACE_NAMES = { normal: 'обычная', sleepy: 'сонная', happy: 'радостная', cold: 'мёрзнет', hungry: 'голодная', wink: 'подмигивает', sad: 'грустная', stern: 'строгая', shy: 'смущается', smug: 'ехидничает', approve: 'одобряет (табличка)', love: 'сердечки в глазах', pout: 'надулась', grumpy: 'недовольная', scared: 'испуганная', panic: 'в панике' };
   let remHelp = false;
   function render() {
     if (!pane) return;

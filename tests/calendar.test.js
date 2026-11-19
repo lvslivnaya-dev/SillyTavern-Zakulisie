@@ -26,6 +26,9 @@ test('events: once, spans, weekly, yearly (also over New Year), until', () => {
   assert.ok(!occursOn(lessons, '2025-07-17'), 'after until');
   const birthday = normalizeEvent({ title: 'День рождения', date: '2024-11-03', repeat: 'yearly' });
   assert.ok(occursOn(birthday, '2027-11-03') && !occursOn(birthday, '2023-11-03'));
+  // День рождения из карточки не «начинается» в год рождения: в любой год истории день наступает (в АУ до года рождения тоже).
+  const born = normalizeEvent({ title: 'ДР Рана', date: '1998-05-12', kind: 'birthday', repeat: 'yearly' });
+  assert.ok(occursOn(born, '2025-05-12') && occursOn(born, '1990-05-12') && !occursOn(born, '1990-05-13'));
   const holidays = normalizeEvent({ title: 'Каникулы', date: '2024-12-28', endDate: '2025-01-05', repeat: 'yearly' });
   assert.ok(occursOn(holidays, '2026-01-03'), 'the span that started in December');
   assert.equal(normalizeEvent({ title: 'Без даты' }), null);

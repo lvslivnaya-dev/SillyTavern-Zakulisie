@@ -59,3 +59,15 @@ test('model list is read through the SillyTavern status endpoint', async () => {
   }, () => fetchAuxModels(mainContext(), 'https://example.test/v1/chat/completions', 'k'));
   assert.deepEqual(models, ['a', 'b']);
 });
+
+test('translation has a model of its own (settings.translate): used even when the auxiliary API is off; the other purposes keep the usual way', async () => {
+  const sent = [];
+  const context = {
+    generateRaw: async () => 'main',
+    ConnectionManagerRequestService: { sendRequest: async (profile, messages) => { sent.push(profile); return { content: 'by profile' }; } },
+  };
+  const settings = { aux: { mode: 'off', purposes: {}, maxTokens: 1000, fallbackToMain: false }, translate: { mode: 'profile', profileId: 'tr-1', maxTokens: 1000 } };
+  assert.equal(await routedContext(context, settings, 'translation').generateRaw({ prompt: 'hi' }), 'by profile');
+  assert.deepEqual(sent, ['tr-1']);
+  assert.equal(await routedContext(context, settings, 'analysis').generateRaw({ prompt: 'hi' }), 'main', 'the others go to the chat model while the auxiliary API is off');
+});

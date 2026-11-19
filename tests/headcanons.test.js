@@ -73,7 +73,7 @@ test('removing a character removes headcanons of its pairs', () => {
   assert.deepEqual(next.ui.headcanons, {});
 });
 
-test('scene fallback: only pairs whose members appear in recent messages (persona always present)', async () => {
+test('scene fallback: a fact goes when someone who knows it appears in recent messages (the persona alone does not count)', async () => {
   const { mentionScorer, recentSceneText } = await import('../src/integration/headcanon-retrieval.js');
   const state = setup();
   state.ui.headcanons = addHeadcanons(state, headcanonKey('a', 'b'), ['Анна и Леон спорят о книгах']).headcanons;
@@ -82,7 +82,9 @@ test('scene fallback: only pairs whose members appear in recent messages (person
   const scene = recentSceneText(chat, 1);
   assert.equal(scene, 'Анна вошла в комнату и улыбнулась.');
   const lines = selectHeadcanons(state, { score: mentionScorer(state, scene) });
-  assert.deepEqual(lines, ['headcanon[Анна & Ева]: Анна зовёт Еву «солнцем»'], 'Леона нет в сцене — его пара не попадает');
+  assert.deepEqual(lines, ['headcanon[Анна & Ева]: Анна зовёт Еву «солнцем»', 'headcanon[Анна & Леон]: Анна и Леон спорят о книгах'], 'Анна здесь: она помнит и то, что у неё с Леоном');
+  const away = selectHeadcanons(state, { score: mentionScorer(state, 'В комнате тихо.') });
+  assert.deepEqual(away, [], 'persona alone brings nothing');
   const both = selectHeadcanons(state, { score: mentionScorer(state, recentSceneText(chat, 2)) });
   assert.equal(both.length, 2);
 });

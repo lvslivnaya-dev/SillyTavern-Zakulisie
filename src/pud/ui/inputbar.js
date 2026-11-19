@@ -14,7 +14,7 @@ const STASH_ID = 'pud-stash';
 const KEEP_OPEN = '#roll_dice, #sd_gen';
 
 export const CHAT_LORE_ID = 'pud-opt-chatlore';
-export function startInputBar(doc, { lore = personaApi, shared = {}, openLore = openChatLore } = {}) {
+export function startInputBar(doc, { lore = personaApi, shared = {}, openLore = openChatLore, chronicleHidden = () => 0 } = {}) {
   const view = doc.defaultView;
   const undo = [];
   let done = false;
@@ -53,7 +53,7 @@ export function startInputBar(doc, { lore = personaApi, shared = {}, openLore = 
         stash.remove();
       });
 
-      // Сколько сообщений чата скрыто от ИИ (is_system, как у /hide) и сколько он ещё читает; пересчитывается при каждом открытии меню
+      // Сколько сообщений чата скрыто от ИИ (is_system, как у /hide, и сжатые хроникой в сводки) и сколько он ещё читает; пересчитывается при каждом открытии меню
       const counter = doc.createElement('div');
       counter.id = 'pud-opt-hidden';
       counter.className = 'pud-opt-info';
@@ -63,9 +63,11 @@ export function startInputBar(doc, { lore = personaApi, shared = {}, openLore = 
       const refreshCounter = () => {
         try {
           const list = (view.SillyTavern?.getContext?.().chat ?? []).filter(Boolean);
-          const hidden = list.filter(message => message.is_system).length;
-          counter.querySelector('span').textContent = `Скрыто: ${hidden} · ИИ читает: ${list.length - hidden}`;
-          counter.title = 'Скрытые сообщения остаются на экране, но ИИ их не читает';
+          const system = list.filter(message => message.is_system).length;
+          const squeezed = Math.max(0, Number(chronicleHidden()) || 0);
+          const hidden = system + squeezed;
+          counter.querySelector('span').textContent = `Скрыто: ${hidden}${squeezed ? ` (в сводках: ${squeezed})` : ''} · ИИ читает: ${Math.max(0, list.length - hidden)}`;
+          counter.title = 'Скрытые сообщения остаются на экране, но ИИ их не читает. «В сводках» — сообщения, которые Хроника заменила пересказом';
           counter.hidden = !list.length;
         } catch (error) { report('счётчик скрытых', error); }
       };

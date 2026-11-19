@@ -3,6 +3,7 @@
  * Правило = когда (часы в сюжете, накал, погода) + цвет + насколько заметно + форма. Подходящие правила накладываются
  * слоями поверх экрана; палитру таверны налёт не меняет. Данные сцены приходят из моста Кулис (bridge.scene).
  */
+import { buildColorsPrompt, colorsFromReply } from '../core/color-ai.js';
 import { report } from '../core/guard.js';
 import {
   WEATHER_CHOICES, TINT_STYLES, DEFAULT_RULES, normalizeMoodTheme, normalizeRule, hourFromText, tintFor,
@@ -17,9 +18,11 @@ const options = (map, current) => Object.entries(map).map(([id, label]) => `<opt
  * @param {{ context: any, settings: any, save: () => void, shared?: any, bridge?: any }} deps
  */
 export function startMoodTheme(doc, { context, settings, save, shared = {}, bridge = null }) {
-  const tab = shared.hub?.addTab?.('moodtheme', 'Тема по настроению', 'moon');
+  // a drawer inside the palette («Оформление → Палитра»); without such a hub it is a tab of its own
+  const tab = shared.hub?.addFold?.('moodtheme', 'Тема по настроению', 'palette') ?? shared.hub?.addTab?.('moodtheme', 'Тема по настроению', 'moon');
   const view = doc.defaultView;
   const pane = tab?.pane;
+  const gen = { desc: '', busy: false, note: '' };
   settings.moodTheme = normalizeMoodTheme(settings.moodTheme);
   const cfg = () => settings.moodTheme;
   const persist = () => { try { save(); } catch (error) { report('тема по настроению: сохранение', error); } };
@@ -91,6 +94,14 @@ export function startMoodTheme(doc, { context, settings, save, shared = {}, brid
         <div class="pud-hint" data-readout></div>
       </div>
       <div class="pud-card pud-card-col">
+        <b>Цвета правил по описанию</b>
+        <div class="pud-palai">
+          <input type="text" class="text_pole" data-gen-desc maxlength="200" value="${escapeHtml(gen.desc)}" placeholder="Опиши настроение цветов: тёплый вечер, зимняя ночь, неон…"${gen.busy ? ' disabled' : ''}>
+          <button type="button" class="menu_button" data-act="gen"${gen.busy ? ' disabled' : ''}>${gen.busy ? 'Подбираю…' : 'Подобрать'}</button>
+        </div>
+        <p class="pud-hint">${escapeHtml(gen.note || 'Модель перекрасит цвета ваших правил, а часы, накал и погоду не тронет.')}</p>
+      </div>
+      <div class="pud-card pud-card-col">
         <b>Правила</b>
         <div class="pud-rules">${c.rules.map(ruleRow).join('') || '<p class="pud-lib-empty">Правил нет: налёта не будет.</p>'}</div>
         <div class="pud-peek-city"><button type="button" class="menu_button" data-act="add">Добавить правило</button><button type="button" class="menu_button" data-act="reset">Вернуть стандартные</button></div>
@@ -113,6 +124,7 @@ export function startMoodTheme(doc, { context, settings, save, shared = {}, brid
     return true;
   };
   const onInput = event => {
+    if (event.target.matches?.('[data-gen-desc]')) { gen.desc = event.target.value; return; }
     if (event.target.type === 'range' || event.target.type === 'color') {
       if (event.target.dataset?.global === 'strength') { cfg().strength = normalizeMoodTheme({ strength: event.target.value }).strength; persist(); paint(); }
       else applyField(event.target);
@@ -129,9 +141,36 @@ export function startMoodTheme(doc, { context, settings, save, shared = {}, brid
     }
     applyField(target);
   };
+  /** Colours of the rules by a description: the model picks, only valid colours are taken, the rest of a rule stays. */
+  async function generateColors() {
+    if (gen.busy) return;
+    if (!gen.desc.trim()) { gen.note = 'Сначала опиши, какие цвета хочешь.'; render(); return; }
+    gen.busy = true;
+    gen.note = 'Модель подбирает цвета, это может занять до минуты.';
+    render();
+    try {
+      const rules = cfg().rules;
+      const roles = rules.map(rule => ({ id: rule.id, label: rule.name, hint: [rule.hourFrom != null ? `hours ${rule.hourFrom}-${rule.hourTo ?? '…'}` : '', rule.weather ? `weather ${rule.weather}` : '', rule.heatMax > 0 && rule.heatMin > 0 ? `heat ${rule.heatMin}-${rule.heatMax}` : ''].filter(Boolean).join(', '), current: rule.color }));
+      // through the auxiliary model when there is one (and it is on for generation), else the chat's own
+      const generate = (bridge?.routedContext?.('generation') ?? context)?.generateRaw ?? globalThis.SillyTavern?.getContext?.()?.generateRaw;
+      if (typeof generate !== 'function') throw new Error('модель не подключена');
+      const reply = await generate({ ...buildColorsPrompt(gen.desc, roles, 'a light colour overlay on the chat screen that changes with the mood of the scene (time of day, heat, weather); one colour per rule'), responseLength: 1200 });
+      const colors = colorsFromReply(reply, rules.map(rule => rule.id));
+      cfg().rules = rules.map(rule => (colors[rule.id] ? normalizeRule({ ...rule, color: colors[rule.id] }) : rule));
+      persist();
+      gen.note = `Готово: перекрашено правил — ${Object.keys(colors).length}.`;
+    } catch (error) {
+      report('тема по настроению: цвета по описанию', error);
+      gen.note = `Не вышло: ${error?.message ?? error}. Проверь, что модель подключена, и попробуй ещё раз.`;
+    } finally {
+      gen.busy = false;
+      render();
+    }
+  }
   const onClick = event => {
     const target = event.target.closest?.('[data-act]');
     if (!target) return;
+    if (target.dataset.act === 'gen') { generateColors(); return; }
     if (target.dataset.act === 'add') cfg().rules = [...cfg().rules, normalizeRule({ name: 'Новое правило', color: '#6b3fa0', alpha: 18 })].slice(0, 20);
     else if (target.dataset.act === 'remove') cfg().rules = cfg().rules.filter(item => item.id !== target.dataset.id);
     else if (target.dataset.act === 'reset') cfg().rules = DEFAULT_RULES.map(item => ({ ...item }));

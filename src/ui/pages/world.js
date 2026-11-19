@@ -5,6 +5,7 @@ import { effectiveLocation } from '../../integration/location-links.js';
 import { effectiveItem } from '../../integration/item-links.js';
 import { looksIssues } from '../../integration/world-prompt.js';
 import { nextSceneText } from '../../integration/chronicle-actions.js';
+import { attachTimeMask } from '../../shared/time-mask.js';
 
 /**
  * The scene and its world: «Сейчас» (the control desk), places and things (each:
@@ -46,8 +47,9 @@ export function createWorldPages(ctx) {
 
   function avatar(character, size = '') {
     const name = characterName(character);
-    return character?.avatar
-      ? element('img', { className: `avatar ${size}`, src: character.avatar, alt: '' })
+    const picture = character?.avatar || snapshot().entityPortraits?.[characterId(character)] || '';
+    return picture
+      ? element('img', { className: `avatar ${size}`, src: picture, alt: '', style: { objectFit: 'cover' } })
       : element('span', { className: `avatar ${size}`, text: name.slice(0, 2) });
   }
 
@@ -123,7 +125,7 @@ export function createWorldPages(ctx) {
     const clock = world().clock ?? {};
     if (editingClock) {
       const day = element('input', { type: 'number', min: 0, value: clock.day || '', className: 'ku-short', 'aria-label': 'День истории', placeholder: 'день' });
-      const time = element('input', { type: 'text', value: clock.time || '', className: 'ku-short', 'aria-label': 'Время', placeholder: 'ЧЧ:ММ' });
+      const time = attachTimeMask(element('input', { type: 'text', value: clock.time || '', className: 'ku-short', 'aria-label': 'Время', placeholder: '__:__' }));
       const label = element('input', { type: 'text', value: clock.label || '', 'aria-label': 'Подпись', placeholder: 'Суббота, 14 марта' });
       const flashback = toggle(Boolean(clock.flashback), 'Идёт флешбек', () => {});
       return element('div', { className: 'ku-clock editing' }, [

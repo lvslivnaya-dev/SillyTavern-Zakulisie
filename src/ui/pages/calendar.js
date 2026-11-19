@@ -3,6 +3,7 @@ import { EVENT_KINDS, INTENSITIES, MONTHS, clockOf, comingEvents, eventsWithQues
 import { createCalendarBuilder } from './calendar-builder.js';
 import { WEATHER_KINDS, WEATHER_KIND_IDS, WEATHER_PARTS_MAX, WEATHER_TEMPLATES } from '../../core/weather.js';
 import { dayOfDate, weatherOnDate } from '../../core/weather-days.js';
+import { attachTimeMask } from '../../shared/time-mask.js';
 
 /**
  * «Календарь» (Мир → Календарь): the story's dates, a month grid, events of a day,
@@ -54,7 +55,7 @@ export function createCalendarPages(ctx) {
     const [y, m, d] = /^\d+-\d+-\d+$/.test(value ?? '') ? value.split('-').map(Number) : [0, 0, 0];
     const day = element('input', { type: 'number', min: 1, max: 99, value: d || '', placeholder: 'день', className: 'ku-short', 'aria-label': 'День месяца' });
     const monthSelect = element('select', { 'aria-label': 'Месяц' }, [element('option', { value: '', text: 'месяц', selected: !m }), ...clock.monthNames.map((name, index) => element('option', { value: index + 1, text: name, selected: m === index + 1 }))]);
-    const year = element('input', { type: 'number', min: 1, max: 9999, value: y || '', placeholder: 'год', className: 'ku-short', 'aria-label': 'Год' });
+    const year = element('input', { type: 'number', min: 1, value: y || '', placeholder: 'год', className: 'ku-short', 'aria-label': 'Год' });
     wrapper.append(day, monthSelect, year);
     Object.defineProperty(wrapper, 'value', {
       get: () => (day.value && monthSelect.value && year.value ? `${String(year.value).padStart(4, '0')}-${String(monthSelect.value).padStart(2, '0')}-${String(day.value).padStart(2, '0')}` : ''),
@@ -88,7 +89,7 @@ export function createCalendarPages(ctx) {
     const day = snapshot().world?.clock?.day ?? 0;
     const input = dateInput(today(), { 'aria-label': 'Какая сегодня дата в истории' });
     // Time and weekday go with the date into «Сейчас»: the weekday follows from the date, the time is asked.
-    const time = element('input', { type: 'text', value: snapshot().world?.clock?.time || '', className: 'ku-short', 'aria-label': 'Время в истории', placeholder: 'ЧЧ:ММ' });
+    const time = attachTimeMask(element('input', { type: 'text', value: snapshot().world?.clock?.time || '', className: 'ku-short', 'aria-label': 'Время в истории', placeholder: '__:__' }));
     const weekday = element('span', { className: 'muted ku-small' });
     const showWeekday = () => {
       const found = input.value && cal().valid(input.value) ? cal().humanDate(input.value) : '';
@@ -131,9 +132,10 @@ export function createCalendarPages(ctx) {
     const goYear = value => { month = pad(Math.max(1, Math.min(9999, Math.round(Number(value)) || year)), monthNumber); render(); };
     const monthPick = element('select', { 'aria-label': 'Месяц', className: 'ku-cal-pick' }, Array.from({ length: N }, (_, index) => element('option', { value: String(index + 1), text: clock.monthNames[index] ?? String(index + 1), selected: index + 1 === monthNumber })));
     monthPick.addEventListener('change', () => goMonth(Number(monthPick.value)));
-    const from = Math.max(1, year - 30);
-    const yearPick = element('select', { 'aria-label': 'Год', className: 'ku-cal-pick' }, Array.from({ length: Math.min(9999, year + 30) - from + 1 }, (_, index) => from + index).map(value => element('option', { value: String(value), text: String(value), selected: value === year })));
+    // The year is typed by hand: any number, no list and no ceiling in the field.
+    const yearPick = element('input', { type: 'number', 'aria-label': 'Год', className: 'ku-cal-pick ku-short', value: String(year) });
     yearPick.addEventListener('change', () => goYear(yearPick.value));
+    yearPick.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); goYear(yearPick.value); } });
     const grid = element('div', { className: 'ku-cal-grid', role: 'grid', style: { gridTemplateColumns: `repeat(${W}, minmax(0, 1fr))` } });
     for (const label of clock.weekdayShort) grid.append(element('span', { className: 'ku-cal-head', text: label }));
     for (let index = 0; index < rows * W; index += 1) {
@@ -378,7 +380,7 @@ export function createCalendarPages(ctx) {
   function renderGenerator() {
     if (cal().custom) return element('div', { className: 'ku-cal-modal-body' }, [element('p', { className: 'muted ku-small', text: CUSTOM_NOTE })]);
     const card = element('div', { className: 'ku-cal-modal-body' });
-    const yearInput = element('input', { type: 'number', min: 1, max: 9999, value: thisYear(), className: 'ku-short', 'aria-label': 'Год, с которого начинается шаблон' });
+    const yearInput = element('input', { type: 'number', min: 1, value: thisYear(), className: 'ku-short', 'aria-label': 'Год, с которого начинается шаблон' });
     const modes = element('div', { className: 'ku-row' }, [['year', 'Год жизни'], ['holidays', 'Только праздники']].map(([id, label]) => {
       const node = button(label, `btn small${genMode === id ? ' primary' : ''}`, () => { if (genMode !== id) { genMode = id; generated = null; render(); } });
       node.setAttribute('aria-pressed', String(genMode === id));
@@ -477,7 +479,7 @@ export function createCalendarPages(ctx) {
     if (!templates.length) card.append(element('p', { className: 'muted ku-small', text: 'Пока нет. Сохраните сгенерированный список или свой календарь.' }));
     for (const template of templates) {
       // The year the template was saved with (what was typed meanwhile is kept through redraws).
-      const year = element('input', { type: 'number', min: 1, max: 9999, value: yearDrafts.get(template.id) ?? template.year ?? thisYear(), className: 'ku-short', 'aria-label': `Год для шаблона ${template.name}` });
+      const year = element('input', { type: 'number', min: 1, value: yearDrafts.get(template.id) ?? template.year ?? thisYear(), className: 'ku-short', 'aria-label': `Год для шаблона ${template.name}` });
       year.addEventListener('input', () => yearDrafts.set(template.id, year.value));
       card.append(element('div', { className: 'ku-fact' }, [
         element('span', { className: 'ku-fact-text' }, [element('strong', { text: template.name }), element('span', { className: 'muted', text: ` · ${template.events.length} событий · с ${MONTHS[(template.startMonth || 1) - 1].toLocaleLowerCase('ru-RU')}` })]),
@@ -505,8 +507,8 @@ export function createCalendarPages(ctx) {
   let modal = '';
   function renderModal() {
     if (!modal) return null;
-    const titles = { gen: 'Сгенерировать год', builder: 'Свой календарь', tpl: 'Сохранённые шаблоны' };
-    const body = modal === 'gen' ? renderGenerator() : modal === 'tpl' ? renderSaved() : builder.renderBuilder();
+    const titles = { gen: 'Сгенерировать год', builder: 'Свой календарь', tpl: 'Сохранённые шаблоны', sound: 'Звуки погоды' };
+    const body = modal === 'gen' ? renderGenerator() : modal === 'tpl' ? renderSaved() : modal === 'sound' ? renderSoundPanel() : builder.renderBuilder();
     const close = () => { modal = ''; render(); };
     const layer = element('div', { className: 'ku-cal-layer', role: 'dialog', 'aria-modal': 'true', 'aria-label': titles[modal] }, [
       element('div', { className: 'ku-cal-sheet' }, [
@@ -517,6 +519,46 @@ export function createCalendarPages(ctx) {
     layer.addEventListener('click', event => { if (event.target === layer) close(); });
     layer.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); close(); } });
     return layer;
+  }
+
+  // ---- Weather sounds: a quiet background under the story's weather (the player itself lives in src/pud/ui/weather-sound.js) -----
+  const soundPanel = () => { try { return invoke('onSoundPanel') ?? null; } catch { return null; } };
+  function renderSoundPanel() {
+    const api = soundPanel();
+    const body = element('div', { className: 'ku-sound' });
+    if (!api) { body.append(element('p', { className: 'muted', text: 'Звуки погоды сейчас выключены: модуль не запущен.' })); return body; }
+    const paint = () => {
+      const view = api.view();
+      const enabled = element('input', { type: 'checkbox', className: 'set-switch', checked: view.enabled, 'aria-label': 'Звуки погоды включены' });
+      enabled.addEventListener('change', () => api.setEnabled(enabled.checked));
+      const volume = element('input', { type: 'range', min: 0, max: 100, step: 5, value: view.volume, 'aria-label': 'Громкость' });
+      const level = element('output', { className: 'set-value', text: `${view.volume}%` });
+      volume.addEventListener('input', () => { level.textContent = `${volume.value}%`; api.setVolume(volume.value); });
+      const rows = view.kinds.map(item => {
+        const input = element('input', { type: 'file', accept: 'audio/*', hidden: true, 'aria-label': `Файл: ${item.label}` });
+        input.addEventListener('change', () => { const file = input.files?.[0]; if (file) attempt(() => api.pick(item.kind, file)); });
+        return element('div', { className: 'ku-sound-row' }, [
+          element('span', { className: 'ku-sound-name' }, [`${item.icon} `, element('strong', { text: item.label }), element('span', { className: 'muted ku-small', text: item.file ? ` — ${item.file}` : ' — нет файла: будет тишина' })]),
+          element('span', { className: 'ku-sound-acts' }, [
+            button('Выбрать файл', 'btn small', () => input.click(), 'Звук с вашего компьютера: mp3, ogg, wav'),
+            ...(item.file ? [button('Проверить', 'btn small', () => attempt(() => api.test(item.kind)), 'Включить этот звук сейчас'), button('Убрать', 'btn small', () => attempt(() => api.remove(item.kind)))] : []),
+            input,
+          ]),
+        ]);
+      });
+      body.replaceChildren(
+        element('p', { className: 'muted ku-small', text: 'Тихий фон под погоду сюжета: дождь, ветер, гроза. Файлы вы выбираете сами: они остаются в браузере и никуда не отправляются, Слива их только проигрывает. Берите записи подлиннее (от минуты): стык скрывается плавным наложением. Бесплатные звуки ищите на Freesound (лицензия CC0) и на Pixabay (Sound Effects).' }),
+        element('label', { className: 'ku-inline' }, [enabled, 'Звуки погоды включены']),
+        element('label', { className: 'ku-sound-vol' }, [element('span', { text: 'Громкость' }), volume, level]),
+        element('p', { className: 'muted ku-small', text: `В шторке сцены появится кнопка 🔊: она ставит звук на паузу и снимает с паузы.${view.available ? '' : ' В этом браузере звук недоступен.'}` }),
+        ...(view.status ? [element('p', { className: 'ku-small', style: { color: 'var(--rs-danger)' }, text: view.status })] : []),
+        element('div', { className: 'ku-sound-list' }, rows),
+        ...(view.testing ? [element('div', { className: 'row' }, [button('Закончить проверку', 'btn small', () => api.endTest())])] : []),
+      );
+    };
+    paint();
+    const stop = api.subscribe(() => { if (!body.isConnected) { stop(); return; } paint(); });
+    return body;
   }
 
   // ---- The planner under the month: the days, stretches of a day, ready templates, the generator ------------------
@@ -623,6 +665,7 @@ export function createCalendarPages(ctx) {
       button('✨ Сгенерировать год', 'btn small', () => { modal = 'gen'; render(); }, 'Модель спланирует год: учёба, праздники, события'),
       button('Свой календарь', 'btn small', () => { modal = 'builder'; render(); }, 'Месяцы, дни недели и сезоны своего мира'),
       button(`Шаблоны · ${templates.length}`, 'btn small', () => { modal = 'tpl'; render(); }, 'Сохранённые шаблоны годов'),
+      button('🔊 Звуки погоды', 'btn small', () => { modal = 'sound'; render(); }, 'Тихий фон под погоду сюжета: свои файлы на дождь, ветер, грозу'),
     ]);
   }
 
@@ -648,6 +691,13 @@ export const CALENDAR_STYLE = `
 @container (max-width:860px){.ku-cal-split{grid-template-columns:minmax(0,1fr)}}
 .ku-cal-sep{width:1px;height:20px;margin:0 6px;background:var(--k-line)}
 .ku-cal-tools{gap:8px;flex-wrap:wrap}
+.ku-sound{display:flex;flex-direction:column;gap:10px}
+.ku-sound p{margin:0}
+.ku-sound-vol{display:flex;align-items:center;gap:10px}.ku-sound-vol input{flex:1;min-width:0}
+.ku-sound-list{display:flex;flex-direction:column;gap:6px}
+.ku-sound-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 10px;padding:8px 10px;border:1px solid var(--k-line);border-radius:10px}
+.ku-sound-name{flex:1 1 200px;min-width:0;overflow-wrap:anywhere}
+.ku-sound-acts{display:flex;flex-wrap:wrap;gap:6px}
 .ku-cal-layer{position:fixed;inset:0;z-index:30;background:color-mix(in srgb,var(--k-shadow) 80%,transparent);display:grid;place-items:center;padding:16px}
 .ku-cal-sheet{width:min(760px,100%);max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--k-line);border-radius:16px;background:var(--k-panel);box-shadow:0 20px 60px var(--k-shadow)}
 .ku-cal-modal-body{display:flex;flex-direction:column;gap:6px}

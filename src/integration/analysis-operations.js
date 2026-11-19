@@ -240,7 +240,8 @@ export function applyAnalysisResult(state, result, metadata = {}, acceptedNewCha
     const ids = [...new Set(item.participantIds.map(resolveId).filter(Boolean))];
     if (ids.length < 2 || ids.length !== item.participantIds.length) continue;
     const key = [...ids].sort().join('|');
-    if (allowedHeadcanons.has(key)) headcanons.push({ key, text: item.text });
+    const knownBy = [...new Set((item.knownBy ?? []).map(resolveId).filter(Boolean))];
+    if (allowedHeadcanons.has(key)) headcanons.push({ key, text: item.text, ...(knownBy.length ? { knownBy } : {}) });
   }
   // The chroniclers: same metadata, so a swipe takes scene, events, learning, time,
   // clothes and things back too. Order: place → clock → who is on stage → the rest,

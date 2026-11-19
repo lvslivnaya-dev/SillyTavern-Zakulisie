@@ -29,8 +29,16 @@ const CATEGORIES = lookup(WARDROBE_CATEGORIES);
 /** Pictures of the library's things (not clothes) live in their own folder of the tree: «Гардероб/Вещи». */
 export const THINGS_DIR = 'Вещи';
 
-/** Every folder of the tree, relative to «Гардероб»: 'Персона/Женское/Верх', … */
+/**
+ * The folders made up front: only «Вещи» (for the library's things). The sections of the wardrobe (90 of them: shelf × gender × section)
+ * are NOT made all at once: a folder appears when its section is opened on the page, or when a picture is saved into it.
+ */
 export function inboxDirectories() {
+  return [THINGS_DIR];
+}
+
+/** Every possible folder of the tree, relative to «Гардероб» (for checks and for tidying; never made all at once). */
+export function allInboxDirectories() {
   const dirs = [THINGS_DIR];
   for (const shelf of Object.values(WARDROBE_SHELVES)) {
     for (const gender of Object.values(WARDROBE_GENDERS)) {

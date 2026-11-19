@@ -14,7 +14,7 @@ for (const name of Object.getOwnPropertyNames(window)) {
 globalThis.requestAnimationFrame = callback => setTimeout(callback, 0);
 window.requestAnimationFrame = globalThis.requestAnimationFrame;
 
-const { NAV_TABS, WINDOWS, windowOf } = await import('../src/ui/layout.js');
+const { NAV_TABS, WINDOWS, MOVED_TABS, windowOf } = await import('../src/ui/layout.js');
 const { createRelationshipStudio } = await import('../src/ui/studio.js');
 const { mountWindowButtons } = await import('../src/integration/shell.js');
 const { createDefaultState } = await import('../src/core/index.js');
@@ -27,18 +27,19 @@ test('every tab of the Studio lives in exactly one window', () => {
     assert.ok(!seen.has(id), `«${id}» is in two windows: ${seen.get(id)} and ${win.id}`);
     seen.set(id, win.id);
   }
-  for (const [id] of NAV_TABS) assert.ok(seen.has(id), `tab «${id}» has no window`);
+  for (const [id] of NAV_TABS) assert.ok(seen.has(id) || MOVED_TABS[id], `tab «${id}» has no window`);
   assert.equal(windowOf('songs').title, 'Медиа');
-  assert.equal(windowOf('nothing').id, 'settings', 'unknown tabs fall into the settings window');
+  assert.equal(windowOf('nothing').id, 'scene', 'unknown tabs fall into the first window');
+  assert.ok(!WINDOWS.some(win => win.id === 'settings'), 'the window «Настройки Закулисья» is gone');
 });
 
-test('the scene window shows its five tabs only; one-tab windows have no menu', () => {
+test('the scene window shows its tabs only (lorebooks and the setup of the chat among them); one-tab windows have no menu', () => {
   let studio;
   try {
     studio = createRelationshipStudio({ store: { getSnapshot: sample }, open: true, layout: { mode: 'window', tab: 'scene' } });
     const root = studio.element.shadowRoot;
     const labels = () => [...root.querySelectorAll('.nav button:not(.nav-fold) .nav-label')].map(node => node.textContent);
-    assert.deepEqual(labels(), ['Сейчас', 'Персонажи', 'Хроника', 'События', 'Секреты']);
+    assert.deepEqual(labels(), ['Сейчас', 'Персонажи', 'Хроника', 'События', 'Секреты', 'Настройка чата', 'Лорбуки']);
     assert.equal(studio.scopeId(), 'scene');
     assert.ok(!root.querySelector('.studio').classList.contains('single'));
 
@@ -47,9 +48,6 @@ test('the scene window shows its five tabs only; one-tab windows have no menu', 
     assert.ok(root.querySelector('.studio').classList.contains('single'), 'wardrobe is one page: no menu');
     assert.equal(root.querySelector('.brand strong').textContent, 'Гардероб');
 
-    studio.showWindow('settings');
-    assert.ok(labels().includes('Кубик') && labels().includes('Имена') && !labels().includes('Погода'));
-    assert.ok(!labels().includes('Хроника'));
 
     // The weather lives on the calendar page: one button, one window (an old link to «weather» leads there).
     assert.equal(windowOf('weather').id, 'calendar');

@@ -20,7 +20,9 @@ export function createSongsPages(ctx) {
   let query = '';
   /** A picked file of songs waiting for the ticks: { data, list, picked }. */
   let incoming = null;
-  let draft = { title: '', artist: '', folderId: '' };
+  const EMPTY_DRAFT = { title: '', artist: '', aliases: '', keys: '', mood: '', sound: '', lyrics: '', folderId: '' };
+  let draft = { ...EMPTY_DRAFT };
+  let adding = false;
   let probe = '';
   let sheet = ''; // the little window over the page: 'settings' | 'probe'
   // the settings and the check of recognition live behind two small buttons of the header
@@ -94,24 +96,39 @@ export function createSongsPages(ctx) {
 
   function renderAdd() {
     const lib = library();
-    const title = element('input', { value: draft.title, placeholder: 'Название: Ласточка', 'aria-label': 'Название песни' });
-    const artist = element('input', { value: draft.artist, placeholder: 'Кто поёт (можно пусто)', 'aria-label': 'Исполнитель' });
+    if (!adding) {
+      return element('div', { className: 'card' }, [button('＋ Добавить песню', 'btn primary', () => { adding = true; render(); })]);
+    }
+    const input = (key, placeholder, label) => {
+      const control = element('input', { value: draft[key], placeholder, 'aria-label': label });
+      control.addEventListener('input', () => { draft[key] = control.value; });
+      return control;
+    };
+    const area = (key, rows, placeholder, label) => {
+      const control = element('textarea', { rows: String(rows), placeholder, 'aria-label': label });
+      control.value = draft[key];
+      control.addEventListener('input', () => { draft[key] = control.value; });
+      return control;
+    };
     const folder = element('select', { 'aria-label': 'В какую папку' }, [element('option', { value: '', text: 'без папки', selected: !draft.folderId }),
       ...lib.folders.map(item => element('option', { value: item.id, text: item.name, selected: draft.folderId === item.id }))]);
-    title.addEventListener('input', () => { draft.title = title.value; });
-    artist.addEventListener('input', () => { draft.artist = artist.value; });
     folder.addEventListener('change', () => { draft.folderId = folder.value; });
-    const add = () => attempt(async () => {
-      const song = await invoke('onSongAdd', { title: draft.title, artist: draft.artist, folderId: draft.folderId });
+    const save = () => attempt(async () => {
+      const song = await invoke('onSongAdd', { ...draft, aliases: listOf(draft.aliases), keys: listOf(draft.keys) });
       if (song?.id) open.add(song.id);
-      draft = { title: '', artist: '', folderId: draft.folderId };
+      draft = { ...EMPTY_DRAFT, folderId: draft.folderId };
+      adding = false;
       render();
-    }, 'Песня добавлена: опишите её и впишите слова.');
-    title.addEventListener('keydown', event => { if (event.key === 'Enter') add(); });
-    artist.addEventListener('keydown', event => { if (event.key === 'Enter') add(); });
+    }, 'Песня добавлена.');
+    const cancel = () => { draft = { ...EMPTY_DRAFT, folderId: draft.folderId }; adding = false; render(); };
     return element('div', { className: 'card' }, [
-      element('h3', { text: 'Добавить песню' }),
-      element('div', { className: 'ku-songs-add' }, [title, artist, folder, button('Добавить', 'btn primary', add)]),
+      element('h3', { text: 'Новая песня' }),
+      element('div', { className: 'ku-songs-head' }, [input('title', 'Название: Ласточка', 'Название песни'), input('artist', 'Кто поёт (можно пусто)', 'Исполнитель'), folder]),
+      field('Другие названия', 'Через запятую: перевод, сокращение, латиница.', input('aliases', 'Через запятую', 'Другие названия')),
+      field('Атмосфера', 'Что это за песня по ощущению: светлая грусть, злость, ночной разговор.', area('mood', 3, 'Например: светлая грусть, как расставание на вокзале.', 'Атмосфера песни')),
+      field('Мелодия и звучание', 'Темп, инструменты, голос.', area('sound', 3, 'Например: медленная акустическая гитара, голос тихий и хрипловатый.', 'Мелодия и звучание')),
+      field('Слова', 'Строки по порядку, пустая строка между куплетами.', area('lyrics', 8, 'Ласточка моя, улетай за море…', 'Слова песни')),
+      element('div', { className: 'row', style: { marginTop: '6px' } }, [button('Сохранить песню', 'btn primary', save), button('Отмена', 'btn', cancel)]),
     ]);
   }
 
@@ -130,8 +147,13 @@ export function createSongsPages(ctx) {
     const details = element('details', { className: `ku-names-card${song.off || folderOff ? ' off' : ''}` });
     details.open = open.has(song.id);
     details.addEventListener('toggle', () => { if (details.open) open.add(song.id); else open.delete(song.id); });
+    // The star: the song is kept at hand in the drawer (Медиа → Песни для рассказчика).
+    const star = element('button', { type: 'button', className: `ku-song-star${song.favorite ? ' on' : ''}`, text: song.favorite ? '★' : '☆', title: song.favorite ? 'Убрать из избранного шторки' : 'В избранное: песня всегда под рукой в шторке', 'aria-pressed': String(Boolean(song.favorite)), 'aria-label': `Избранное: ${song.title}` });
+    star.style.cssText = 'background:none;border:none;cursor:pointer;font-size:1.2em;padding:0 4px;color:inherit';
+    star.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); attempt(() => act('onSongUpdate', { id: song.id, patch: { favorite: !song.favorite } }, 'songs-edit')); });
     details.append(element('summary', {}, [
       send,
+      star,
       element('strong', { text: song.title }),
       song.artist ? element('span', { className: 'muted ku-small', text: ` — ${song.artist}` }) : null,
       element('span', { className: `ku-names-state${missing.length ? '' : ' ok'}`, text: missing.length ? missing.join(', ') : 'готова' }),

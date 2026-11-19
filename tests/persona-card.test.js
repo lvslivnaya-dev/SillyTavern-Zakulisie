@@ -1,15 +1,12 @@
-/** The card of a persona (a card of the library with `persona: true`): sections of what shows, records with people and AU. */
+/** The card of a persona (a card of the library with `persona: true`): sections of what shows, records with people. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addAu, addFolder, addLibraryCharacter, buildPersonaPrompt, cleanRecords, emptyLibrary, emptyPersonaCards, findPersonaCard, migratePersonaCards, normalizeLibrary,
-  ensurePersonaHome, normalizePersonaCards, removeAu, selectPersonaRecords, updateLibraryCharacter,
+  addFolder, addLibraryCharacter, buildPersonaPrompt, cleanRecords, emptyLibrary, emptyPersonaCards, findPersonaCard, migratePersonaCards, normalizeLibrary,
+  ensurePersonaHome, normalizePersonaCards, selectPersonaRecords, updateLibraryCharacter,
 } from '../src/core/index.js';
 
 function sample() {
-  let settings = addAu(emptyPersonaCards(), 'Универ');
-  settings = addAu(settings, 'Мафия');
-  const [univer, mafia] = settings.au.map(item => item.id);
   const { library, folder } = addFolder(emptyLibrary(), { name: 'Персоны' });
   const added = addLibraryCharacter(library, { folderId: folder.id, name: 'Рика', aliases: ['Рикка'], persona: true, avatar: 'rika.png' });
   const lib = updateLibraryCharacter(added.library, added.character.id, {
@@ -19,14 +16,13 @@ function sample() {
       { kind: 'other', title: 'Public Info', text: 'Студентка' },
     ],
     records: [
-      { text: 'Рэн видит в ней младшую сестру', about: ['Рэн'], knows: ['Мику'], au: [univer] },
+      { text: 'Рэн видит в ней младшую сестру', about: ['Рэн'], knows: ['Мику'] },
       { text: 'Носит шрамы под рукавами', about: [], knows: ['Рэн'], secret: true },
-      { text: 'Знаменита в клане', au: [mafia] },
       { text: 'Общеизвестный факт', about: [], knows: [] },
       { text: 'Выключено', about: [], off: true },
     ],
   });
-  return { settings, lib, univer, mafia, card: lib.characters[0] };
+  return { lib, card: lib.characters[0] };
 }
 
 test('a persona card is a card of the library: the persona template, the flag, the records', () => {
@@ -38,29 +34,28 @@ test('a persona card is a card of the library: the persona template, the flag, t
   assert.equal(plain.character.persona, undefined);
   assert.equal(plain.character.sections.length, 9);
   const { card } = sample();
-  assert.equal(card.records.length, 5, 'the switched-off one stays too');
-  assert.equal(normalizeLibrary(JSON.parse(JSON.stringify(sample().lib))).characters[0].records.length, 5, 'and it survives a round trip');
+  assert.equal(card.records.length, 4, 'the switched-off one stays too');
+  assert.equal(normalizeLibrary(JSON.parse(JSON.stringify(sample().lib))).characters[0].records.length, 4, 'and it survives a round trip');
 });
 
-test('a record goes when its AU is on and ANY of its people is on stage — so the one who knows is not left out', () => {
-  const { card, univer } = sample();
+test('a record goes when ANY of its people is on stage — so the one who knows is not left out', () => {
+  const { card } = sample();
   const texts = options => selectPersonaRecords(card, options).map(record => record.text);
-  assert.deepEqual(texts({ present: ['Рэн'], activeAu: [univer] }), ['Рэн видит в ней младшую сестру', 'Носит шрамы под рукавами', 'Общеизвестный факт']);
-  assert.deepEqual(texts({ present: ['Мику'], activeAu: [univer] }), ['Рэн видит в ней младшую сестру', 'Общеизвестный факт'], 'Мику knows it, though it is about Рэн');
-  assert.deepEqual(texts({ present: ['Кто-то'], activeAu: [univer] }), ['Общеизвестный факт']);
-  assert.deepEqual(texts({ present: ['Рэн'], activeAu: [] }), ['Носит шрамы под рукавами', 'Общеизвестный факт'], 'the AU records wait until the AU is on');
+  assert.deepEqual(texts({ present: ['Рэн'] }), ['Рэн видит в ней младшую сестру', 'Носит шрамы под рукавами', 'Общеизвестный факт']);
+  assert.deepEqual(texts({ present: ['Мику'] }), ['Рэн видит в ней младшую сестру', 'Общеизвестный факт'], 'Мику knows it, though it is about Рэн');
+  assert.deepEqual(texts({ present: ['Кто-то'] }), ['Общеизвестный факт']);
 });
 
-test('several AU can be on at once, and a switched-off record never goes', () => {
-  const { card, univer, mafia } = sample();
-  const texts = selectPersonaRecords(card, { present: ['Рэн'], activeAu: [univer, mafia] }).map(record => record.text);
-  assert.ok(texts.includes('Рэн видит в ней младшую сестру') && texts.includes('Знаменита в клане'));
+test('a switched-off record never goes', () => {
+  const { card } = sample();
+  const texts = selectPersonaRecords(card, { present: ['Рэн'] }).map(record => record.text);
+  assert.ok(texts.includes('Рэн видит в ней младшую сестру'));
   assert.ok(!texts.includes('Выключено'));
 });
 
 test('the block: sections, notes and secrets with who knows; empty when there is nothing', () => {
-  const { card, univer } = sample();
-  const block = buildPersonaPrompt(card, { present: ['Рэн'], activeAu: [univer] });
+  const { card } = sample();
+  const block = buildPersonaPrompt(card, { present: ['Рэн'] });
   assert.match(block, /^\[PERSONA — Рика\]\nlooks: Невысокая, веснушки/);
   assert.match(block, /voice: Тихий низкий голос/);
   assert.match(block, /info\[Public Info\]: Студентка/);
@@ -83,10 +78,7 @@ test('the card is the one the chat chose, else by the avatar, else by name or al
   assert.equal(findPersonaCard([hero], { names: ['Рэн'] }), null, 'a character is not a persona');
 });
 
-test('the AU list: add, no repeats, removing one; the cards of an earlier version move to the library', () => {
-  const { settings, univer } = sample();
-  assert.throws(() => addAu(settings, 'универ'), /уже есть/);
-  assert.equal(removeAu(settings, univer).au.length, 1);
+test('the cards of an earlier version move to the library', () => {
   assert.deepEqual(normalizePersonaCards('junk'), emptyPersonaCards());
   const moved = migratePersonaCards([{ name: 'Рика', aliases: ['Рикка'], avatar: 'rika.png', looks: 'Рыжая', voice: '', records: [{ text: 'Запись', about: ['Рэн'] }] }]);
   assert.deepEqual(moved[0].sections.map(section => [section.kind, section.text]), [['visual', 'Рыжая']]);
@@ -170,20 +162,22 @@ test('persona notes: loaded as persona cards, noticed when changed, refreshed wi
   assert.ok(asked.some(id => id.startsWith('record:')));
 });
 
-test('persona cards need no folder: they sit in a hidden one; a plain folder that holds only personas moves to their shelf', () => {
+test('persona cards need no folder: they sit in a hidden one; folders are shared with the other shelves', () => {
   const made = addLibraryCharacter(emptyLibrary(), { name: 'Рика', persona: true });
   const home = made.library.folders.find(folder => folder.id === made.character.folderId);
   assert.deepEqual([home.persona, home.hidden], [true, true], 'no folder of their own is shown');
   assert.equal(ensurePersonaHome(structuredClone(made.library)), home.id, 'the same place every time');
   const plain = addLibraryCharacter(emptyLibrary(), { name: 'Ран' });
   assert.equal(plain.library.folders.find(folder => folder.id === plain.character.folderId).name, 'Без папки', 'a hero with no folder goes to «Без папки», not to the personas');
-  const own = addFolder(made.library, { name: 'Мои', persona: true });
-  assert.equal(own.folder.persona, true);
-  // an old library: persona cards in a plain «Персоны» folder
+  const own = addFolder(made.library, { name: 'Мои' });
+  assert.equal(own.folder.persona, undefined, 'a folder is shared by characters and personas');
+  // an old library: persona folders lose their mark, only the hidden home keeps it; a «Персоны» folder with persona cards stays an ordinary one
   const old = normalizeLibrary({ folders: [{ id: 'f1', name: 'Персоны' }, { id: 'f2', name: 'Герои' }], characters: [
     { id: 'c1', folderId: 'f1', name: 'Рика', persona: true, sections: [] }, { id: 'c2', folderId: 'f2', name: 'Ран', sections: [] }] });
   const flags = Object.fromEntries(old.folders.map(folder => [folder.id, [Boolean(folder.persona), Boolean(folder.hidden)]]));
-  assert.deepEqual(flags, { f1: [true, true], f2: [false, false] });
+  assert.deepEqual(flags, { f1: [false, false], f2: [false, false] });
+  const marked = normalizeLibrary({ folders: [{ id: 'p1', name: 'Мои', persona: true }, { id: 'p2', name: 'Дом', persona: true, hidden: true }], characters: [] });
+  assert.deepEqual(marked.folders.map(folder => [Boolean(folder.persona), Boolean(folder.hidden)]), [[false, false], [true, true]]);
 });
 
 test('the looks and the voice of a persona are described from a picture, by the rules of the permanent looks', async () => {
@@ -256,4 +250,14 @@ test('the hidden character is a section of the persona card that never reaches t
   assert.match(block, /Рыжая/);
   assert.doesNotMatch(block, /Колючая/, 'the persona block never carries it');
   assert.equal(makeSection({ kind: 'private', text: 'x' }).kind, 'private');
+});
+
+test('a secret record may say when it comes out; an ordinary record keeps no condition', async () => {
+  const { cleanRecords } = await import('../src/core/persona-card.js');
+  const records = cleanRecords([
+    { text: 'Шрам на спине', secret: true, condition: '  Ран увидит шрам  ' },
+    { text: 'Любит чай', secret: false, condition: 'не нужно' },
+  ]);
+  assert.equal(records[0].condition, 'Ран увидит шрам');
+  assert.equal(records[1].condition, '');
 });

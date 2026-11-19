@@ -13,6 +13,7 @@ import { startMessenger } from './ui/messenger.js';
 import { startAssistants } from './ui/assistants.js';
 import { startWalkCat } from './ui/walkcat.js';
 import { startHub } from './ui/hub.js';
+import { startKulisyPages } from './ui/kulisy-pages.js';
 import { startConnection } from './ui/connection.js';
 import { startChips } from './ui/chips.js';
 import { startPalette } from './ui/palette.js';
@@ -20,6 +21,7 @@ import { startPrompts } from './ui/prompts.js';
 import { startHome } from './ui/home.js';
 import { startPersonas } from './ui/personas.js';
 import { startPersonaSwitch } from './ui/persona-switch.js';
+import { startPersonaEntry } from './ui/persona-entry.js';
 import { startCharacters } from './ui/characters.js';
 import { startExtensions } from './ui/extensions.js';
 import { startLorebooks } from './ui/lorebooks.js';
@@ -43,7 +45,7 @@ const MODULES = [
   { name: 'иконки', start: () => injectSprite(document) },
   { name: 'тема', start: ({ context }) => startTheme(document, context) },
   { name: 'чат', start: () => startChat(document) },
-  { name: 'кнопки поля ввода', start: ({ shared }) => startInputBar(document, { shared }) },
+  { name: 'кнопки поля ввода', start: ({ shared, bridge }) => startInputBar(document, { shared, chronicleHidden: () => bridge?.chronicleHidden?.() ?? 0 }) },
   { name: 'скрыть сообщения', start: ({ context }) => startHider(document, { context }) },
   { name: 'котик при стриминге', start: ({ context }) => startWalkCat(document, { context }) },
   {
@@ -51,12 +53,16 @@ const MODULES = [
     start: ({ context, settings, stopAll, shared }) => startHub(document, { settings, save: () => context.saveSettingsDebounced?.(), stopAll, shared }),
   },
   {
+    name: 'настройки Закулисья в окне настроек',
+    start: ({ bridge, shared }) => startKulisyPages(document, { bridge, shared }),
+  },
+  {
     name: 'профили соединения',
     start: ({ context, settings }) => startConnection(document, { context, settings, save: () => context.saveSettingsDebounced?.() }),
   },
   {
     name: 'палитра',
-    start: ({ context, settings, shared }) => startPalette(document, { settings, save: () => context.saveSettingsDebounced?.(), shared, generate: opts => context.generateRaw(opts) }),
+    start: ({ context, settings, shared, bridge }) => startPalette(document, { settings, save: () => context.saveSettingsDebounced?.(), shared, generate: opts => (bridge?.routedContext?.('generation') ?? context).generateRaw(opts) }),
   },
   {
     name: 'кнопки пресета',
@@ -95,6 +101,10 @@ const MODULES = [
     start: ({ context, settings }) => startPersonaSwitch(document, { context, settings }),
   },
   {
+    name: 'выбор персоны при входе в чат',
+    start: ({ context }) => startPersonaEntry(document, { context }),
+  },
+  {
     name: 'персонажи',
     start: ({ context, settings, shared }) => startCharacters(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared }),
   },
@@ -108,7 +118,7 @@ const MODULES = [
   },
   {
     name: 'редактор лорбука',
-    start: ({ context, settings, shared }) => startLoreEditor(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared }),
+    start: ({ context, settings, shared, bridge }) => startLoreEditor(document, { context, settings, save: () => context.saveSettingsDebounced?.(), shared, bridge }),
   },
   {
     name: 'что сработало из лорбуков',

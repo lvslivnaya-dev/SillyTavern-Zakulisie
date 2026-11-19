@@ -454,7 +454,7 @@ test('комментарий: реплика берётся из маркеро�
   assert.equal(cleanComment('Okay, let me think about this.', 25), '');
   assert.equal(cleanComment('Ну ты даёшь, Гето!', 25), 'Ну ты даёшь, Гето!', 'обычная реплика без маркеров проходит');
   const msgs = buildCommentMessages({ chat: [{ name: 'Аня', text: 'Привет', isUser: true }], maxWords: 20 });
-  assert.match(msgs[1].content, /<<<реплика>>>/);
+  assert.match(msgs[1].content, /<<<\[лицо\] реплика>>>/);
 });
 
 test('свои напоминания: по времени раз в день, через промежутки, выключенные и пустые молчат, пауза встроенных их не держит', () => {
@@ -515,4 +515,33 @@ test('свои напоминания в настройках Сливы: доб
     pane.querySelector('.pud-rem [data-act="rem-del"]').click();
     assert.equal(m.settings.peek.reminders.length, 0);
   } finally { m.undo(); }
+});
+
+test('у облачка Сливы есть крестик: закрывает сразу, ничего не откладывая', async () => {
+  const m = mount();
+  await m.shared.peek.show({ kind: 'rest' });
+  const root = m.document.getElementById(PEEK_ID);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.ok(root.classList.contains('on'));
+  m.document.querySelector('.pud-peek-x').dispatchEvent(new m.win.MouseEvent('click', { bubbles: true }));
+  assert.ok(!root.classList.contains('on'), 'облачко закрылось');
+  assert.ok(!(m.settings.peek.snoozeUntil > 0), 'тишина не включилась');
+  m.undo();
+});
+
+test('комментарий: лицо берётся из тега в реплике и соответствует смыслу, тег не показывается', async () => {
+  const { commentFace, COMMENT_MOODS } = await import('../src/pud/core/peek.js');
+  assert.equal(commentFace('<<<[smug] Ну-ну, конечно.>>>'), 'smug');
+  assert.equal(commentFace('Мы думаем… <<<[love] Какая забота!>>>'), 'love');
+  assert.equal(commentFace('<<<[LOVE] Ах>>>'), 'love');
+  assert.equal(commentFace('[panic] Беги!'), 'panic', 'без маркеров тоже читается');
+  assert.equal(cleanComment('<<<[smug] Ну-ну, конечно.>>>', 20), 'Ну-ну, конечно.');
+  assert.equal(cleanComment('<<<[love]Какая забота!>>>', 20), 'Какая забота!');
+  assert.equal(cleanComment('<<<[нет такого] текст>>>', 20), '[нет такого] текст', 'неизвестный тег не трогаем');
+  // нет тега или тег неизвестный → мягкое случайное лицо, не падает
+  assert.ok(['wink', 'normal', 'happy'].includes(commentFace('<<<Просто реплика>>>', () => 0.9)));
+  assert.ok(['wink', 'normal', 'happy'].includes(commentFace('<<<[cold] Брр>>>', () => 0)));
+  for (const name of Object.keys(COMMENT_MOODS)) assert.ok(PEEK_FACES[name], `${name}: есть лицо`);
+  const prompt = buildCommentMessages({ chat: [], maxWords: 20 })[0].content;
+  for (const name of ['smug', 'love', 'approve', 'shy', 'pout', 'grumpy', 'scared', 'panic']) assert.match(prompt, new RegExp(`\[${name}\]`));
 });

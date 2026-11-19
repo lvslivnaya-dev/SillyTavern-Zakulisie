@@ -14,15 +14,15 @@
 /** Книги чата: [{ name, via: [{ kind, label }], missing }], по алфавиту. */
 export function chatLoreBooks(sources) {
   const books = new Map();
-  const add = (name, kind, label) => {
+  const add = (name, kind, label, avatar = '') => {
     if (!name) return;
     if (!books.has(name)) books.set(name, { name, via: [] });
-    books.get(name).via.push({ kind, label });
+    books.get(name).via.push(avatar ? { kind, label, avatar } : { kind, label });
   };
   for (const name of sources.global ?? []) add(name, 'global', 'глобально');
   for (const card of sources.cards ?? []) {
-    add(card.world, 'card', `карточка «${card.name}»`);
-    for (const name of card.extras ?? []) add(name, 'extra', `доп. у «${card.name}»`);
+    add(card.world, 'card', `карточка «${card.name}»`, card.avatar);
+    for (const name of card.extras ?? []) add(name, 'extra', `доп. у «${card.name}»`, card.avatar);
   }
   if (sources.persona?.book) add(sources.persona.book, 'persona', `персона «${sources.persona.name}»`);
   add(sources.chat, 'chat', 'этот чат');

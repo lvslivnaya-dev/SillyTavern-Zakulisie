@@ -56,3 +56,13 @@ test('вкладка «Иконки»: подпись про авторское 
   assert.deepEqual(settings.icons, { pud: {}, studio: {} });
   undo();
 });
+
+test('вкладка «Иконки»: иконки спрятаны в две шторки', () => {
+  const { document } = new JSDOM('<body></body>').window;
+  injectSprite(document);
+  const pane = document.createElement('div');
+  const hub = { addTab: () => ({ pane, remove() {} }) };
+  const undo = startIconStudio(document, { settings: { icons: { pud: {}, studio: {} } }, save() {}, hub, shared: { visual: {} } });
+  assert.deepEqual([...pane.querySelectorAll('details[data-fold] > summary')].map(node => node.textContent), ['Панели и окна Закулисья', 'Окна отношений, мира и библиотек']);
+  undo();
+});

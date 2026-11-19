@@ -1,26 +1,26 @@
 /**
- * The card of a persona: what the others can see in her, and the records about her that depend on who is on stage and on the AU
- * (the alternate universe) the chat plays.
+ * The card of a persona: what the others can see in her, and the records about her that depend on who is on stage.
  *
  * A persona card is a card of the character library (core/location-library.js) marked `persona: true`: the same folders, gallery,
  * editor, names with their case forms, closet and translation. Its sections are those of the persona template (what shows from
  * outside: Visual, Voice, Public Info), and it has what a character's card has not:
- *   records[] = [record]   record = { id, text, about[], knows[], aboutIds[], knowsIds[], au[], secret, off }
+ *   records[] = [record]   record = { id, text, about[], knows[], aboutIds[], knowsIds[], secret, off }
  *            about, knows — the characters the record concerns / who know it, as names (a name or a nickname typed in);
  *            aboutIds, knowsIds — the same, tied straight to cards of the library (a card is found in the chat by whoever it is attached to);
  *            none of the four = about her for everyone;
- *            au — the AU it belongs to (empty = every AU); secret — known only to about + knows.
- * The list of AU and the switch «send the persona» are in the extension settings:
- *   settings = { version: 1, enabled, au: [{ id, name }], cards: [legacy] }   (a chat says which AU are on: state.ui.au)
+ *            secret — known only to about + knows; it also becomes a secret of the scene when a chat with her opens (see index.js, syncPersonaSecrets);
+ *            condition — for a secret: when it comes out, in words.
+ * The switch «send the persona» is in the extension settings:
+ *   settings = { version: 1, enabled, cards: [legacy] }
  *
- * What goes out (buildPersonaPrompt): the sections, and the records whose AU is on in the chat and whose people are on stage
+ * What goes out (buildPersonaPrompt): the sections, and the records whose people are on stage
  * (any of them — so that the one who knows is never left without what he knows). Pure: no DOM, no SillyTavern.
  */
 import { normalizeAlias, uniqueId } from './ids.js';
 import { filledSections, sectionText } from './character-cards.js';
 
 export const PERSONA_VERSION = 1;
-export const PERSONA_LIMITS = Object.freeze({ records: 80, au: 30, name: 80, text: 700, people: 12, promptCharacters: 3500 });
+export const PERSONA_LIMITS = Object.freeze({ records: 80, name: 80, text: 700, people: 12, promptCharacters: 3500 });
 export const PERSONA_TAG = 'PERSONA';
 
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -28,9 +28,9 @@ const line = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().sli
 const prose = (value, max) => String(value ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, max);
 const unique = list => [...new Set(list)];
 
-/** The settings: the switch, the list of AU. `cards` is what an earlier version kept here; it moves to the library (migratePersonaCards). */
+/** The settings: the switch. `cards` is what an earlier version kept here; it moves to the library (migratePersonaCards). */
 export function emptyPersonaCards() {
-  return { version: PERSONA_VERSION, enabled: true, au: [], cards: [] };
+  return { version: PERSONA_VERSION, enabled: true, cards: [] };
 }
 
 /** «Рэн, Мику» → ['Рэн', 'Мику']: the names typed in one field. */
@@ -57,8 +57,9 @@ export function cleanRecords(raw) {
       knows: splitPeople(item.knows),
       aboutIds: cardIds(item.aboutIds),
       knowsIds: cardIds(item.knowsIds),
-      au: unique((Array.isArray(item.au) ? item.au : []).map(value => line(value, 80)).filter(Boolean)),
       secret: item.secret === true,
+      // when a secret record comes out (in words; the model judges by meaning); only for a secret
+      condition: item.secret === true ? line(item.condition, 300) : '',
       off: item.off === true,
     });
     if (records.length >= PERSONA_LIMITS.records) break;
@@ -69,33 +70,7 @@ export function cleanRecords(raw) {
 /** Tolerant: anything broken becomes an empty settings object. */
 export function normalizePersonaCards(raw) {
   if (!raw || typeof raw !== 'object') return emptyPersonaCards();
-  const au = [];
-  const auIds = new Set();
-  for (const item of Array.isArray(raw.au) ? raw.au : []) {
-    const name = line(item?.name, PERSONA_LIMITS.name);
-    const id = typeof item?.id === 'string' && item.id ? item.id : '';
-    if (!name || !id || auIds.has(id) || au.length >= PERSONA_LIMITS.au) continue;
-    auIds.add(id);
-    au.push({ id, name });
-  }
-  return { version: PERSONA_VERSION, enabled: raw.enabled !== false, au, cards: Array.isArray(raw.cards) ? raw.cards : [] };
-}
-
-export function addAu(library, name) {
-  const next = clone(normalizePersonaCards(library));
-  const clean = line(name, PERSONA_LIMITS.name);
-  if (!clean) throw new Error('У АУ должно быть название.');
-  if (next.au.some(item => normalizeAlias(item.name) === normalizeAlias(clean))) throw new Error('Такое АУ уже есть.');
-  if (next.au.length >= PERSONA_LIMITS.au) throw new Error(`АУ не больше ${PERSONA_LIMITS.au}.`);
-  next.au.push({ id: uniqueId('au'), name: clean });
-  return next;
-}
-
-/** The AU is dropped from the list. (Records that named it keep the id: it matches nothing, so they simply wait.) */
-export function removeAu(library, id) {
-  const next = clone(normalizePersonaCards(library));
-  next.au = next.au.filter(item => item.id !== id);
-  return next;
+  return { version: PERSONA_VERSION, enabled: raw.enabled !== false, cards: Array.isArray(raw.cards) ? raw.cards : [] };
 }
 
 /**
@@ -131,17 +106,15 @@ export function migratePersonaCards(settingsCards) {
 }
 
 /**
- * The records that go out now: not switched off, of an AU that is on (or of none), and either for everyone
+ * The records that go out now: not switched off, and either for everyone
  * (nobody named) or with any of the people it names on stage. `present` = names and aliases of those on stage,
  * `presentCardIds` = the library cards attached to them (a record tied to a card finds its character whatever the name is).
  */
-export function selectPersonaRecords(card, { present = [], activeAu = [], presentCardIds = [] } = {}) {
+export function selectPersonaRecords(card, { present = [], presentCardIds = [] } = {}) {
   const here = new Set(present.filter(Boolean).map(normalizeAlias));
   const cardsHere = new Set(presentCardIds);
-  const on = new Set(activeAu);
   return (card?.records ?? []).filter(record => {
     if (record.off) return false;
-    if (record.au.length && !record.au.some(id => on.has(id))) return false;
     const names = unique([...record.about, ...record.knows]);
     const ids = unique([...(record.aboutIds ?? []), ...(record.knowsIds ?? [])]);
     return (!names.length && !ids.length) || names.some(name => here.has(normalizeAlias(name))) || ids.some(id => cardsHere.has(id));
@@ -155,17 +128,16 @@ const RULES = Object.freeze([
 ]);
 
 /** The wrapped block, or '' when there is nothing to say. */
-export function buildPersonaPrompt(card, { present = [], activeAu = [], presentCardIds = [], cardNames = new Map(), maxCharacters = PERSONA_LIMITS.promptCharacters } = {}) {
+export function buildPersonaPrompt(card, { present = [], presentCardIds = [], cardNames = new Map(), maxCharacters = PERSONA_LIMITS.promptCharacters } = {}) {
   if (!card) return '';
   const lines = [];
   if (card.gender === 'female' || card.gender === 'male') lines.push(`gender: ${card.gender}`);
-  const auOn = new Set(activeAu);
-  for (const section of filledSections(card).filter(item => !item.au?.length || item.au.some(id => auOn.has(id)))) {
+  for (const section of filledSections(card)) {
     const text = sectionText(section).replace(/\s*\n\s*/g, ' ');
     const label = section.kind === 'visual' ? 'looks' : section.kind === 'voice' ? 'voice' : `info[${section.title}]`;
     lines.push(`${label}: ${text}`);
   }
-  for (const record of selectPersonaRecords(card, { present, activeAu, presentCardIds })) {
+  for (const record of selectPersonaRecords(card, { present, presentCardIds })) {
     const label = ids => (ids ?? []).map(id => cardNames.get(id)).filter(Boolean);
     const about = unique([...record.about, ...label(record.aboutIds)]);
     const people = unique([...about, ...record.knows, ...label(record.knowsIds)]);

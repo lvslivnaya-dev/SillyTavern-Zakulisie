@@ -127,14 +127,12 @@ export function makeSection(raw = {}, { id } = {}) {
   const title = cleanLine(raw?.title, CARD_LIMITS.title) || CARD_SECTION_KINDS[kind];
   const when = CARD_WHEN.includes(raw?.when) ? raw.when : '';
   const keys = cleanKeys(raw?.keys);
-  const au = [...new Set((Array.isArray(raw?.au) ? raw.au : []).map(value => String(value ?? '').trim().slice(0, 80)).filter(Boolean))].slice(0, 30);
   return {
     id: String(id ?? raw?.id ?? '') || uniqueId('sec'),
     kind, title,
     text: cleanProse(raw?.text, CARD_LIMITS.text),
     ...(when ? { when } : {}),
     ...(keys.length ? { keys } : {}),
-    ...(au.length ? { au } : {}),
     ...(raw?.off === true ? { off: true } : {}),
   };
 }

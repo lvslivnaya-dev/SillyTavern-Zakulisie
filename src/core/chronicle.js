@@ -22,6 +22,8 @@
  * Every function returns a new chronicle and never mutates its input.
  */
 
+import { relativeScores } from './semantic.js';
+
 export const CHRONICLE_MARKER = 'kulisyChronicle';
 /** Marker of messages whose scene was unfolded by hand: they stay as they are. */
 export const CHRONICLE_KEEP = 'keep';
@@ -309,9 +311,11 @@ export function levelLabel(item) {
 
 /**
  * The prompt block: active summaries, oldest first. Over the budget, the oldest go
- * first (they are the most compressed and the least urgent).
+ * first (they are the most compressed and the least urgent); with `similarity(summary)` (embeddings: closeness to the scene)
+ * the newest and the pinned stay and the others are kept by meaning instead, still in story order; `semanticLimit` also cuts the older ones to the
+ * closest few even when the budget would hold more.
  */
-export function buildChroniclePrompt(chronicle, { maxCharacters = 6000 } = {}) {
+export function buildChroniclePrompt(chronicle, { maxCharacters = 6000, similarity = null, keepNewest = 2, semanticLimit = 0 } = {}) {
   const active = activeSummaries(chronicle);
   if (!active.length) return '';
   const counters = { 0: 0, 1: 0, 2: 0 };
@@ -322,12 +326,33 @@ export function buildChroniclePrompt(chronicle, { maxCharacters = 6000 } = {}) {
   const head = '[STORY SO FAR — CHRONICLE]\nWhat happened before the messages below, oldest first. Treat it as established past: keep names, facts, promises and secrets consistent with it; do not retell it.';
   const tail = '[/STORY SO FAR]';
   const budget = Math.max(200, maxCharacters - head.length - tail.length - 4);
-  const kept = [];
+  let kept = [];
   let used = 0;
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    if (used + lines[index].length + 1 > budget && kept.length) break;
-    kept.unshift(lines[index].slice(0, budget));
-    used += lines[index].length + 1;
+  const total = lines.reduce((sum, line) => sum + line.length + 1, 0);
+  const limit = Math.max(0, Math.floor(Number(semanticLimit) || 0));
+  const cut = Boolean(similarity) && limit > 0 && lines.length > keepNewest + limit;
+  if (similarity && (total > budget || cut) && lines.length > keepNewest) {
+    // Too long for the budget: the newest summaries and the pinned ones stay (the story must not lose its latest turn),
+    // the rest compete by closeness to the scene instead of the oldest simply dropping. They still go in story order.
+    const near = relativeScores(active, similarity);
+    const must = new Set([...lines.keys()].filter(index => index >= lines.length - keepNewest || active[index].pinned));
+    const rest = [...lines.keys()].filter(index => !must.has(index)).sort((left, right) => (near(active[right]) ?? -1) - (near(active[left]) ?? -1) || right - left);
+    const chosen = new Set();
+    // `semanticLimit`: of the older summaries only that many (the closest to the scene) are sent at all; 0 = as many as the budget holds.
+    const allowed = new Set(cut ? rest.slice(0, limit) : rest);
+    for (const index of [...[...must].sort((left, right) => right - left), ...rest.filter(index => allowed.has(index))]) {
+      const cost = lines[index].length + 1;
+      if (used + cost > budget && chosen.size) { if (must.has(index)) chosen.add(index); continue; }
+      chosen.add(index);
+      used += cost;
+    }
+    kept = [...chosen].sort((left, right) => left - right).map(index => lines[index].slice(0, budget));
+  } else {
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if (used + lines[index].length + 1 > budget && kept.length) break;
+      kept.unshift(lines[index].slice(0, budget));
+      used += lines[index].length + 1;
+    }
   }
   return `${head}\n${kept.join('\n')}\n${tail}`;
 }

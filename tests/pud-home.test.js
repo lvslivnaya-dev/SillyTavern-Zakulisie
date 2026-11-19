@@ -228,3 +228,39 @@ test('полка: «Новый нарратор» и карандаш на ка�
   assert.equal(document.querySelector('.pud-pola[data-key="group:g1"] [data-act="edit"]'), null, 'у группы нет карандаша');
   undo();
 });
+
+test('обновление страницы: запомненный чат открывается снова, а закрытый чат на главной остаётся на главной', async () => {
+  const store = new Map();
+  const storage = { getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, value) };
+  const run = async (saved, { current } = {}) => {
+    const { document } = tavern();
+    const api = fakeApi();
+    const handlers = {};
+    let chatId = current;
+    if (saved) store.set('zakulisie.place', JSON.stringify(saved)); else store.delete('zakulisie.place');
+    const context = {
+      characters, groups, tagMap, tags, chat: [], getCurrentChatId: () => chatId, characterId: chatId === undefined ? undefined : 0, eventTypes: { CHAT_CHANGED: 'chat', APP_READY: 'ready' },
+      eventSource: { on: (type, fn) => { (handlers[type] ??= []).push(fn); }, removeListener() {} },
+    };
+    const undo = startHome(document, { context, settings: migrateSettings({}), save() {}, api, storage });
+    // пустое состояние старта таверны не должно стирать запомненное место
+    for (const fn of handlers.chat ?? []) fn();
+    assert.equal(store.get('zakulisie.place'), saved ? JSON.stringify(saved) : undefined, 'пока идёт запуск, место не перезаписывается');
+    for (const fn of handlers.ready ?? []) fn();
+    await frame(); await frame();
+    return { api, undo, document, handlers, setChat: id => { chatId = id; } };
+  };
+  const first = await run({ kind: 'char', avatar: 'ran.png', file: 'Ран - 2' });
+  assert.deepEqual(first.api.calls[0], ['open', 'ran.png', 'Ран - 2'], 'вернулись в тот же чат');
+  first.undo();
+  const second = await run({ kind: 'home' });
+  assert.equal(second.api.calls.length, 0, 'с главной никуда не уходим');
+  // после запуска смена чата запоминается
+  second.setChat('Майки');
+  for (const fn of second.handlers.chat) fn();
+  assert.deepEqual(JSON.parse(store.get('zakulisie.place')), { kind: 'home' }, 'контекст без characterId → это не чат');
+  second.undo();
+  const third = await run({ kind: 'char', avatar: 'ghost.png', file: 'x' });
+  assert.equal(third.api.calls.length, 0, 'персонажа уже нет: молча остаёмся на главной');
+  third.undo();
+});

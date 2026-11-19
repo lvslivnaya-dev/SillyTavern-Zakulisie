@@ -27,12 +27,15 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
   const tab = shared.hub?.addTab?.('mood', 'Настроение', 'theater');
   const view = doc.defaultView;
   const pane = tab?.pane;
+  // The icons and the own moods: a block at the end of the tab (kept as an element of its own, redrawn separately).
+  const editor = doc.createElement('div');
+  editor.className = 'pud-mood-editor';
   const old = settings.moods ?? {};
   settings.moods = {
     ...normalizeMoodConfig(old),
     // Плашки настроения в шторке во вкладке «Кто» убраны (настроение живёт во вкладке «Эмоции»): один раз выключаем, дальше можно вернуть галочкой.
-    strips: old.stripsHidden ? old.strips !== false && old.badges !== false : false,
-    stripsHidden: true,
+    strips: old.stripsReset ? old.strips === true : false,
+    stripsReset: true,
     send: old.send !== false,
     auto: old.auto !== false,
     autoEvery: clamp(Math.round(Number(old.autoEvery) || 2), 1, 20),
@@ -41,6 +44,8 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
   const live = () => globalThis.SillyTavern?.getContext?.() ?? context;
   const scene = () => { try { return bridge?.scene?.read?.() ?? null; } catch { return null; } };
   const list = () => moodList(settings.moods);
+  /** With the ones taken out of the templates: the editor shows them so they can be brought back. */
+  const fullList = () => moodList(settings.moods, { all: true });
   const moods = () => normalizeMoods(readMeta(live(), 'moods', {}), list());
   /** Герои сцены без персоны автора. */
   const castNames = () => {
@@ -91,6 +96,7 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
     event.preventDefault();
     event.stopPropagation();
     const { name, mood } = pill.dataset;
+    writeMeta(live(), 'moods_prev', null); // рукой поставили: откатывать свайпом уже нечего
     store(setMood(moods(), name, moods()[name]?.mood === mood ? '' : mood, Date.now(), list()));
   };
   doc.addEventListener('click', onDocClick, true);
@@ -110,9 +116,11 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
       const ctx = live();
       const chat = readChat(ctx);
       if (!chat.length) throw new Error('В чате пока нечего читать.');
-      const raw = await askModel(ctx, helperProfile(settings), buildMoodMessages({ chat, names, list: list() }), 400);
+      const raw = await askModel(ctx, helperProfile(settings), buildMoodMessages({ chat, names, list: list() }), Math.min(1500, 300 + names.length * 40));
       const found = parseMoodAnswer(raw, names, list());
       let next = moods();
+      // Что было до определения: свайп или перегенерация этого ответа вернут настроение назад (см. rollbackOnSwipe).
+      if (Object.keys(found).length) writeMeta(live(), 'moods_prev', { mesId: Math.max(0, (ctx.chat?.length ?? 1) - 1), before: next });
       for (const [name, id] of Object.entries(found)) next = setMood(next, name, id, Date.now(), list());
       status = Object.keys(found).length ? `Настроение определено: ${Object.keys(found).length}.` : 'По тексту настроение не видно.';
       store(next);
@@ -147,14 +155,14 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
   const dot = key => `<button type="button" class="pud-info-dot" data-help="${key}" aria-expanded="${helpOpen.has(key)}" title="Пояснение" aria-label="Пояснение">?</button>`;
   const note = key => `<p class="pud-hint pud-info-note" data-note="${key}"${helpOpen.has(key) ? '' : ' hidden'}>${HELP[key]}</p>`;
   let selMood = '';
-  const moodItem = id => list().find(item => item.id === id) ?? null;
+  const moodItem = id => fullList().find(item => item.id === id) ?? null;
   const faceOf = item => (item.image ? `<img src="${item.image}" alt="">` : escapeHtml(item.emoji));
   /** Значок настроения: сама кнопка выбора картинки; × убирает картинку. */
   const iconButton = item => `<span class="pud-mood-iconwrap"><button type="button" class="pud-mood-prev${item.image ? ' has-img' : ''}" data-act="mood-img" data-mid="${escapeHtml(item.id)}" title="Нажмите, чтобы выбрать картинку. Её можно и вставить (Ctrl+V) или перетащить сюда" aria-label="Выбрать картинку для «${escapeHtml(item.label)}»">${faceOf(item)}</button>${item.image ? `<button type="button" class="pud-mood-imgx" data-act="mood-img-clear" data-mid="${escapeHtml(item.id)}" title="Убрать картинку" aria-label="Убрать картинку">×</button>` : ''}</span>`;
   const PALETTE = ["😊", "😄", "🥰", "😍", "😘", "😏", "😳", "😌", "😢", "😭", "😠", "😡", "😤", "😨", "😱", "😒", "😬", "🥵", "🔥", "😴", "🥱", "😶", "🙄", "🤔", "😎", "🥺", "😈", "🤨", "😮", "😐", "😔", "💔", "❤️", "💞", "✨", "🌧️", "🍵", "🖤"];
   const editorHtml = () => {
-    const all = list();
-    const builtIn = all.slice(0, MOODS.length);
+    const hiddenIds = new Set(settings.moods.hidden ?? []);
+    const builtIn = fullList().slice(0, MOODS.length);
     const custom = settings.moods.custom.map(item => ({ ...item, image: settings.moods.images[item.id] }));
     const chosen = moodItem(selMood);
     return `<div class="pud-card pud-card-col">
@@ -165,7 +173,7 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
           <button type="button" class="menu_button" data-act="emoji-reset"${chosen ? '' : ' disabled'} title="Вернуть стандартный эмодзи">Стандартный</button>
         </div>
         <div class="pud-emoji-pal">${PALETTE.map(item => `<button type="button" data-pal="${item}" title="Поставить выбранному настроению">${item}</button>`).join('')}</div>
-        <div class="pud-mood-icons">${builtIn.map(item => `<div class="pud-mood-tile${item.id === selMood ? ' sel' : ''}" data-pick="${item.id}">${iconButton(item)}<span class="pud-mood-tname">${escapeHtml(item.label)}</span></div>`).join('')}</div>
+        <div class="pud-mood-icons">${builtIn.map(item => `<div class="pud-mood-tile${item.id === selMood ? ' sel' : ''}${hiddenIds.has(item.id) ? ' off' : ''}" data-pick="${item.id}">${iconButton(item)}<span class="pud-mood-tname">${escapeHtml(item.label)}</span><button type="button" class="pud-mood-hide" data-act="${hiddenIds.has(item.id) ? 'mood-show' : 'mood-hide'}" data-mid="${item.id}" title="${hiddenIds.has(item.id) ? 'Вернуть в шаблоны' : 'Убрать из шаблонов: пропадёт с плашек и из автоопределения'}" aria-label="${hiddenIds.has(item.id) ? 'Вернуть' : 'Убрать'}: ${escapeHtml(item.label)}">${hiddenIds.has(item.id) ? '+' : '×'}</button></div>`).join('')}</div>
       </div>
       <div class="pud-card pud-card-col">
         <div class="pud-inforow"><b>Свои настроения</b>${dot('custom')}</div>${note('custom')}
@@ -183,12 +191,13 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
 
   // ───────── вкладка и быстрая панель
   function render() {
+    editor.innerHTML = `${editorHtml()}<input type="file" accept="image/*" hidden data-mood-file>`;
     if (!pane) return;
     const names = castNames();
     const current = moods();
     pane.innerHTML = `
       <h3>Настроение</h3>
-      <p class="pud-hint">У каждого героя сцены свой ряд плашек с настроением: текущее подсвечено, нажмите на плашку, чтобы поменять. Персоне (вашему герою) настроение не задаётся: модель читает его по вашим постам. Цветом экрана по настроению сцены управляет вкладка «Тема по настроению» в блоке «Визуал».</p>
+      <p class="pud-hint">У каждого героя сцены свой ряд плашек с настроением: текущее подсвечено, нажмите на плашку, чтобы поменять. Персоне (вашему герою) настроение не задаётся: модель читает его по вашим постам. Цветом экрана по настроению сцены управляет шторка «Тема по настроению» в «Оформление → Палитра».</p>
       <div class="pud-card pud-card-col">
         <label class="pud-opt"><span>Показывать плашки настроения в шторке</span><input type="checkbox" data-field="strips"${settings.moods.strips ? ' checked' : ''}></label>
         <label class="pud-opt"><span>Говорить модели о настроении героев</span><input type="checkbox" data-field="send"${settings.moods.send ? ' checked' : ''}></label>
@@ -201,8 +210,8 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
         ${names.length ? names.map(name => `<div class="pud-mood-row"><span class="pud-mood-name">${escapeHtml(name)}</span><span class="pud-mood-row-pills ${STRIP_CLASS}" data-name="${escapeHtml(name)}">${pillsHtml(name, current[name]?.mood ?? '', list())}</span><span class="pud-hint">${escapeHtml(moodOf(current[name]?.mood, list())?.label ?? 'не задано')}</span></div>`).join('') : '<p class="pud-lib-empty">На сцене пока нет героев (кроме вашей персоны).</p>'}
         <div class="pud-peek-city"><button type="button" class="menu_button" data-act="detect"${busy ? ' disabled' : ''}>Определить по чату (модель)</button><span class="pud-hint">${escapeHtml(status)}</span></div>
       </div>
-      ${editorHtml()}
-      <input type="file" accept="image/*" hidden data-mood-file>`;
+      `;
+    pane.append(editor);
   }
   const afterListChange = () => { persist(); applyPrompt(); decorate(); shared.quick?.refresh('mood'); };
   let pickId = '';
@@ -226,13 +235,13 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
   /** Выбрать настроение для эмодзи: без перерисовки, чтобы не сбивать набор текста. */
   function select(id) {
     selMood = id;
-    for (const node of pane.querySelectorAll('[data-pick]')) node.classList.toggle('sel', node.dataset.pick === id);
+    for (const node of editor.querySelectorAll('[data-pick]')) node.classList.toggle('sel', node.dataset.pick === id);
     const item = moodItem(id);
-    const label = pane.querySelector('[data-emoji-for]');
+    const label = editor.querySelector('[data-emoji-for]');
     if (label) label.textContent = item?.label ?? 'выберите настроение ниже';
-    const input = pane.querySelector('[data-emoji-shared]');
+    const input = editor.querySelector('[data-emoji-shared]');
     if (input) { input.disabled = !item; input.value = item?.emoji ?? ''; }
-    const reset = pane.querySelector('[data-act="emoji-reset"]');
+    const reset = editor.querySelector('[data-act="emoji-reset"]');
     if (reset) reset.disabled = !item;
   }
   /** Поставить эмодзи настроению id (пусто: стандартный). */
@@ -247,8 +256,8 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
     }
     afterListChange();
     const item = moodItem(id);
-    for (const face of pane.querySelectorAll(`[data-pick="${id}"] .pud-mood-prev:not(.has-img)`)) face.textContent = item?.emoji ?? '';
-    const input = pane.querySelector('[data-emoji-shared]');
+    for (const face of editor.querySelectorAll(`[data-pick="${id}"] .pud-mood-prev:not(.has-img)`)) face.textContent = item?.emoji ?? '';
+    const input = editor.querySelector('[data-emoji-shared]');
     if (input && selMood === id && document.activeElement !== input) input.value = item?.emoji ?? '';
   }
   const onPaste = event => {
@@ -306,12 +315,12 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
     if (help) {
       const key = help.dataset.help;
       if (helpOpen.has(key)) helpOpen.delete(key); else helpOpen.add(key);
-      for (const node of pane.querySelectorAll(`[data-note="${key}"]`)) node.hidden = !helpOpen.has(key);
-      for (const node of pane.querySelectorAll(`[data-help="${key}"]`)) node.setAttribute('aria-expanded', String(helpOpen.has(key)));
+      for (const node of editor.querySelectorAll(`[data-note="${key}"]`)) node.hidden = !helpOpen.has(key);
+      for (const node of editor.querySelectorAll(`[data-help="${key}"]`)) node.setAttribute('aria-expanded', String(helpOpen.has(key)));
       return;
     }
     const pick = event.target.closest?.('[data-act="mood-img"]');
-    if (pick) { pickId = pick.dataset.mid; select(pick.dataset.mid); pane.querySelector('[data-mood-file]')?.click(); return; }
+    if (pick) { pickId = pick.dataset.mid; select(pick.dataset.mid); editor.querySelector('[data-mood-file]')?.click(); return; }
     const clear = event.target.closest?.('[data-act="mood-img-clear"]');
     if (clear) {
       const images = { ...settings.moods.images };
@@ -321,10 +330,19 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
       render();
       return;
     }
+    const hide = event.target.closest?.('[data-act="mood-hide"], [data-act="mood-show"]');
+    if (hide) {
+      const id = hide.dataset.mid;
+      const rest = (settings.moods.hidden ?? []).filter(item => item !== id);
+      settings.moods.hidden = hide.dataset.act === 'mood-hide' ? [...rest, id] : rest;
+      afterListChange();
+      render();
+      return;
+    }
     const pal = event.target.closest?.('[data-pal]');
     if (pal) {
       if (selMood) applyEmoji(selMood, pal.dataset.pal);
-      else { const label = pane.querySelector('[data-emoji-for]'); if (label) label.textContent = 'сначала выберите настроение ниже'; }
+      else { const label = editor.querySelector('[data-emoji-for]'); if (label) label.textContent = 'сначала выберите настроение ниже'; }
       return;
     }
     if (event.target.closest?.('[data-act="emoji-reset"]')) { if (selMood) applyEmoji(selMood, ''); return; }
@@ -352,13 +370,17 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
     const id = idAt(event.target);
     if (id) select(id);
   };
-  pane?.addEventListener('change', onChange);
-  pane?.addEventListener('input', onInput);
-  pane?.addEventListener('paste', onPaste);
-  pane?.addEventListener('dragover', onDragOver);
-  pane?.addEventListener('drop', onDrop);
-  pane?.addEventListener('focusin', onFocusIn);
-  pane?.addEventListener('click', onClick);
+  // the editor of the icons stands inside the pane of the tab, so the pane's listeners hear it too
+  const hosts = [pane].filter(Boolean);
+  for (const host of hosts) {
+    host.addEventListener('change', onChange);
+    host.addEventListener('input', onInput);
+    host.addEventListener('paste', onPaste);
+    host.addEventListener('dragover', onDragOver);
+    host.addEventListener('drop', onDrop);
+    host.addEventListener('focusin', onFocusIn);
+    host.addEventListener('click', onClick);
+  }
   const paneObserver = pane ? new view.MutationObserver(() => { if (!pane.hidden) render(); }) : null;
   paneObserver?.observe(pane, { attributes: true, attributeFilter: ['hidden'] });
 
@@ -388,7 +410,17 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
   listen('CHAT_CHANGED', () => { status = ''; replies = 0; applyPrompt(); decorate(); if (pane && !pane.hidden) render(); });
   listen('MESSAGE_RECEIVED', afterReply);
   listen('MESSAGE_SENT', afterReply);
-  listen('GENERATION_STARTED', () => { generating = true; });
+  /** Ответ, по которому определили настроение, перегенерировали или перелистнули: настроение возвращается к тому, что было до него. */
+  const rollbackOnSwipe = mesId => {
+    try {
+      const prev = readMeta(live(), 'moods_prev', null);
+      if (!prev || typeof prev.before !== 'object' || (mesId !== undefined && Number(mesId) !== prev.mesId)) return;
+      writeMeta(live(), 'moods_prev', null);
+      store(normalizeMoods(prev.before, list()));
+    } catch (error) { report('настроение: откат при свайпе', error); }
+  };
+  listen('MESSAGE_SWIPED', rollbackOnSwipe);
+  listen('GENERATION_STARTED', type => { generating = true; if (type === 'swipe' || type === 'regenerate') rollbackOnSwipe(Math.max(0, (live().chat?.length ?? 1) - 1)); });
   for (const name of ['GENERATION_ENDED', 'GENERATION_STOPPED']) listen(name, () => { generating = false; });
   const unsubscribeScene = bridge?.scene?.subscribe?.(() => { applyPrompt(); }) ?? (() => {});
   applyPrompt();
@@ -400,13 +432,16 @@ export function startMood(doc, { context, settings, save, shared = {}, bridge = 
     unsubscribeScene();
     for (const id of timers) view.clearTimeout(id);
     paneObserver?.disconnect();
-    pane?.removeEventListener('change', onChange);
-    pane?.removeEventListener('input', onInput);
-    pane?.removeEventListener('paste', onPaste);
-    pane?.removeEventListener('dragover', onDragOver);
-    pane?.removeEventListener('drop', onDrop);
-    pane?.removeEventListener('focusin', onFocusIn);
-    pane?.removeEventListener('click', onClick);
+    for (const host of hosts) {
+      host.removeEventListener('change', onChange);
+      host.removeEventListener('input', onInput);
+      host.removeEventListener('paste', onPaste);
+      host.removeEventListener('dragover', onDragOver);
+      host.removeEventListener('drop', onDrop);
+      host.removeEventListener('focusin', onFocusIn);
+      host.removeEventListener('click', onClick);
+    }
+    editor.remove();
     doc.removeEventListener('click', onDocClick, true);
     for (const [type, fn] of listeners) events?.removeListener?.(type, fn);
     setPromptBlock(live(), MOODS_PROMPT_KEY, '');

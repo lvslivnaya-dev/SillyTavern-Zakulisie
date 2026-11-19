@@ -52,7 +52,7 @@ export const RELATION_TABS = Object.freeze(new Set(NAV_GROUPS.find(group => grou
  * its own tabs. «iconClass» is a FontAwesome class (SillyTavern ships it) for the top bar button.
  */
 export const WINDOWS = Object.freeze([
-  Object.freeze({ id: 'scene', title: 'Сцена', iconClass: 'fa-clapperboard', tabs: Object.freeze(['scene', 'characters', 'chronicle', 'events', 'secrets']) }),
+  Object.freeze({ id: 'scene', title: 'Сцена', iconClass: 'fa-clapperboard', tabs: Object.freeze(['scene', 'characters', 'chronicle', 'events', 'secrets', 'lorebooks', 'setup']) }),
   Object.freeze({ id: 'relations', title: 'Отношения', subtitle: 'Что герои чувствуют друг к другу', iconClass: 'fa-heart', tabs: Object.freeze(['overview', 'headcanons', 'triangles']) }),
   Object.freeze({ id: 'cards', title: 'Карточки персонажей', subtitle: 'Кто они, как выглядят и что о них известно', iconClass: 'fa-address-card', tabs: Object.freeze(['cards']) }),
   Object.freeze({ id: 'places', title: 'Локации', subtitle: 'Где происходит сцена', iconClass: 'fa-location-dot', tabs: Object.freeze(['places']) }),
@@ -60,14 +60,20 @@ export const WINDOWS = Object.freeze([
   Object.freeze({ id: 'quests', title: 'Квесты', subtitle: 'Что герои ведут и что откладывают', iconClass: 'fa-flag', tabs: Object.freeze(['quests']) }),
   Object.freeze({ id: 'calendar', title: 'Календарь и погода', subtitle: 'Время, даты, праздники и погода истории', iconClass: 'fa-calendar-days', tabs: Object.freeze(['calendar']) }),
   Object.freeze({ id: 'media', title: 'Медиа', subtitle: 'музыка, видео и другое', iconClass: 'fa-music', tabs: Object.freeze(['player', 'songs']) }),
-  // Everything else: the dice, names, weather and the machinery. The persona window is the former Pudrenitsa's one (Kulisy only embeds the card editor in it).
-  Object.freeze({ id: 'settings', title: 'Настройки Закулисья', subtitle: 'Тонкая настройка', iconClass: 'fa-gear', tabs: Object.freeze(['dice', 'names', 'setup', 'journal', 'lorebooks', 'leaks', 'settings']) }),
 ]);
 
-/** The window a tab lives in (the settings window for anything unknown). */
+/**
+ * Pages that moved out of the Studio into the settings window of the tavern («Закулисье» on the top bar): Studio tab -> tab of that window.
+ * The Studio does not show them any more: a link to one opens the settings window on the right tab (options.onMoved).
+ */
+export const MOVED_TABS = Object.freeze({ names: 'k-names', journal: 'k-journal', leaks: 'k-checks', dice: 'k-dice', settings: 'k-modules' });
+/** Sections of the old settings page -> tab of the settings window of the tavern. */
+export const MOVED_SECTIONS = Object.freeze({ modules: 'k-modules', behaviour: 'k-modules', relations: 'k-modules', scene: 'k-modules', chronicle: 'k-modules', loregate: 'k-modules', diagnostics: 'k-diagnostics', models: 'k-models', prompt: 'k-prompt', data: 'k-data' });
+
+/** The window a tab lives in (the first one, «Сцена», for anything unknown). */
 export function windowOf(tabId) {
   if (tabId === 'weather') tabId = 'calendar'; // the weather is part of the calendar page
-  return WINDOWS.find(item => item.tabs.includes(tabId)) ?? WINDOWS.at(-1);
+  return WINDOWS.find(item => item.tabs.includes(tabId)) ?? WINDOWS[0];
 }
 
 export const LAYOUT_MODES = Object.freeze(['window', 'dock']);

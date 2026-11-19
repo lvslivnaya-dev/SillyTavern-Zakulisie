@@ -149,13 +149,26 @@ export function createHeadcanonsPage(ctx) {
       if (editingHeadcanonId === item.id) {
         const editor = element('form', { className: 'record editing' });
         const input = element('textarea', { value: item.text, 'aria-label': 'Текст хедканона' });
+        // Who knows it: the group always; the others are ticked here (someone who was there, or was told).
+        const extra = new Set((item.knownBy ?? []).filter(id => !ids.includes(id)));
+        const roster = element('div', { className: 'roster-list' });
+        for (const character of ctx.snapshot.characters || []) {
+          const who = characterId(character);
+          if (ids.includes(who)) continue;
+          const box = element('input', { type: 'checkbox', checked: extra.has(who), 'aria-label': `${characterName(character)} знает этот хедканон` });
+          box.addEventListener('change', () => { if (box.checked) extra.add(who); else extra.delete(who); });
+          roster.append(element('label', { className: 'roster-item' }, [box, element('span', { text: characterName(character) })]));
+        }
         const save = button('Сохранить', 'btn primary', () => {});
         save.type = 'submit';
-        editor.append(input, element('div', { className: 'record-actions' }, [save, button('Отмена', 'btn', () => { editingHeadcanonId = null; render(); })]));
+        editor.append(input,
+          element('p', { className: 'muted', style: { fontSize: '11px', margin: '6px 0 2px' }, text: `Знают всегда: ${ids.map(id => nameOf(id)).join(', ')}. Кому ещё известно, отметьте: остальные в сцене о нём не знают и не говорят так, словно были там.` }),
+          ...(roster.children.length ? [roster] : []),
+          element('div', { className: 'record-actions' }, [save, button('Отмена', 'btn', () => { editingHeadcanonId = null; render(); })]));
         editor.addEventListener('submit', async event => {
           event.preventDefault();
           try {
-            await facade.invoke('onUpdateHeadcanon', { key, id: item.id, text: input.value });
+            await facade.invoke('onUpdateHeadcanon', { key, id: item.id, text: input.value, knownBy: [...extra] });
             editingHeadcanonId = null;
             render();
           } catch (error) { setStatus(error?.message || 'Не удалось сохранить', true); }
@@ -168,14 +181,15 @@ export function createHeadcanonsPage(ctx) {
       list.append(element('article', { className: `record headcanon${item.enabled === false ? ' off' : ''}` }, [
         element('div', { className: 'record-head' }, [
           element('label', { className: 'roster-item', title: 'Выключенный хедканон не отправляется модели' }, [enabled, item.enabled === false ? 'выключен' : 'включён']),
-          item.pinned ? element('span', { className: 'record-badge pinned', title: 'Отправляется всегда, когда все из этой группы в сцене', text: '📌 закреплён' }) : null,
+          item.pinned ? element('span', { className: 'record-badge pinned', title: 'Отправляется всегда, когда в сцене есть кто-то из тех, кто его знает', text: '📌 закреплён' }) : null,
           element('span', { className: 'record-badge', text: HEADCANON_SOURCES[item.source] ?? 'вручную' }),
           element('time', { text: formatTime(item.createdAt) }),
         ].filter(Boolean)),
         element('p', { className: 'record-text', text: item.text }),
+        ...((item.knownBy ?? []).some(id => !ids.includes(id)) ? [element('p', { className: 'muted', style: { fontSize: '11px', margin: '0 0 6px' }, text: `Знают: ${item.knownBy.map(id => nameOf(id)).join(', ')}` })] : []),
         element('div', { className: 'record-actions' }, [
           button(item.pinned ? '📌 Открепить' : '📌 Закрепить', 'btn', () => act('onUpdateHeadcanon', { key, id: item.id, pinned: !item.pinned }, 'headcanon-pin'),
-            item.pinned ? 'Снова отбирать по сцене' : 'Отправлять всегда, когда все из этой группы в сцене: мимо отбора и лимита'),
+            item.pinned ? 'Снова отбирать по сцене' : 'Отправлять всегда, когда в сцене есть кто-то из тех, кто его знает: мимо отбора и лимита'),
           button('Вспомнить сейчас', 'btn', async () => {
             try {
               await facade.invoke('onRecallRecord', { text: item.text });

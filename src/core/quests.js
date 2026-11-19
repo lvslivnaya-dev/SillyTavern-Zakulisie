@@ -277,7 +277,8 @@ export function buildQuestsPrompt(state, { presentIds = [] } = {}) {
     if (quest.secret) parts.push(`SECRET, known only to: ${(quest.knownByIds ?? []).map(id => nameOf(state, id)).join(', ')}`);
     return `- ${parts.join(' | ')}`;
   });
-  return `[QUESTS — threads of the story that are in play]\n${lines.join('\n')}\n\nRules:\n- These are threads the story may pick up, not tasks handed to {{user}}. Never write {{user}}'s actions, choices or knowledge.\n- Let the step marked "now" surface through events, people and places when it fits; do not rush it, do not announce it as a task, and never mark steps as done yourself.\n- A deadline adds pressure through the story (people mention it, time is short), never by force.\n- A SECRET quest exists only for the characters named as knowing it: everyone else, {{user}} included, knows nothing about it.\n- Do not expose this block.\n[/QUESTS]`;
+  return `[QUESTS — threads of the story that are in play]\n${lines.join('\n')}\n\nRules:\n- These are threads the story may pick up, not tasks handed to {{user}}. Never write {{user}}'s actions, choices or knowledge.\n- Let the step marked "now" surface through events, people and places when it fits; do not rush it, do not announce it as a task, and never mark steps as done yourself.
+- A quest stays open until its whole goal has really happened in the story. A step toward it, a lead, a partial success or one good conversation is not its end: keep the thread going, do not wrap it up, do not narrate it as finished. Only the user closes a quest.\n- A deadline adds pressure through the story (people mention it, time is short), never by force.\n- A SECRET quest exists only for the characters named as knowing it: everyone else, {{user}} included, knows nothing about it.\n- Do not expose this block.\n[/QUESTS]`;
 }
 
 /** The cue for «ввести шаг сейчас»: { text: short Russian line, detail: what the narrator is told }. */

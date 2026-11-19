@@ -1,9 +1,8 @@
 import { button, element } from '../helpers.js';
 
 /**
- * «Персона» → which card of the library is the persona of this chat, and the AU of the chat. The card itself (looks, voice, names,
- * records about her) is written in «Мир → Персоны», in the same library and the same window as the cards of characters. The AU are a
- * list shared by all chats; each chat switches on the ones it plays (several at once).
+ * «Персона» → which card of the library is the persona of this chat. The card itself (looks, voice, names,
+ * records about her) is written in «Мир → Персоны», in the same library and the same window as the cards of characters.
  */
 export function createPersonaCardPage(ctx) {
   const snapshot = () => ctx.snapshot;
@@ -15,7 +14,7 @@ export function createPersonaCardPage(ctx) {
     catch (error) { setStatus(error?.message || String(error), true); return undefined; }
   }
 
-  const library = () => ({ enabled: true, au: [], cards: [], ...(snapshot().personaCards ?? {}) });
+  const library = () => ({ enabled: true, cards: [], ...(snapshot().personaCards ?? {}) });
   const personaCards = () => (snapshot().locationLibrary?.characters ?? []).filter(card => card.persona);
 
   function renderCardBox() {
@@ -62,32 +61,8 @@ export function createPersonaCardPage(ctx) {
     return box;
   }
 
-  function renderAu() {
-    const lib = library();
-    const on = new Set(snapshot().personaAu ?? []);
-    const box = element('div', { className: 'card' }, [
-      element('h3', { text: 'АУ' }),
-      element('p', { className: 'muted ku-small', text: 'Названия АУ общие, а какие из них играет этот чат, решаете здесь. Можно включить несколько сразу: пойдут записи всех включённых.' }),
-    ]);
-    if (!lib.au.length) box.append(element('p', { className: 'muted', text: 'АУ пока нет. Добавьте первое, например «Универ» или «Мафия».' }));
-    for (const item of lib.au) {
-      const check = element('input', { type: 'checkbox', className: 'set-switch', checked: on.has(item.id), 'aria-label': `АУ «${item.name}» включено в этом чате` });
-      check.addEventListener('change', () => attempt(() => act('onPersonaAuToggle', { id: item.id, on: check.checked }, 'persona-au-toggle'), check.checked ? `АУ «${item.name}» включено` : `АУ «${item.name}» выключено`));
-      box.append(element('div', { className: 'ku-fact' }, [
-        element('label', { className: 'ku-fact-text' }, [check, ` ${item.name}`]),
-        button('×', 'btn icon small', () => attempt(() => act('onPersonaAuRemove', { id: item.id }, 'persona-au-remove'), 'АУ удалено'), `Удалить АУ «${item.name}»`),
-      ]));
-    }
-    const name = element('input', { type: 'text', placeholder: 'Название АУ', 'aria-label': 'Название нового АУ' });
-    box.append(element('div', { className: 'row', style: { marginTop: '8px' } }, [
-      name,
-      button('Добавить АУ', 'btn small', () => attempt(async () => { await act('onPersonaAuAdd', { name: name.value }, 'persona-au-add'); name.value = ''; }, 'АУ добавлено')),
-    ]));
-    return box;
-  }
-
   function renderPersonaCard() {
-    return [renderCardBox(), renderAu()];
+    return [renderCardBox()];
   }
 
   return { renderPersonaCard };

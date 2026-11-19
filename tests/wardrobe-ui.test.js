@@ -235,3 +235,31 @@ test('Ctrl+V of a picture: with a card open it takes the picture (the old one go
     assert.ok(!calls.some(([name]) => name === 'onWardrobeAddCard'), 'no new card is made behind the open one');
   } finally { studio.destroy(); }
 });
+
+test('«Выбрать»: отмеченные карточки описываются и переводятся отдельно от остальных; в карточке есть свой «Перевести»; нет кнопки «+ Картинки»', async () => {
+  const { studio, shadow, byText, calls, jacket } = open();
+  try {
+    byText('Мужское').click();
+    assert.equal(byText('+ Картинки'), undefined, 'the only «+» is the one that creates a card');
+    assert.ok(byText('+ Создать карточку'));
+    byText('Выбрать').click();
+    const tiles = () => [...shadow.querySelectorAll('.ku-tile:not(.ku-drop)')];
+    tiles()[1].click();
+    assert.equal(shadow.querySelector('.ku-wcard'), null, 'while selecting a click ticks, not opens');
+    assert.equal(tiles()[1].classList.contains('picked'), true);
+    const translate = [...shadow.querySelectorAll('button')].find(node => /^Перевести выбранные \(1\)/.test(node.textContent));
+    assert.ok(translate, 'the button says it works on the ticked ones');
+    translate.click();
+    await flush();
+    const asked = calls.find(([name]) => name === 'onWardrobeTranslateMissing');
+    assert.equal(asked[1].cardIds.length, 1, 'only the ticked card');
+    byText('Готово').click();
+    tiles()[1].click();
+    const own = [...shadow.querySelectorAll('.ku-wcard button')].find(node => node.textContent === 'Перевести на английский');
+    assert.ok(own, 'a card has its own translation button');
+    calls.length = 0;
+    own.click();
+    await flush();
+    assert.deepEqual(calls.filter(([name]) => name === 'onWardrobeTranslateMissing').map(([, payload]) => payload.cardIds.length), [1]);
+  } finally { studio.destroy(); }
+});

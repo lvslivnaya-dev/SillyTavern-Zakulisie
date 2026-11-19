@@ -75,7 +75,7 @@ import {
   INTIMACY_STAGES, aheadGroups, stageOf, heatLevel, buildQuestsPrompt, cleanShifts, closingLine, closingShifts, currentStep, groupQuests, progressOf, questCue, questId, questsOf, dueText, daysLeft, QUEST_STATUSES,
   currentLocation,
   normalizeNames, normalizeAlias,
-  cardNameEntry, updateLibraryCharacter, privateText, stripLatinAliases, normalizePersonaCards, addBond, updateBond, removeBond, selectBonds, buildBondsPrompt, buildPersonaPrompt, findPersonaCard, migratePersonaCards, addFolder, addLibraryCharacter, addAu, removeAu,
+  cardNameEntry, updateLibraryCharacter, privateText, stripLatinAliases, normalizePersonaCards, addBond, updateBond, removeBond, selectBonds, buildBondsPrompt, buildPersonaPrompt, findPersonaCard, migratePersonaCards, addFolder, addLibraryCharacter,
   personalPieces,
   setupProgress,
   setupReminderDue,
@@ -145,7 +145,7 @@ import { inboxDirectories, newThingFiles, newTreeFiles, placeFromPath, THINGS_DI
 import { libraryDirectories, newLibraryFiles } from './src/integration/library-inbox.js';
 import { countImages, moveImages } from './src/integration/image-move.js';
 import { TEST_IMAGE, TEST_PROMPT, askAboutImage, listVisionChoices, visionSettings } from './src/integration/vision.js';
-import { hideSummarized } from './src/integration/chronicle-run.js';
+import { hideSummarized, summarizedMarks } from './src/integration/chronicle-run.js';
 import { createChronicleRunner } from './src/integration/chronicle-actions.js';
 import { getSettings, GM_METADATA_KEY, KULISY_BUILD, SCENE_PROMPT_KEY } from './src/integration/settings.js';
 import { ASSISTANTS, CUSTOM_ASSISTANT_ID, DEFAULT_GM_NAME, DEFAULT_GM_PROMPT, GM_AVATAR_MAX, GM_LIMITS, acceptProposal, addMessage, dropLastReply, buildGmPrompt, buildGmRequest, clearTalk, continueTalk, editConclusion, normalizeGm, normalizeGmSettings, parseAddresses, patchCustoms, rejectProposal, removeConclusion, resolveAssistant, setProposal, splitReply, toggleConclusion } from './src/core/gm-assistant.js';
@@ -157,17 +157,20 @@ import { pairTropeFactors, pairTropePace, pairTropes, triangleTropeFactors, tria
 import { getAnalysisTokenUsage } from './src/integration/analyzer.js';
 import { onChangeBusy, getBusy, resetBusy, withBusy } from './src/integration/busy.js';
 import { clearLog, formatLog, logEvent } from './src/integration/diagnostics.js';
-import { AUX_PURPOSES, auxGenerate, fetchAuxModels, listAuxProfiles, routedContext } from './src/integration/llm.js';
+import { AUX_PURPOSES, auxEnabledFor, auxGenerate, fetchAuxModels, listAuxProfiles, routedContext } from './src/integration/llm.js';
 import { collectRecords, triangleEdges } from './src/core/records.js';
 import { mountExtensionShell, mountWindowButtons } from './src/integration/shell.js';
 import { WINDOWS, normalizeLayout, reopenOnLoad, windowOf } from './src/ui/layout.js';
 import { mountMessageButtons } from './src/integration/message-buttons.js';
-import { mountChatOverlay, extraPanes, extraPaneHooks, mediaSection } from './src/integration/chat-overlay.js';
+import { mountChatOverlay, extraPanes, extraPaneHooks, mediaSection, DRAWER_TILES } from './src/integration/chat-overlay.js';
 import { registerWardrobeRooms } from './src/integration/overlay-wardrobe.js';
 import { scanAcquaintances } from './src/integration/acquaintance-scan.js';
 import { scanLoreSecrets } from './src/integration/secret-scan.js';
 import { guessGenders } from './src/integration/genders.js';
-import { mentionScorer, mentionedEntities, recentSceneText, semanticScorer } from './src/integration/headcanon-retrieval.js';
+import { knowersHere, mentionScorer, mentionedEntities, recentSceneText, semanticScorer } from './src/integration/headcanon-retrieval.js';
+
+/** After the headcanon lines: only those named in the brackets know a fact; whoever was not part of it must not talk as if they were. */
+const HEADCANON_RULE = 'headcanon rule: a headcanon is known only to the people named in its brackets. Whoever else is in the scene was not part of it: they do not know where it came from and do not refer to it as if they had been there.';
 import { applyGate, normalizeGate, planGate, worldEntries } from './src/integration/lore-gate.js';
 import { autoSecrets, bornAt, duplicateBuckets } from './src/core/secret-tools.js';
 import { describeBlocks } from './src/integration/prompt-overview.js';
@@ -175,6 +178,7 @@ import { classifyAutoSecrets, composeSecret, foldEvents } from './src/integratio
 import { openSecretDialog } from './src/integration/secret-dialog.js';
 import { mountSelectionChip } from './src/integration/selection-chip.js';
 import { DEFAULT_LOCAL_MODEL, LOCAL_MODELS, cosine, embedTexts } from './src/integration/embeddings.js';
+import { textSimilarities } from './src/integration/record-retrieval.js';
 import { createChatStorage } from './src/integration/storage.js';
 import { createLibraryCallbacks, createLocationLibraryStore, syncChat, syncChatCards } from './src/integration/location-library-actions.js';
 import { autoLinkNarratorCards } from './src/integration/card-links.js';
@@ -207,6 +211,21 @@ function normalizeEmbeddings(config) {
     key: String(config?.key ?? '').trim().slice(0, 500),
     model: String(config?.model ?? '').trim().slice(0, 200),
     threshold: Math.max(0, Math.min(0.95, Number(config?.threshold) || 0)),
+    recordsLimit: config?.recordsLimit == null ? 6 : Math.max(0, Math.min(40, Math.round(Number(config.recordsLimit)) || 0)),
+    chronicleLimit: config?.chronicleLimit == null ? 4 : Math.max(0, Math.min(40, Math.round(Number(config.chronicleLimit)) || 0)),
+  };
+}
+
+/** The model for translation: the same fields as the auxiliary API's (a profile or a URL, a key, a model). */
+function normalizeTranslate(raw) {
+  const mode = ['off', 'profile', 'custom'].includes(raw?.mode) ? raw.mode : 'off';
+  return {
+    mode,
+    profileId: String(raw?.profileId ?? '').slice(0, 200),
+    url: String(raw?.url ?? '').trim().slice(0, 500),
+    key: String(raw?.key ?? '').trim().slice(0, 500),
+    model: String(raw?.model ?? '').trim().slice(0, 200),
+    maxTokens: Math.max(256, Math.min(32000, Math.round(Number(raw?.maxTokens)) || 4096)),
   };
 }
 
@@ -237,6 +256,40 @@ async function initKulisy() {
   const settings = getSettings(context);
   // State of the folder «Гардероб» (see refreshInbox); declared early: the snapshot reads it.
   let inboxInfo = { available: false, count: 0, places: [], things: 0, reason: '' };
+  /**
+   * Pictures for the round marks of the heroes (instead of two letters): the portrait of the hero's card in the library (by name or alias).
+   * Only heroes who are in the library get one; the others keep their letters.
+   */
+  function portraitsOf(currentState) {
+    const norm = value => String(value ?? '').trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
+    const cards = (locationLibrary.get().characters ?? []).filter(card => card.image);
+    if (!cards.length) return {};
+    const byName = new Map();
+    for (const card of cards) for (const name of [card.name, ...(card.aliases ?? [])]) if (norm(name) && !byName.has(norm(name))) byName.set(norm(name), card.image);
+    const out = {};
+    for (const entity of Object.values(currentState.entities ?? {})) {
+      const image = [entity.name, ...(entity.aliases ?? [])].map(norm).map(name => byName.get(name)).find(Boolean);
+      if (image) out[entity.id] = imageUrl(image);
+    }
+    return out;
+  }
+  /** Who does the work of a purpose now: the auxiliary model (profile or own URL) or the chat's own one. */
+  function whoDoesPurpose(purpose) {
+    try {
+      if (!auxEnabledFor(settings, purpose)) return 'основная модель чата (та, что выбрана для чата в таверне)';
+      const aux = settings.aux ?? {};
+      if (purpose === 'translation' && settings.translate?.mode && settings.translate.mode !== 'off') {
+        const own = settings.translate;
+        if (own.mode === 'profile') return `модель для перевода, профиль «${listAuxProfiles(SillyTavern.getContext()).find(profile => profile.id === own.profileId)?.name || 'не выбран'}»`;
+        return `модель для перевода «${own.model || 'не указана'}»`;
+      }
+      if (aux.mode === 'profile') {
+        const name = listAuxProfiles(SillyTavern.getContext()).find(profile => profile.id === aux.profileId)?.name;
+        return `вспомогательная модель, профиль «${name || 'не выбран'}»`;
+      }
+      return `вспомогательная модель «${aux.model || 'не указана'}»`;
+    } catch { return 'основная модель чата'; }
+  }
   let inboxPrepared = false;
   // The same for the folder «Библиотека» (library-inbox.js): its folders follow the library's, so they are laid out again on every check.
   let libraryInboxInfo = { available: false, count: 0, reason: '' };
@@ -320,15 +373,14 @@ async function initKulisy() {
       personaCardId: personaCardNow()?.id ?? '',
       personaCardChosen: Boolean(state.ui?.personaCard),
       personaTavernDescription: tavernPersonaDescription(),
-      bondsNow: selectBonds(locationLibrary.get().bonds, { presentCardIds: presentCardIdsNow(), activeAu: state.ui?.au ?? [], knownCardIds: locationLibrary.get().characters.map(card => card.id) }).map(bond => bond.id),
+      bondsNow: selectBonds(locationLibrary.get().bonds, { presentCardIds: presentCardIdsNow(), personaCardId: personaCardNow()?.id ?? '', knownCardIds: locationLibrary.get().characters.map(card => card.id) }).map(bond => bond.id),
       bondsChat: bondsChatInfo(),
-      personaAu: state.ui?.au ?? [],
       gm: assistantView(),
       personaMismatch: Boolean(persona && chatPersona && boundPersonaName
         && boundPersonaName.toLocaleLowerCase('ru-RU') !== chatPersona.toLocaleLowerCase('ru-RU')),
       lorebooks: { available: SillyTavern.getContext().getWorldInfoNames?.() ?? [], selected: state.ui?.linkedLorebooks ?? [], cardWorlds: cardWorldNames(), tavern: tavernBooks, status: 'Этот список — книги, которые читает само Закулисье (анализ, поиск персонажей, секреты). Модели записи отправляет таверна, и только из книг, подключённых в ней самой: к карточке, персоне, чату или глобально. Исходные файлы не изменяются.' },
       settings: {
-        autoTrack: settings.autoAnalyze, widgetEnabled: settings.widget.visible, studioMulti: settings.studioMulti === true, railSide: settings.railSide === 'right' ? 'right' : 'left',
+        autoTrack: settings.autoAnalyze, widgetEnabled: settings.widget.visible, studioMulti: settings.studioMulti === true, railSide: settings.railSide === 'right' ? 'right' : 'left', drawerHidden: drawerHiddenNow(),
         maxPromptCharacters: settings.maxPromptCharacters,
         headcanonLimit: settings.headcanonLimit,
         knowledgeCandidates: settings.knowledgeCandidates,
@@ -344,6 +396,7 @@ async function initKulisy() {
         largeChangeThreshold: settings.largeChangeThreshold,
         chronicle: structuredClone(settings.chronicle ?? {}),
         aux: structuredClone(settings.aux),
+        translate: structuredClone(settings.translate),
         embeddings: structuredClone(settings.embeddings),
         loreGate: normalizeGate(settings.loreGate),
         ...Object.fromEntries(TOGGLE_SETTINGS.map(key => [key, settings[key] !== false])),
@@ -359,6 +412,7 @@ async function initKulisy() {
       leaks: openLeaks(),
       slips: openSlips(),
       factorHits: factorHits(),
+      entityPortraits: (() => { try { return portraitsOf(state); } catch { return {}; } })(),
       tavernCharacters: (() => { try { return (SillyTavern.getContext().characters ?? []).filter(item => item?.avatar).map(item => ({ avatar: String(item.avatar), name: String(item.name ?? item.avatar) })); } catch { return []; } })(),
       narratorNow: currentNarrator(),
       calendar: calendarView(state),
@@ -564,7 +618,9 @@ async function initKulisy() {
       includeTensions: settings.sendTensions !== false,
       includeFactors: settings.sendFactors !== false,
       maxCharacters: Number(settings.maxPromptCharacters) || 4000,
-    }) + (settings.sendHeadcanons !== false && sceneHeadcanons.length ? `\n${sceneHeadcanons.join('\n')}` : '');
+      similarity: semantic.size ? semanticNear : null,
+      semanticLimit: semantic.size ? Number(settings.embeddings?.recordsLimit ?? 6) : 0,
+    }) + (settings.sendHeadcanons !== false && sceneHeadcanons.length ? `\n${sceneHeadcanons.join('\n')}\n${HEADCANON_RULE}` : '');
   }
 
   /** { entityId: 'male' | 'female' } from the cards the characters (and the persona) are tied to. */
@@ -643,7 +699,36 @@ async function initKulisy() {
   // Why the preview shows what it shows: how many are on, how many fit the scene, how they were picked.
   let headcanonInfo = { enabled: 0, picked: 0, method: 'mentions', disabled: false };
 
+  // Closeness of the records and the chronicle to the last posts by meaning (embeddings): text → 0..1 cosine. Empty = no meaning, the old order.
+  let semantic = new Map();
+  const semanticNear = item => semantic.get(String(item?.text ?? '').trim()) ?? null;
+  let semanticInfo = { method: 'off', count: 0 };
+
+  /** Embed the texts that compete for the budget (memories, tensions, library records, chronicle) against the last posts. Never blocks a reply for long. */
+  async function prepareSemantics(chat = SillyTavern.getContext().chat) {
+    const config = settings.embeddings ?? {};
+    if (config.mode !== 'local' && config.mode !== 'api') { semantic = new Map(); semanticInfo = { method: 'off', count: 0 }; return; }
+    try {
+      const texts = [
+        ...activeSummaries(chronicleState()).map(item => item.text),
+        ...['memories', 'tensions'].flatMap(kind => collectRecords(state, kind).filter(item => !item.disabled).map(item => item.text)),
+        ...(locationLibrary.get().bonds ?? []).filter(bond => !bond.off).map(bond => bond.text),
+      ];
+      semantic = await textSimilarities(config, recentSceneText(chat), texts, EMBEDDING_WAIT_MS);
+      semanticInfo = { method: 'semantic', count: semantic.size };
+    } catch (error) {
+      semantic = new Map();
+      semanticInfo = { method: 'off', count: 0, note: error?.message === 'timeout' ? 'Модель эмбеддингов ещё загружается: на эту генерацию записи и хроника выбираются без смысла.' : `Смысловой отбор записей недоступен (${error?.message ?? error}).` };
+      logEvent('warn', 'Смысловой отбор записей и хроники не сработал', error);
+    }
+  }
+
   async function prepareHeadcanons(chat = SillyTavern.getContext().chat) {
+    await prepareHeadcanonsOnly(chat);
+    await prepareSemantics(chat);
+  }
+
+  async function prepareHeadcanonsOnly(chat = SillyTavern.getContext().chat) {
     const enabled = listHeadcanonPairs(state).reduce((sum, pair) => sum + pair.enabledCount, 0);
     try {
       if (settings.sendHeadcanons === false || !enabled) {
@@ -659,7 +744,7 @@ async function initKulisy() {
         score,
         limit: Math.max(1, Math.min(30, Number(settings.headcanonLimit) || 8)),
         maxCharacters: 1500,
-        pinnedFor: pair => pair.ids.every(id => inScene.has(id)),
+        pinnedFor: (pair, item) => knowersHere(state, item, pair, inScene).here > 0,
       });
       headcanonInfo = { enabled, picked: sceneHeadcanons.length, method, disabled: false, ...(note ? { note } : {}) };
     } catch (error) {
@@ -779,11 +864,12 @@ async function initKulisy() {
   }
 
   function refreshPrompt() {
+    syncPersonaSecrets();
     const ctx = SillyTavern.getContext();
     // The chronicle has its own switch and its own place (before the chat history).
     const chronicleSettings = chronicleConfig(settings.chronicle);
     const chronicleBlock = settings.enabled && chronicleSettings.enabled
-      ? buildChroniclePrompt(chronicleState(), { maxCharacters: chronicleSettings.maxPromptCharacters }) : '';
+      ? buildChroniclePrompt(chronicleState(), { maxCharacters: chronicleSettings.maxPromptCharacters, similarity: semantic.size ? semanticNear : null, semanticLimit: Number(settings.embeddings?.chronicleLimit ?? 4) }) : '';
     chronicleTokens = chronicleBlock ? countTokens(chronicleBlock) : 0;
     promptParts.chronicle = chronicleBlock;
     updateChroniclePrompt(ctx, chronicleBlock);
@@ -840,7 +926,7 @@ async function initKulisy() {
         const byEntity = cardsByEntity(state, locationLibrary.get());
         const presentCardIds = presentIds(state).filter(id => id !== personaId).map(id => byEntity.get(id)?.id).filter(Boolean);
         const cardNames = new Map((locationLibrary.get().characters ?? []).map(card => [card.id, card.name]));
-        personaBlock = buildPersonaPrompt(found, { present, activeAu: state.ui?.au ?? [], presentCardIds, cardNames });
+        personaBlock = buildPersonaPrompt(found, { present, presentCardIds, cardNames });
       }
     } catch (error) { console.error('[Kulisy] Persona prompt failed.', error); }
     personaTokens = personaBlock ? countTokens(personaBlock) : 0;
@@ -851,7 +937,7 @@ async function initKulisy() {
     try {
       if (settings.enabled && settings.sendBonds !== false) {
         const lib = locationLibrary.get();
-        bondsBlock = buildBondsPrompt(lib.bonds, { presentCardIds: presentCardIdsNow(), activeAu: state.ui?.au ?? [], cardNames: new Map((lib.characters ?? []).map(card => [card.id, card.name])) });
+        bondsBlock = buildBondsPrompt(lib.bonds, { presentCardIds: presentCardIdsNow(), personaCardId: personaCardNow()?.id ?? '', similarity: semantic.size ? semanticNear : null, semanticLimit: Number(settings.embeddings?.recordsLimit ?? 6), cardNames: new Map((lib.characters ?? []).map(card => [card.id, card.name])) });
       }
     } catch (error) { console.error('[Kulisy] Bonds prompt failed.', error); }
     bondsTokens = bondsBlock ? countTokens(bondsBlock) : 0;
@@ -1116,9 +1202,23 @@ ${replyText}` });
     return { kind: 'sillytavern-kulisy', exportedAt: new Date().toISOString(), state };
   }
 
+  /** The buttons of the drawer the user switched off (only the known ones). */
+  function drawerHiddenNow() {
+    return (Array.isArray(settings.drawerHidden) ? settings.drawerHidden : []).filter(id => DRAWER_TILES.some(tile => tile.id === id));
+  }
+
   async function changeSettings({ settings: patch }) {
     if (Object.hasOwn(patch, 'autoTrack')) settings.autoAnalyze = Boolean(patch.autoTrack);
     if (Object.hasOwn(patch, 'widgetEnabled')) settings.widget.visible = Boolean(patch.widgetEnabled);
+    if (Object.hasOwn(patch, 'drawerTile')) {
+      const { id, show } = patch.drawerTile ?? {};
+      if (DRAWER_TILES.some(tile => tile.id === id)) {
+        const hidden = new Set(drawerHiddenNow());
+        if (show) hidden.delete(id); else hidden.add(id);
+        settings.drawerHidden = [...hidden];
+        refreshChatOverlay();
+      }
+    }
     if (Object.hasOwn(patch, 'railSide')) { settings.railSide = patch.railSide === 'right' ? 'right' : 'left'; refreshChatOverlay(); }
     if (Object.hasOwn(patch, 'studioMulti')) { settings.studioMulti = Boolean(patch.studioMulti); if (!settings.studioMulti) closePanels(); }
     for (const key of TOGGLE_SETTINGS) if (Object.hasOwn(patch, key)) settings[key] = Boolean(patch[key]);
@@ -1157,6 +1257,7 @@ ${replyText}` });
       });
     }
     if (patch.aux && typeof patch.aux === 'object') settings.aux = normalizeAux({ ...settings.aux, ...patch.aux });
+    if (patch.translate && typeof patch.translate === 'object') settings.translate = normalizeTranslate({ ...settings.translate, ...patch.translate });
     if (patch.wardrobeVision && typeof patch.wardrobeVision === 'object') settings.wardrobeVision = visionSettings({ ...settings.wardrobeVision, ...patch.wardrobeVision });
     if (patch.embeddings && typeof patch.embeddings === 'object') {
       settings.embeddings = normalizeEmbeddings({ ...settings.embeddings, ...patch.embeddings });
@@ -1749,7 +1850,22 @@ ${replyText}` });
     },
     onMediaRemove: ({ id }) => {
       if (mediaDock.current()?.id === id) mediaDock.stop();
+      const cover = normalizeMedia(settings.mediaLibrary).items.find(item => item.id === id)?.image;
       saveMedia(library => removeMediaItem(library, id));
+      if (cover) deleteWardrobeImage(SillyTavern.getContext(), cover).catch(() => {});
+    },
+    /** A cover of your own for the gallery view of the player. */
+    onMediaSetImage: async ({ id, imageDataUrl }) => {
+      const old = normalizeMedia(settings.mediaLibrary).items.find(item => item.id === id)?.image;
+      const image = await uploadWardrobeImage(SillyTavern.getContext(), imageDataUrl, uniqueId('cover'), 'kulisy-media');
+      saveMedia(library => updateMediaItem(library, id, { image }));
+      if (old) deleteWardrobeImage(SillyTavern.getContext(), old).catch(() => {});
+      return image;
+    },
+    onMediaClearImage: async ({ id }) => {
+      const old = normalizeMedia(settings.mediaLibrary).items.find(item => item.id === id)?.image;
+      saveMedia(library => updateMediaItem(library, id, { image: '' }));
+      if (old) deleteWardrobeImage(SillyTavern.getContext(), old).catch(() => {});
     },
     onMediaPlay: ({ id }) => {
       const item = normalizeMedia(settings.mediaLibrary).items.find(entry => entry.id === id);
@@ -1796,9 +1912,9 @@ ${replyText}` });
     });
 
   const songsCallbacks = {
-    onSongAdd: ({ title, artist, folderId }) => {
+    onSongAdd: ({ title, artist, folderId, ...more }) => {
       let made = null;
-      saveSongs(library => { made = addSong(library, { title, artist, folderId }); return made.library; });
+      saveSongs(library => { made = addSong(library, { title, artist, folderId, aliases: more.aliases, keys: more.keys, mood: more.mood, sound: more.sound, lyrics: more.lyrics }); return made.library; });
       return made.song;
     },
     onSongUpdate: ({ id, patch }) => saveSongs(library => updateSong(library, id, patch)),
@@ -1825,6 +1941,13 @@ ${replyText}` });
     },
     /** What this chat does with a song: { op: 'pin' | 'unpin' | 'mute' | 'unmute', songId, mode, singerId }. */
     onSongChat: async ({ op, songId, mode, singerId }) => {
+      if (op === 'favorite') {
+        // a star on a song: it is kept at hand in the drawer (the library is shared by all chats)
+        const found = normalizeSongs(settings.songLibrary).songs.find(song => song.id === songId);
+        if (!found) return false;
+        saveSongs(library => updateSong(library, songId, { favorite: !found.favorite }));
+        return true;
+      }
       const ids = normalizeSongs(settings.songLibrary).songs.map(song => song.id);
       let current = normalizeSongState(state.ui?.songs, { songIds: ids });
       if (op === 'pin') current = pinSong(current, songId, { mode, singerId });
@@ -2222,6 +2345,46 @@ ${replyText}` });
   function personaCardNow() {
     const entity = state.ui?.personaId ? state.entities[state.ui.personaId] : null;
     return findPersonaCard(locationLibrary.get().characters, { id: state.ui?.personaCard, avatar: boundPersonaAvatar(), names: entity ? [entity.name, ...(entity.aliases ?? [])] : [] });
+  }
+
+  /**
+   * The secret records of the persona's card become secrets of the scene (events «own», with the record's id), kept in step with the card:
+   * a new record is added, a changed one updated, one switched off, made ordinary or deleted is taken away. Known to her and to whom the record names.
+   */
+  let personaSecretsKey = '';
+  async function syncPersonaSecrets() {
+    try {
+      const card = personaCardNow();
+      const personaId = state.ui?.personaId;
+      if (!card || !personaId || !state.entities[personaId]) return;
+      const wanted = (card.records ?? []).filter(record => record.secret && !record.off && String(record.text ?? '').trim());
+      const entityOfCard = new Map([...cardOfEntity()].map(([entityId, cardId]) => [cardId, entityId]));
+      const knowersOf = record => [...new Set([personaId, ...(record.knows ?? []).map(name => resolveEntityId(state, name)), ...(record.knowsIds ?? []).map(id => entityOfCard.get(id))].filter(id => id && state.entities[id]))];
+      const key = JSON.stringify([personaId, wanted.map(record => [record.id, record.text, record.condition, knowersOf(record)]), (state.knowledge?.events ?? []).filter(event => event.personaRecord).map(event => event.id)]);
+      if (key === personaSecretsKey) return;
+      const events = state.knowledge?.events ?? [];
+      const stamp = { transactionId: uniqueId('manual'), reason: 'Секреты карточки персоны', timestamp: new Date().toISOString() };
+      const operations = [];
+      for (const record of wanted) {
+        const text = String(record.text).replace(/\s+/g, ' ').trim();
+        const label = text.length > 100 ? `${text.slice(0, 97)}…` : text;
+        const existing = events.find(event => event.personaRecord === record.id);
+        if (!existing) {
+          operations.push(createOperation('event.add', { item: { id: uniqueId('event'), text: label, witnessIds: knowersOf(record), secret: true, own: true, detail: record.text, ...(record.condition ? { condition: record.condition } : {}), personaRecord: record.id, createdAt: new Date().toISOString() } }, stamp));
+        } else if (existing.detail !== String(record.text).trim() || (existing.condition ?? '') !== (record.condition ?? '') || existing.text !== label) {
+          operations.push(createOperation('event.update', { eventId: existing.id, changes: { text: label, detail: record.text, condition: record.condition ?? '' } }, stamp));
+        }
+      }
+      for (const event of events) {
+        if (event.personaRecord && !wanted.some(record => record.id === event.personaRecord)) operations.push(createOperation('event.remove', { eventId: event.id }, stamp));
+      }
+      personaSecretsKey = key;
+      if (!operations.length) return;
+      await commit(applyOperations(state, operations), true);
+      personaSecretsKey = '';
+    } catch (error) {
+      logEvent('warn', 'Секреты карточки персоны не перенеслись в сцену', error);
+    }
   }
 
   /** Which library card each character of this chat has: the attached ones, and the persona's own. */
@@ -3603,24 +3766,6 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       notify();
       return added;
     },
-    onPersonaAuAdd: ({ name }) => savePersonaCards(library => addAu(library, name)),
-    onPersonaAuRemove: async ({ id }) => {
-      savePersonaCards(library => removeAu(library, id));
-      if ((state.ui?.au ?? []).includes(id)) {
-        const next = structuredClone(state);
-        next.ui.au = next.ui.au.filter(item => item !== id);
-        await commit(next, true);
-      }
-    },
-    /** The AU this chat plays (several at once): the records of those AU go. */
-    onPersonaAuToggle: async ({ id, on }) => {
-      const next = structuredClone(state);
-      next.ui ??= {};
-      const set = new Set(next.ui.au ?? []);
-      if (on) set.add(id); else set.delete(id);
-      if (set.size) next.ui.au = [...set]; else delete next.ui.au;
-      await commit(next, true);
-    },
     /** The case forms of the words of a card's names, asked of the model. Nothing is saved: the editor puts them into its draft. → [{ word, same, gen… }] */
     onCardNamesFill: async ({ name, aliases, words }) => {
       if (isGenerationActive()) await waitForGenerationEnd();
@@ -3893,7 +4038,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       await commitHeadcanons(headcanons);
       return added;
     },
-    onUpdateHeadcanon: async ({ key, id, text, enabled, pinned }) => {
+    onUpdateHeadcanon: async ({ key, id, text, enabled, pinned, knownBy }) => {
       assertHeadcanonPair(key);
       await commitHeadcanons(updateHeadcanons(state, key, entry => {
         const item = entry.items.find(candidate => candidate.id === id);
@@ -3905,6 +4050,12 @@ ${card.personality ?? card.data?.personality ?? ''}`;
         }
         if (enabled != null) item.enabled = Boolean(enabled);
         if (pinned != null) { if (pinned) item.pinned = true; else delete item.pinned; }
+        // Who knows it: the group always does; the others only when the fact says so. Nobody extra: nothing is kept.
+        if (knownBy != null) {
+          const members = headcanonPairIds(key);
+          const extra = [...new Set((Array.isArray(knownBy) ? knownBy : []).map(String).filter(who => state.entities[who] && !members.includes(who)))].slice(0, 20);
+          if (extra.length) item.knownBy = [...members, ...extra]; else delete item.knownBy;
+        }
       }));
     },
     // «Вспомнить в следующем ответе»: a one-off stage cue with the record's text.
@@ -4039,6 +4190,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     },
     onRefreshScene: async () => { await prepareHeadcanons(); refreshPrompt(); },
     onAuxProfiles: () => listAuxProfiles(SillyTavern.getContext()),
+    onWhoDoes: ({ purpose }) => whoDoesPurpose(purpose),
     onLocalEmbeddingModels: () => Object.entries(LOCAL_MODELS).map(([id, model]) => ({ id, label: model.label })),
     /** Embeds two short texts with the settings being edited; the first local run downloads the model. */
     onTestEmbeddings: async ({ embeddings }) => {
@@ -4057,6 +4209,17 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     onAuxPurposes: () => ({ ...AUX_PURPOSES }),
     /** Where pictures go and what the folder plugin says; never throws (a missing plugin is a normal answer). */
     onWardrobeInboxRefresh: () => refreshInbox(),
+    /** The folder of a section (shelf / gender / section) is made when the section is opened, not all 90 up front. Never throws. */
+    onWardrobePrepareFolder: async ({ shelf, gender, category } = {}) => {
+      try {
+        if (!inboxInfo.available) return false;
+        await prepareInbox(SillyTavern.getContext(), [treeDirFor({ shelf, gender, category })]);
+        return true;
+      } catch (error) {
+        logEvent('warn', 'Папку раздела не удалось создать', error);
+        return false;
+      }
+    },
     onImageStorageStatus: async () => ({
       storage: settings.imageStorage === 'folder' ? 'folder' : 'server',
       plugin: await folderStorageStatus(),
@@ -4098,6 +4261,15 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     },
     onFetchAuxModels: ({ url, key }) => fetchAuxModels(SillyTavern.getContext(), url, key),
     /** A tiny request with the settings being edited (not yet saved). */
+    /** The same tiny request for the translation model being edited. */
+    onTestTranslate: async ({ translate }) => {
+      const candidate = normalizeTranslate({ ...settings.translate, ...translate });
+      if (candidate.mode === 'off') throw new Error('Модель для перевода выключена: перевод идёт, как у остальных функций.');
+      const started = Date.now();
+      const reply = await auxGenerate(SillyTavern.getContext(), { ...settings.aux, ...candidate }, [{ role: 'user', content: 'Translate into English, reply with the translation only: «привет».' }]);
+      logEvent('info', `Проверка модели для перевода: ответ за ${Date.now() - started} мс`);
+      return `Ответ получен за ${((Date.now() - started) / 1000).toFixed(1)} с: «${String(reply).trim().slice(0, 60)}»`;
+    },
     onTestAux: async ({ aux }) => {
       const candidate = normalizeAux({ ...settings.aux, ...aux });
       if (candidate.mode === 'off') throw new Error('Вспомогательный API выключен.');
@@ -4120,6 +4292,8 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       context.saveSettingsDebounced();
     },
     directionPresets,
+    // The pages that moved into the settings window of the tavern (settings, history, checks, dice, names): a link to one opens it there.
+    onMoved: (page, extra) => (controller?.personaBridge?.openSettingsPage ? controller.personaBridge.openSettingsPage(page, extra) : false),
     // The persona window is the former Pudrenitsa's: Kulisy only embeds the card editor into it.
     onOpenPersonas: avatar => controller?.personaBridge?.personaWindow?.open?.(avatar),
   });
@@ -4387,8 +4561,8 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       logEvent('warn', `${label}: возможная утечка — ${next.entities[leak.entityId]?.name ?? leak.entityId} знает о «${next.knowledge?.events?.find(event => event.id === leak.eventId)?.text ?? leak.eventId}»${leak.quote ? `: «${leak.quote}»` : ''}`);
     }
     const headcanonIds = [];
-    for (const { key, text } of applied.headcanons ?? []) {
-      const added = addHeadcanons(next, key, [text], { source: 'auto', messageId: messageIndex });
+    for (const { key, text, knownBy } of applied.headcanons ?? []) {
+      const added = addHeadcanons(next, key, [{ text, knownBy }], { source: 'auto', messageId: messageIndex });
       next = { ...next, ui: { ...next.ui, headcanons: added.headcanons } };
       headcanonIds.push(...added.ids);
     }
@@ -4801,33 +4975,8 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       playing: chat.playing.map(item => ({ songId: item.songId, title: label(item.songId), artist: byId.get(item.songId)?.artist ?? '', mode: item.mode, singerId: item.singerId })),
       found: (songsReport?.found ?? []).filter(item => byId.has(item.songId)).map(item => ({ songId: item.songId, title: item.title, why: item.why, muted: item.muted })),
       muted: chat.muted.map(id => ({ songId: id, title: label(id) })),
-      library: library.songs.map(song => ({ songId: song.id, title: song.title, artist: song.artist })),
+      library: library.songs.map(song => ({ songId: song.id, title: song.title, artist: song.artist, favorite: song.favorite === true })),
     };
-  }
-
-  /**
-   * «АУ не выбрана»: cards in play (the persona's and the characters') hold sections or records written for an AU, but this chat plays none,
-   * so none of them reaches the narrator. Null when there is nothing to warn about.
-   */
-  function auWarningNow() {
-    try {
-      const lib = normalizePersonaCards(settings.personaCards);
-      if (!lib.au.length || (state.ui?.au ?? []).length) return null;
-      const ids = new Set(cardOfEntity().values());
-      const names = [];
-      let hidden = 0;
-      for (const card of locationLibrary.get().characters ?? []) {
-        if (!ids.has(card.id)) continue;
-        const count = (card.sections ?? []).filter(section => section.au?.length).length + (card.records ?? []).filter(record => record.au?.length).length;
-        if (!count) continue;
-        names.push(card.name);
-        hidden += count;
-      }
-      return hidden ? { names, hidden, chat: String(SillyTavern.getContext().chatId ?? ''), avatar: personaCardNow()?.avatar ?? '' } : null;
-    } catch (error) {
-      logEvent('warn', 'Проверка АУ не удалась', error);
-      return null;
-    }
   }
 
   /** The calendar for the drawer: the month around the story's date and the next events (deadlines of the quests too); null without a date. */
@@ -4884,6 +5033,7 @@ ${card.personality ?? card.data?.personality ?? ''}`;
 
   /** Chips: everyone on stage, plus whoever the last messages mention (likely to come on). */
   function overlayView() {
+    const portraits = (() => { try { return portraitsOf(state); } catch { return {}; } })();
     const enabled = settings.enabled && settings.trackKnowledge !== false;
     const personaId = state.ui?.personaId || '';
     const here = new Set(presentIds(state));
@@ -4901,11 +5051,13 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     const nameOf = id => state.entities[id]?.name ?? id;
     const director = settings.director ?? {};
     return {
-      auWarning: enabled ? auWarningNow() : null,
+      chatId: String(SillyTavern.getContext().chatId ?? ''),
       setup: (() => { const setup = setupSnapshot(); return { due: setupReminderDue({ enabled: setup.enabled, remind: setup.remind, off: setup.off }, setup.progress), done: setup.progress.done, total: setup.progress.total, steps: setup.steps.map(step => ({ id: step.id, title: step.title, tab: step.tab, required: step.required, done: step.done })), chat: String(SillyTavern.getContext().chatId ?? '') }; })(),
       chips: settings.enabled && settings.sceneChips !== false,
       railSide: settings.railSide === 'right' ? 'right' : 'left',
-      cast: ids.map(id => ({ id, name: state.entities[id].name, present: here.has(id), persona: id === personaId, silent: silent.get(id) ?? 0 })),
+      castLook: settings.castLook === 'icons' ? 'icons' : 'list',
+      drawerHidden: drawerHiddenNow(),
+      cast: ids.map(id => ({ id, name: state.entities[id].name, present: here.has(id), persona: id === personaId, silent: silent.get(id) ?? 0, portrait: portraits[id] ?? state.entities[id].avatar ?? '' })),
       director: {
         open: director.open === true,
         silenceAfter: Math.max(0, Math.round(Number(director.silenceAfter ?? 4)) || 0),
@@ -5046,6 +5198,8 @@ ${card.personality ?? card.data?.personality ?? ''}`;
     },
     onOpenStudio: tab => openStudioTab(tab),
     onOpenPersonas: avatar => controller?.personaBridge?.personaWindow?.open?.(avatar),
+    /** The weather sounds (src/pud/ui/weather-sound.js) live in the «Календарь и погода» window; null while that module is off. */
+    onSoundPanel: () => controller?.personaBridge?.soundPanel ?? null,
     onSetupOff: () => setupCallbacks.onSetupOff({ off: true }).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье')),
     onCue: async cue => {
       try {
@@ -5069,6 +5223,12 @@ ${card.personality ?? card.data?.personality ?? ''}`;
         const library = normalizeNoteLibrary(settings.narratorNotes);
         const saved = library.find(item => item.id === id);
         const count = replyCountOf(SillyTavern.getContext().chat);
+        const sameWords = (left, right) => String(left ?? '').trim().toLocaleLowerCase('ru-RU') === String(right ?? '').trim().toLocaleLowerCase('ru-RU');
+        const everyOfPin = value => Math.max(0, Math.round(Number(value)) || 0);
+        // The same words, with the same cooldown, are already pinned here: say so instead of «закреплено» again.
+        const alreadyHere = (words, cooldown) => (directionState().pins ?? []).some(pin => sameWords(pin.text, words) && everyOfPin(pin.every) === everyOfPin(cooldown));
+        const alreadyForAll = (words, cooldown) => normalizeNoteLibrary(settings.narratorPins).some(pin => sameWords(pin.text, words) && everyOfPin(pin.every) === everyOfPin(cooldown));
+        const pinnedForAll = words => normalizeNoteLibrary(settings.narratorPins).some(pin => sameWords(pin.text, words));
         if (action === 'save') {
           settings.narratorNotes = saveNote(library, { text, every });
           context.saveSettingsDebounced();
@@ -5082,23 +5242,29 @@ ${card.personality ?? card.data?.personality ?? ''}`;
           settings.narratorNotes = removeNote(library, id);
           context.saveSettingsDebounced();
         } else if (action === 'pin') {
-          settings.narratorNotes = saveNote(library, { text, every });
-          context.saveSettingsDebounced();
+          // Only for THIS chat: the text is not put into the shared «Мои указания» (that list is for all chats), and it cannot be pinned twice.
+          if (pinnedForAll(text)) throw new Error('Уже закреплено: это указание закреплено во всех чатах.');
+          if (alreadyHere(text, every)) throw new Error('Уже закреплено в этом чате.');
           await saveDirection(pinNote(directionState(), { text, every }));
           globalThis.toastr?.success?.('Закреплено: уйдёт со следующим ответом', 'Закулисье');
         } else if (action === 'pin-saved') {
           if (!saved) throw new Error('Такого указания уже нет.');
+          if (pinnedForAll(saved.text)) throw new Error('Уже закреплено: это указание закреплено во всех чатах.');
+          if (alreadyHere(saved.text, saved.every)) throw new Error('Уже закреплено в этом чате.');
           await saveDirection(pinNote(directionState(), { text: saved.text, every: saved.every }));
           globalThis.toastr?.success?.('Закреплено: уйдёт со следующим ответом', 'Закулисье');
         } else if (action === 'pin-all' || action === 'pin-all-saved') {
           // For ALL chats: kept in the settings; each chat counts its own cooldown.
           const source = action === 'pin-all' ? { text, every } : saved;
           if (!source) throw new Error('Такого указания уже нет.');
+          if (alreadyForAll(source.text, source.every)) throw new Error('Уже закреплено во всех чатах.');
           if (action === 'pin-all') settings.narratorNotes = saveNote(library, { text, every });
           const pins = normalizeNoteLibrary(settings.narratorPins);
           if (pins.length >= 10 && !pins.some(pin => pin.text.toLocaleLowerCase('ru-RU') === String(source.text).trim().toLocaleLowerCase('ru-RU'))) throw new Error('Для всех чатов закреплено уже 10: открепите лишнее.');
           settings.narratorPins = saveNote(pins, { text: source.text, every: source.every });
           context.saveSettingsDebounced();
+          const here = (directionState().pins ?? []).find(pin => sameWords(pin.text, source.text));
+          if (here) await saveDirection(unpinNote(directionState(), here.id)); // the pin of this chat is replaced by the one for all chats
           globalThis.toastr?.success?.('Закреплено для всех чатов: уйдёт со следующим ответом', 'Закулисье');
         } else if (action === 'unpin-all') {
           settings.narratorPins = removeNote(normalizeNoteLibrary(settings.narratorPins), id);
@@ -5155,6 +5321,11 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       const send = document.getElementById('send_but');
       if (send) send.click();
       else Promise.resolve(SillyTavern.getContext().generate?.('normal')).catch(error => globalThis.toastr?.error?.(error.message, 'Закулисье'));
+    },
+    onCastLook: look => {
+      settings.castLook = look === 'icons' ? 'icons' : 'list';
+      context.saveSettingsDebounced();
+      refreshChatOverlay();
     },
     onToggleOpen: open => {
       settings.director ??= {};
@@ -5309,6 +5480,15 @@ ${card.personality ?? card.data?.personality ?? ''}`;
   globalThis.Kulisy = controller;
   // What the persona window (the former Pudrenitsa) needs from Kulisy: the card of a persona, made on demand, and its editor to embed.
   controller.personaBridge = {
+    /** How many chat messages the chronicle keeps from the model right now (the same rule as the interceptor): the counter in the chat menu shows it. */
+    chronicleHidden() {
+      try {
+        const config = chronicleConfig(settings.chronicle);
+        if (!settings.enabled || !config.enabled || !config.hideSummarized) return 0;
+        const chat = SillyTavern.getContext().chat ?? [];
+        return summarizedMarks(chat, normalizeChronicle(state.ui?.chronicle)).filter(mark => !chat[mark.messageIndex]?.is_system).length;
+      } catch { return 0; }
+    },
     // страницы шторки от Закулисья («Повторы», «Нити», «Эмоции», «График»)
     panes: extraPanes,
     paneHooks: extraPaneHooks,
@@ -5374,7 +5554,19 @@ ${card.personality ?? card.data?.personality ?? ''}`;
       overview: (scaleIds, window) => relationOverview(state, scaleIds, window),
       shifts: limit => recentShifts(state, limit),
     },
-    createEditor: (container, { onGear } = {}) => createRelationshipStudio({ store, callbacks, open: false, container, embedCard: true, onGear, directionPresets, layout: settings.studio }),
+    /** The context a purpose (analysis, translation...) is routed through: the auxiliary model when it is on for it, else the chat's own. */
+    routedContext: purpose => routedContext(SillyTavern.getContext(), settings, purpose),
+    /** Who does the work of a purpose now, in words: «вспомогательная модель: …» or «основная модель чата». */
+    whoDoes: purpose => whoDoesPurpose(purpose),
+    /** One page of the Studio (a settings section, the history...) inside the settings window of the tavern; drawn only while `isVisible()`. */
+    createPage: (container, spec, isVisible) => createRelationshipStudio({
+      store, callbacks, open: false, container, embedPage: spec, isVisible, directionPresets, layout: settings.studio,
+    }),
+    createEditor: (container, { onGear } = {}) => createRelationshipStudio({
+      store, callbacks, open: false, container, embedCard: true, onGear, directionPresets, layout: settings.studio,
+      // The «Шкаф» of the persona's card: the big wardrobe window on that card's closet (the card id is in wardrobeFocus already).
+      onCloset: () => { try { openStudioTab('wardrobe'); } catch (error) { console.error('[Kulisy] The closet window did not open.', error); } },
+    }),
   };
   // manifest.json → generate_interceptor: runs before SillyTavern assembles the prompt,
   // so headcanons are picked for the scene that is about to be written.

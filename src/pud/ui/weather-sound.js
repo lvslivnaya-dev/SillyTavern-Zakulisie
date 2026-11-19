@@ -1,7 +1,7 @@
 /**
  * «Звуки погоды»: тихий фон под текущую погоду сюжета. Файлы приносит сама Аня (они лежат в браузере, в IndexedDB,
  * и никуда не уходят), расширение только проигрывает. Петля сделана внахлёст, со случайным стартом и медленным
- * «дыханием» громкости, чтобы повтор не бросался в глаза. Звук можно выключить в настройках и поставить на паузу в шторке.
+ * «дыханием» громкости, чтобы повтор не бросался в глаза. Звук настраивается в окне «Календарь и погода» и ставится на паузу в шторке.
  */
 import { report } from '../core/guard.js';
 import {
@@ -14,7 +14,6 @@ const DB_NAME = 'pud-weather-sounds';
 const STORE = 'files';
 const MAX_BYTES = 40 * 1024 * 1024;
 const FADE_SEC = 3;
-const escapeHtml = text => String(text ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 
 /** Хранилище файлов в IndexedDB: вид погоды → { name, blob }. Без IndexedDB (старый браузер) всё молча пусто. */
 export function createIdbStore(view) {
@@ -152,9 +151,7 @@ export function createAudioEngine(view) {
  * @param {{ context: any, settings: any, save: () => void, shared?: any, bridge?: any, storage?: any, createEngine?: Function }} deps
  */
 export function startWeatherSound(doc, { context, settings, save, shared = {}, bridge = null, storage = null, createEngine = createAudioEngine }) {
-  const tab = shared.hub?.addTab?.('sounds', 'Звуки погоды', 'moon');
   const view = doc.defaultView;
-  const pane = tab?.pane;
   const store = storage ?? createIdbStore(view);
   const engine = createEngine(view);
   settings.weatherSound = normalizeWeatherSound(settings.weatherSound);
@@ -237,72 +234,51 @@ export function startWeatherSound(doc, { context, settings, save, shared = {}, b
   const onFirstGesture = () => { engine.resume(); sync(); };
   doc.addEventListener('pointerdown', onFirstGesture, { once: true, capture: true });
 
-  // ───────── вкладка
+  // ───────── панель в окне «Календарь и погода» (рисует её сама страница календаря; здесь только состояние и действия)
   async function refreshNames() { names = await store.names(); }
-  function render() {
-    if (!pane) return;
-    const c = cfg();
-    pane.innerHTML = `
-      <h3>Звуки погоды</h3>
-      <p class="pud-hint">Тихий фон под погоду сюжета: дождь, ветер, гроза. Файлы вы выбираете сами (звук с вашего компьютера, любой формат, который читает браузер: mp3, ogg, wav). Они остаются в браузере и никуда не отправляются; Слива их только проигрывает. Для спокойной петли берите записи подлиннее (от минуты): стык скрывается плавным наложением и «дыханием» громкости. Бесплатные звуки без авторских прав ищите на Freesound с лицензией CC0 и на Pixabay (раздел Sound Effects).</p>
-      <div class="pud-card pud-card-col">
-        <label class="pud-opt"><span><b>Звуки погоды включены</b></span><input type="checkbox" data-field="enabled"${c.enabled ? ' checked' : ''}></label>
-        <label class="pud-peek-fields"><span>Громкость, %</span><input type="range" data-field="volume" min="0" max="100" step="5" value="${c.volume}"></label>
-        <div class="pud-hint">В шторке сцены появится кнопка 🔊: она ставит звук на паузу и снимает с паузы.${engine.available() ? '' : ' В этом браузере звук недоступен.'}</div>
-        <div class="pud-hint" data-status>${escapeHtml(status)}</div>
-      </div>
-      <div class="pud-card pud-card-col">
-        <b>Файлы по видам погоды</b>
-        <ul class="pud-thread-list">${Object.entries(SOUND_KINDS).map(([kind, item]) => `
-          <li class="pud-thread"><span class="pud-thread-text">${item.icon} <b>${escapeHtml(item.label)}</b>${names[kind] ? ` — ${escapeHtml(names[kind])}` : ' — нет файла: будет тишина'}</span>
-          <span class="pud-thread-acts">
-            <label class="menu_button pud-sound-pick">Выбрать файл<input type="file" accept="audio/*" data-kind="${kind}" hidden></label>
-            ${names[kind] ? `<button type="button" class="menu_button" data-act="test" data-kind="${kind}">Проверить</button><button type="button" class="menu_button" data-act="remove" data-kind="${kind}">Убрать</button>` : ''}
-          </span></li>`).join('')}</ul>
-        ${override ? '<div class="pud-peek-city"><button type="button" class="menu_button" data-act="endtest">Закончить проверку</button></div>' : ''}
-      </div>`;
-  }
-  const onChange = async event => {
-    const target = event.target;
-    if (target.dataset?.field === 'enabled') { cfg().enabled = target.checked; persist(); render(); sync(); return; }
-    if (target.dataset?.field === 'volume') { cfg().volume = Math.min(100, Math.max(0, Number(target.value) || 0)); persist(); engine.setVolume(cfg().volume); return; }
-    const kind = target.dataset?.kind;
-    const file = target.files?.[0];
-    if (!kind || !file) return;
-    if (file.size > MAX_BYTES) { status = 'Файл слишком большой (больше 40 МБ). Возьмите покороче.'; render(); return; }
-    await store.put(kind, { name: file.name, blob: file });
-    buffers.delete(kind);
-    status = '';
-    await refreshNames();
-    render();
-    sync();
-  };
-  const onClick = async event => {
-    const target = event.target.closest?.('[data-act]');
-    if (!target) return;
-    const kind = target.dataset.kind;
-    if (target.dataset.act === 'remove') { await store.remove(kind); buffers.delete(kind); await refreshNames(); render(); sync(); }
-    else if (target.dataset.act === 'test') {
+  const listeners = new Set();
+  const notify = () => { for (const listener of [...listeners]) { try { listener(); } catch (error) { report('звуки погоды: панель', error); } } };
+  const panel = {
+    view: () => ({
+      available: engine.available(),
+      enabled: cfg().enabled,
+      volume: cfg().volume,
+      status,
+      testing: Boolean(override),
+      kinds: Object.entries(SOUND_KINDS).map(([kind, item]) => ({ kind, icon: item.icon, label: item.label, file: names[kind] ?? '' })),
+      maxMb: Math.round(MAX_BYTES / 1024 / 1024),
+    }),
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    setEnabled(on) { cfg().enabled = Boolean(on); persist(); notify(); sync(); },
+    setVolume(value) { cfg().volume = Math.min(100, Math.max(0, Number(value) || 0)); persist(); engine.setVolume(cfg().volume); },
+    async pick(kind, file) {
+      if (!SOUND_KINDS[kind] || !file) return;
+      if (file.size > MAX_BYTES) { status = `Файл слишком большой (больше ${Math.round(MAX_BYTES / 1024 / 1024)} МБ). Возьмите покороче.`; notify(); return; }
+      await store.put(kind, { name: file.name, blob: file });
+      buffers.delete(kind);
+      status = '';
+      await refreshNames();
+      await sync();
+      notify();
+    },
+    async remove(kind) { await store.remove(kind); buffers.delete(kind); await refreshNames(); await sync(); notify(); },
+    async test(kind) {
       override = kind;
       paused = false;
       status = cfg().enabled ? '' : 'Звуки выключены: включите галочку наверху.';
       if (cfg().enabled) await sync();
-      render();
-    }
-    else if (target.dataset.act === 'endtest') { override = null; render(); sync(); }
+      notify();
+    },
+    endTest() { override = null; notify(); sync(); },
   };
-  pane?.addEventListener('change', onChange);
-  pane?.addEventListener('click', onClick);
-  const paneObserver = pane ? new view.MutationObserver(() => { if (!pane.hidden) { refreshNames().then(render); } }) : null;
-  paneObserver?.observe(pane, { attributes: true, attributeFilter: ['hidden'] });
+  if (bridge) { bridge.soundPanel = panel; }
 
   const types = context.eventTypes ?? {};
   const events = context.eventSource;
   const onChat = () => { override = null; sync(); };
   if (types.CHAT_CHANGED && events?.on) events.on(types.CHAT_CHANGED, onChat);
   const unsubscribeScene = bridge?.scene?.subscribe?.(() => { override = null; sync(); }) ?? (() => {});
-  refreshNames().then(() => { render(); sync(); });
-  render();
+  refreshNames().then(() => { notify(); sync(); });
 
   shared.weatherSound = { sync, engine };
 
@@ -310,15 +286,12 @@ export function startWeatherSound(doc, { context, settings, save, shared = {}, b
     syncing += 1;
     stopRail();
     unsubscribeScene();
-    paneObserver?.disconnect();
-    pane?.removeEventListener('change', onChange);
-    pane?.removeEventListener('click', onClick);
+    if (bridge?.soundPanel === panel) bridge.soundPanel = null;
     doc.removeEventListener('click', onRailClick, true);
     doc.removeEventListener('pointerdown', onFirstGesture, { capture: true });
     if (types.CHAT_CHANGED) events?.removeListener?.(types.CHAT_CHANGED, onChat);
     engine.destroy();
     for (const button of doc.querySelectorAll(`.${SOUND_BUTTON_CLASS}`)) button.remove();
     delete shared.weatherSound;
-    tab?.remove?.();
   };
 }

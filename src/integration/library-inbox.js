@@ -27,13 +27,22 @@ const MAX_LEVELS = 4;
 const SEGMENT = /^[\p{L}\p{N}][\p{L}\p{N} _.()-]{0,59}$/u;
 const usable = name => SEGMENT.test(name) && !/^\.+$/.test(name) && !name.endsWith('.');
 
-/** Every folder of the tree for this library: 'Места', 'Места/Кафе', 'Места/Кафе/Терраса', … (the same for 'Вещи'). */
+/**
+ * The folders of the tree for this library: 'Места', 'Места/Кафе', 'Места/Кафе/Терраса', … and the same for 'Вещи'.
+ * A folder is made on a shelf only when something of that kind lies in it (or deeper): a place in «Кафе» makes «Места/Кафе»,
+ * not «Вещи/Кафе» too. Empty library folders have no folder on the computer until there is something to put in.
+ */
 export function libraryDirectories(library) {
   const dirs = [];
   const folders = (library?.folders ?? []).filter(folder => !folder.persona);
-  for (const label of Object.values(LIBRARY_SHELVES)) {
+  const kinds = { 'Места': library?.locations ?? [], 'Вещи': library?.items ?? [] };
+  for (const [label, entries] of Object.entries(kinds)) {
     dirs.push(label);
+    // the folders that hold something of this kind, with all the folders above them
+    const used = new Set();
+    for (const entry of entries) for (const step of folderPath(library, entry.folderId)) used.add(step.id);
     for (const folder of folders) {
+      if (!used.has(folder.id)) continue;
       const names = folderPath(library, folder.id).map(item => item.name);
       if (names.length && names.length <= MAX_LEVELS && names.every(usable)) dirs.push(`${label}/${names.join('/')}`);
     }

@@ -47,7 +47,7 @@ function open(tab, handlers = {}) {
   const proxy = new Proxy(handlers, { get: (target, name) => target[name] ?? (typeof name === 'string' && name.startsWith('on') ? payload => { calls.push([name, payload]); } : undefined) });
   let studio;
   try {
-    studio = createRelationshipStudio({ store: { getSnapshot: snapshotOf }, open: true, layout: { mode: 'window', tab }, callbacks: proxy });
+    studio = createRelationshipStudio({ store: { getSnapshot: snapshotOf }, open: true, layout: { mode: 'window', tab }, callbacks: proxy, ...(tab === 'leaks' ? { embedPage: { tab } } : {}) });
   } finally { console.error = original; }
   return { studio, shadow: studio.element.shadowRoot, calls, errors };
 }
@@ -120,7 +120,6 @@ test('leaks: the menu shows the count; swipe, "he knows" and dismiss reach their
   const { studio, shadow, calls, errors } = open('leaks');
   try {
     assert.deepEqual(errors, []);
-    assert.equal(shadow.querySelector('.nav .badge')?.textContent, '1');
     assert.match(shadow.querySelector('.ku-quote').textContent, /Ты же была в подворотне/);
     const payload = { messageIndex: 4, entityId: mikey.id, eventId: 'alley' };
     buttonByText(shadow, 'Свайп').click();

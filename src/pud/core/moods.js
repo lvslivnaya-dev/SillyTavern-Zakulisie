@@ -57,14 +57,16 @@ export function normalizeMoodConfig(raw) {
   for (const [id, data] of Object.entries(source.images && typeof source.images === 'object' ? source.images : {})) {
     if ((seen.has(id)) && isIconData(data)) images[id] = data;
   }
-  return { icons, custom, images };
+  // убранные из шаблонов встроенные настроения: на плашках, в автоопределении и в промпте их нет, вернуть можно в «Иконках»
+  const hidden = (Array.isArray(source.hidden) ? source.hidden : []).filter(id => MOODS.some(item => item.id === id));
+  return { icons, custom, images, hidden: [...new Set(hidden)] };
 }
 
 /** Полный список настроений: встроенные (с её значками) и свои. */
-export function moodList(config) {
-  const { icons, custom, images } = normalizeMoodConfig(config);
+export function moodList(config, { all = false } = {}) {
+  const { icons, custom, images, hidden } = normalizeMoodConfig(config);
   const withImage = item => (images[item.id] ? { ...item, image: images[item.id] } : item);
-  return [...MOODS.map(item => withImage(icons[item.id] ? { ...item, emoji: icons[item.id] } : item)), ...custom.map(item => withImage({ ...item, en: item.en || item.label }))];
+  return [...MOODS.filter(item => all || !hidden.includes(item.id)).map(item => withImage(icons[item.id] ? { ...item, emoji: icons[item.id] } : item)), ...custom.map(item => withImage({ ...item, en: item.en || item.label }))];
 }
 
 /** Заготовка нового своего настроения. */
@@ -111,19 +113,51 @@ export function buildMoodMessages({ chat, names, list = MOODS }) {
 }
 
 /** Ответ модели → { имя: id } только для известных имён и настроений. */
+/** Имя для сравнения: без регистра, «ё» как «е», без скобок («Имя (АУ агентство)» → «имя»). */
+const nameKey = value => String(value ?? '').toLowerCase().replace(/ё/g, 'е').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/[^\p{L}\p{N} ]+/gu, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Какой из героев имеется в виду: точное имя, потом имя без скобок, потом слова имени (модель часто отвечает «Мина» вместо «Асидо Мина»),
+ * но только если так подходит один-единственный герой: лучше пропустить, чем перепутать.
+ */
+function matchName(name, names) {
+  const exact = names.find(item => item.toLowerCase() === String(name).trim().toLowerCase());
+  if (exact) return exact;
+  const key = nameKey(name);
+  if (!key) return '';
+  const same = names.filter(item => nameKey(item) === key);
+  if (same.length === 1) return same[0];
+  const part = names.filter(item => { const words = nameKey(item).split(' '); return key.split(' ').every(word => words.includes(word)) || words.every(word => key.split(' ').includes(word)); });
+  return part.length === 1 ? part[0] : '';
+}
+
+/** Настроение, названное моделью: id, русское название или значок-эмодзи. */
+function matchMood(value, list, known) {
+  const raw = String(value ?? '').trim();
+  if (known.has(raw)) return raw;
+  const low = raw.toLowerCase();
+  return list.find(item => item.id.toLowerCase() === low || String(item.label ?? '').toLowerCase() === low || (item.emoji && item.emoji === raw))?.id ?? '';
+}
+
 export function parseMoodAnswer(raw, names, list = MOODS) {
   const known = byId(list);
   const text = String(raw ?? '').replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, ' ');
   const start = text.indexOf('{');
+  if (start < 0) return {};
+  let pairs = [];
   const end = text.lastIndexOf('}');
-  if (start < 0 || end <= start) return {};
   try {
-    const parsed = JSON.parse(text.slice(start, end + 1));
-    const out = {};
-    for (const [name, id] of Object.entries(parsed ?? {})) {
-      const who = names.find(item => item.toLowerCase() === String(name).trim().toLowerCase());
-      if (who && known.has(id)) out[who] = id;
-    }
-    return out;
-  } catch { return {}; }
+    if (end <= start) throw new Error('no closing brace');
+    pairs = Object.entries(JSON.parse(text.slice(start, end + 1)) ?? {});
+  } catch {
+    // Не разобралось как JSON (обрезано по токенам, лишняя запятая): выбираем пары "имя": "настроение" по одной, ответ не пропадает целиком.
+    pairs = [...text.slice(start).matchAll(/"([^"\n]{1,80})"\s*:\s*"([^"\n]{1,40})"/g)].map(match => [match[1], match[2]]);
+  }
+  const out = {};
+  for (const [name, value] of pairs) {
+    const who = matchName(name, names);
+    const id = matchMood(value, list, known);
+    if (who && id) out[who] = id;
+  }
+  return out;
 }

@@ -329,7 +329,7 @@ const chipsHtml = '<button class="ku-chip on"><span class="ku-chip-name">Сат�
 test('вкладка «Настроение»: плашки у каждого героя свои, у персоны и тех, кого нет на сцене, их нет; текущая подсвечена', async () => {
   const m = mount({ extraBody: chipsHtml });
   const bridge = sceneBridge({ value: { heat: 0, time: '', cast: ['Сатору', 'Гето'], weather: null } });
-  const settings = { moods: { stripsHidden: true } };
+  const settings = { moods: { strips: true, stripsReset: true } };
   const undo = startMood(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge });
   try {
     await wait(120);
@@ -363,7 +363,7 @@ test('настроение: модель следит автоматически
   m.context.ConnectionManagerRequestService.sendRequest = async (id, messages) => { seen.push(messages[1].content); return { content: '{"Сатору":"shy","Гето":"angry","Аня":"sad"}' }; };
   m.context.eventTypes.MESSAGE_RECEIVED = 'recv';
   const bridge = sceneBridge({ value: { heat: 0, time: '', cast: ['Сатору', 'Гето'], weather: null } });
-  const settings = { peek: { commentProfile: 'p1' }, moods: { auto: true, autoEvery: 2, stripsHidden: true } };
+  const settings = { peek: { commentProfile: 'p1' }, moods: { auto: true, autoEvery: 2, strips: true, stripsReset: true } };
   const undo = startMood(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge });
   try {
     for (const fn of m.handlers.recv) fn();
@@ -385,7 +385,7 @@ test('настроение: без выбранной модели автома�
   m.context.eventTypes.MESSAGE_RECEIVED = 'recv';
   let calls = 0;
   m.context.ConnectionManagerRequestService.sendRequest = async () => { calls += 1; return { content: '{}' }; };
-  const undo = startMood(m.document, { context: m.context, settings: { moods: { auto: true, autoEvery: 1, stripsHidden: true } }, save() {}, shared: m.shared, bridge: sceneBridge({ value: { cast: ['Сатору'] } }) });
+  const undo = startMood(m.document, { context: m.context, settings: { moods: { auto: true, autoEvery: 1, stripsReset: true } }, save() {}, shared: m.shared, bridge: sceneBridge({ value: { cast: ['Сатору'] } }) });
   try {
     for (const fn of m.handlers.recv) fn();
     await wait(1700);
@@ -439,7 +439,7 @@ test('быстрое меню шторки: панели повторов, ни�
   const m = mount({ chat, extraBody: chipsHtml });
   const { state } = graphState();
   const bridge = sceneBridge({ value: { heat: 0, time: '', cast: ['Сатору', 'Гето'], weather: null }, lines: relationLines(state), scales: state.config.scales, series: (a, b) => scaleSeries(state, a, b) });
-  const settings = { moods: { stripsHidden: true } };
+  const settings = { moods: { stripsReset: true } };
   const host = paneHost(m, bridge);
   const undos = [
     startQuick(m.document, { shared: m.shared, bridge }),
@@ -563,37 +563,34 @@ test('звуки погоды: под погоду сюжета играет н�
     await wait(30);
     assert.equal(engine.current(), null, 'для ясной погоды файла нет: тишина');
     // выключили
-    const off = m.tabs.sounds.querySelector('[data-field="enabled"]');
-    off.checked = false;
-    off.dispatchEvent(new m.win.Event('change', { bubbles: true }));
+    bridge.soundPanel.setEnabled(false);
     await wait(20);
     assert.equal(m.document.querySelector(`.${SOUND_BUTTON_CLASS}`), null);
   } finally { undo(); m.done(); }
   assert.ok(engine.log.some(item => item[0] === 'destroy'));
 });
 
-test('звуки погоды: файл выбирается и убирается во вкладке, слишком большой отклоняется', async () => {
+test('звуки погоды: файл выбирается и убирается через панель окна календаря, слишком большой отклоняется', async () => {
   const m = mount();
   const storage = fakeStore();
-  const undo = startWeatherSound(m.document, { context: m.context, settings: {}, save() {}, shared: m.shared, bridge: sceneBridge({ value: { weather: null } }), storage, createEngine: () => fakeEngine() });
+  const bridge = sceneBridge({ value: { weather: null } });
+  const undo = startWeatherSound(m.document, { context: m.context, settings: {}, save() {}, shared: m.shared, bridge, storage, createEngine: () => fakeEngine() });
   try {
     await wait(20);
-    const input = m.tabs.sounds.querySelector('input[type="file"][data-kind="rain"]');
-    Object.defineProperty(input, 'files', { value: [{ name: 'дождь.ogg', size: 1000 }], configurable: true });
-    input.dispatchEvent(new m.win.Event('change', { bubbles: true }));
-    await wait(30);
+    const panel = bridge.soundPanel;
+    assert.ok(panel, 'панель отдана мосту');
+    assert.equal(m.tabs.sounds, undefined, 'вкладки «Звуки погоды» в настройках больше нет');
+    assert.ok(panel.view().kinds.some(item => item.kind === 'rain' && !item.file));
+    await panel.pick('rain', { name: 'дождь.ogg', size: 1000 });
     assert.equal(storage.files.rain.name, 'дождь.ogg');
-    assert.match(m.tabs.sounds.textContent, /дождь\.ogg/);
-    const big = m.tabs.sounds.querySelector('input[type="file"][data-kind="storm"]');
-    Object.defineProperty(big, 'files', { value: [{ name: 'гроза.wav', size: 90 * 1024 * 1024 }], configurable: true });
-    big.dispatchEvent(new m.win.Event('change', { bubbles: true }));
-    await wait(20);
+    assert.equal(panel.view().kinds.find(item => item.kind === 'rain').file, 'дождь.ogg');
+    await panel.pick('storm', { name: 'гроза.wav', size: 90 * 1024 * 1024 });
     assert.equal(storage.files.storm, undefined);
-    assert.match(m.tabs.sounds.textContent, /слишком большой/);
-    click(m, m.tabs.sounds.querySelector('[data-act="remove"][data-kind="rain"]'));
-    await wait(30);
+    assert.match(panel.view().status, /слишком большой/);
+    await panel.remove('rain');
     assert.equal(storage.files.rain, undefined);
   } finally { undo(); m.done(); }
+  assert.equal(bridge.soundPanel, null, 'при остановке модуля панель снимается');
 });
 
 test('график отношений: вкладка рисует линию, закрепление виджетом и в шторке, открепление', () => {
@@ -632,17 +629,17 @@ test('график отношений: вкладка рисует линию, �
 
 test('все новые вкладки без моста Кулис не падают (старый запуск без Закулисья)', () => {
   const m = mount();
-  const settings = { moods: { stripsHidden: true } };
+  const settings = { moods: { stripsReset: true } };
   const undos = [
     startMood(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge: null }),
     startRelGraph(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge: null }),
     startWeatherSound(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge: null, storage: fakeStore(), createEngine: () => fakeEngine() }),
   ];
   try {
-    assert.ok(m.tabs.mood && m.tabs.relgraph && m.tabs.sounds);
+    assert.ok(m.tabs.mood && m.tabs.relgraph);
     assert.match(m.tabs.relgraph.textContent, /Модуль Кулис не подключён/);
   } finally { undos.forEach(fn => fn()); m.done(); }
-  for (const id of ['mood', 'relgraph', 'sounds']) assert.equal(m.document.querySelector(`[data-pane="${id}"]`), null);
+  for (const id of ['mood', 'relgraph']) assert.equal(m.document.querySelector(`[data-pane="${id}"]`), null);
 });
 
 test('график отношений: шкалы линии выбираются значками (⚙), название в подсказке; без значка берётся первая буква', () => {
@@ -793,7 +790,7 @@ test('отношения: ⚙ у линии даёт ей свой набор ш
 
 test('настроение: в большой настройке эмодзи ставится выбором настроения + палитрой или полем, добавляются свои настроения', async () => {
   const m = mount({ extraBody: chipsHtml });
-  const settings = { moods: { stripsHidden: true } };
+  const settings = { moods: { strips: true, stripsReset: true } };
   const undo = startMood(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge: sceneBridge({ value: { heat: 0, time: '', cast: ['Сатору', 'Гето'], weather: null } }) });
   try {
     await wait(120);
@@ -886,7 +883,7 @@ test('повторы: галочки и массовая чистка — зап
 test('настроение: своя картинка вместо значка — нажатием на значок, вставкой, сбросом; плашка рисует её, а не эмодзи', async () => {
   const PNG = 'data:image/png;base64,iVBORw0KGgo=';
   const m = mount({ extraBody: chipsHtml });
-  const settings = { moods: { stripsHidden: true } };
+  const settings = { moods: { strips: true, stripsReset: true } };
   const undo = startMood(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge: sceneBridge({ value: { heat: 0, time: '', cast: ['Сатору', 'Гето'], weather: null } }), imageFromFile: async file => { if (file.name === 'bad') throw new Error('не картинка'); return PNG; } });
   try {
     await wait(120);
@@ -942,7 +939,7 @@ test('настроение: плашки во вкладке «Кто» по у�
     await wait(120);
     assert.equal(m.document.querySelectorAll('#ku-scene-chips .pud-mood-strip').length, 0, 'в шторке плашек нет');
     assert.equal(settings.moods.strips, false);
-    assert.equal(settings.moods.stripsHidden, true);
+    assert.equal(settings.moods.stripsReset, true);
   } finally { undo(); }
 });
 
@@ -983,5 +980,98 @@ test('отношения: стикеры — значок в рамке, кот�
     assert.ok(pane.querySelector('.pud-rel-line .pud-rel-bar'));
     click(m, pane.querySelector('[data-stk-mode="stickers"]'));
     assert.ok(pane.querySelector('.pud-rel-line .pud-sticker'));
+  } finally { undo(); m.done(); }
+});
+
+test('настроение: ответ модели ловит героев с АУ в имени, одно слово имени, русское название и обрезанный JSON', () => {
+  const names = ['Асидо Мина (АУ агентство)', 'Бакуго Кацуки (АУ агентство)', 'Джиро Кёка (АУ агентство)', 'Токоями Фумикаге (АУ агентство)'];
+  const answer = '{"Асидо Мина":"sad","Бакуго":"love","Джиро Кёка":"грустит","Токоями Фумикаге":"love"';
+  assert.deepEqual(parseMoodAnswer(answer, names), {
+    'Асидо Мина (АУ агентство)': 'sad',
+    'Бакуго Кацуки (АУ агентство)': 'love',
+    'Джиро Кёка (АУ агентство)': 'sad',
+    'Токоями Фумикаге (АУ агентство)': 'love',
+  });
+  // Уникальное слово имени узнаётся; общая фамилия у двух героев не угадывается: лучше пропустить, чем перепутать.
+  assert.deepEqual(parseMoodAnswer('{"Ран":"sad"}', ['Хайтани Ран', 'Хайтани Риндо']), { 'Хайтани Ран': 'sad' });
+  assert.deepEqual(parseMoodAnswer('{"Хайтани":"sad"}', ['Хайтани Ран', 'Хайтани Риндо']), {});
+});
+
+test('настроение: свайп ответа возвращает настроение к тому, что было до определения', async () => {
+  const m = mount({ extraBody: chipsHtml, chat: [{ name: 'Сатору', is_user: false, mes: 'Он смутился.' }, { name: 'Гето', is_user: false, mes: 'Он нахмурился.' }] });
+  m.context.ConnectionManagerRequestService.sendRequest = async () => ({ content: '{"Сатору":"angry"}' });
+  m.context.eventTypes.MESSAGE_RECEIVED = 'recv';
+  m.context.eventTypes.MESSAGE_SWIPED = 'swiped';
+  const bridge = sceneBridge({ value: { heat: 0, time: '', cast: ['Сатору', 'Гето'], weather: null } });
+  const settings = { peek: { commentProfile: 'p1' }, moods: { auto: true, autoEvery: 1 } };
+  writeMeta(m.context, 'moods', { Сатору: { mood: 'sad', at: 1 } });
+  const undo = startMood(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge });
+  try {
+    for (const fn of m.handlers.recv) fn();
+    await wait(1700);
+    assert.equal(readMeta(m.context, 'moods')['Сатору'].mood, 'angry', 'определилось');
+    for (const fn of m.handlers.swiped) fn(1);
+    assert.equal(readMeta(m.context, 'moods')['Сатору'].mood, 'sad', 'свайп вернул прежнее');
+  } finally { undo(); m.done(); }
+});
+
+test('настроение: встроенное можно убрать из шаблонов (пропадает с плашек) и вернуть', async () => {
+  const m = mount({ extraBody: chipsHtml });
+  const settings = { moods: { strips: true, stripsReset: true } };
+  const undo = startMood(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge: sceneBridge({ value: { heat: 0, time: '', cast: ['Сатору', 'Гето'], weather: null } }) });
+  try {
+    await wait(120);
+    const editor = m.tabs.mood;
+    assert.ok(m.document.querySelector('#ku-scene-chips .pud-mood-pill[data-mood="calm"]'), 'плашка есть');
+    click(m, editor.querySelector('[data-act="mood-hide"][data-mid="calm"]'));
+    assert.deepEqual(settings.moods.hidden, ['calm']);
+    await wait(120);
+    assert.equal(m.document.querySelector('#ku-scene-chips .pud-mood-pill[data-mood="calm"]'), null, 'с плашек пропала');
+    assert.ok(editor.querySelector('.pud-mood-tile.off[data-pick="calm"]'), 'в редакторе осталась, приглушённая');
+    click(m, editor.querySelector('[data-act="mood-show"][data-mid="calm"]'));
+    assert.deepEqual(settings.moods.hidden, []);
+    await wait(120);
+    assert.ok(m.document.querySelector('#ku-scene-chips .pud-mood-pill[data-mood="calm"]'), 'вернулась');
+  } finally { undo(); m.done(); }
+});
+
+test('тема по настроению: «Подобрать» перекрашивает правила по описанию, остальное в правилах остаётся', async () => {
+  const m = mount();
+  const bridge = sceneBridge({ value: { heat: 0, time: '12:00', weather: null } });
+  const settings = { moodTheme: { enabled: true, strength: 100 } };
+  m.context.generateRaw = async ({ prompt }) => {
+    assert.match(prompt, /зимняя ночь/);
+    return '```json\n{"night":"#102030","nope":"#ffffff","storm":"red"}\n```';
+  };
+  const undo = startMoodTheme(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge });
+  try {
+    const pane = m.tabs.moodtheme;
+    const before = settings.moodTheme.rules.find(rule => rule.id === 'night');
+    const hours = before.hourFrom;
+    pane.querySelector('[data-gen-desc]').value = 'зимняя ночь';
+    pane.querySelector('[data-gen-desc]').dispatchEvent(new m.win.Event('input', { bubbles: true }));
+    click(m, pane.querySelector('[data-act="gen"]'));
+    await wait(60);
+    const night = settings.moodTheme.rules.find(rule => rule.id === 'night');
+    assert.equal(night.color, '#102030', 'цвет подобран');
+    assert.equal(night.hourFrom, hours, 'часы не тронуты');
+    assert.match(m.tabs.moodtheme.textContent, /перекрашено правил — 1/);
+  } finally { undo(); m.done(); }
+});
+
+test('палитра отношений: «Подобрать» задаёт цвета стикеров по описанию', async () => {
+  const m = mount();
+  const settings = { relGraph: {} };
+  m.context.generateRaw = async () => '{"grow":"#66cc99","fall":"#cc6677","growMax":"zzz"}';
+  const undo = startRelGraph(m.document, { context: m.context, settings, save() {}, shared: m.shared, bridge: sceneBridge({ value: {} }) });
+  try {
+    const pane = m.tabs.relgraph;
+    pane.querySelector('[data-stk-desc]').value = 'нежные';
+    pane.querySelector('[data-stk-desc]').dispatchEvent(new m.win.Event('input', { bubbles: true }));
+    click(m, pane.querySelector('[data-stk-gen]'));
+    await wait(60);
+    assert.equal(settings.relGraph.stickers.colors.grow, '#66cc99');
+    assert.equal(settings.relGraph.stickers.colors.fall, '#cc6677');
+    assert.match(pane.textContent, /подобрано цветов — 2/);
   } finally { undo(); m.done(); }
 });

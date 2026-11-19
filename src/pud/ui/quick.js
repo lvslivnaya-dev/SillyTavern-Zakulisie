@@ -21,7 +21,7 @@ export function startQuick(doc, { shared, bridge = null }) {
   function decorate(rail = doc.getElementById(RAIL_ID)) {
     if (!rail) return;
     // «Пнуть» переехало с рейки в боковую планку: настоящая плитка спрятана, планка нажимает её
-    const kickTile = rail.querySelector('.ku-rail .ku-tile.kick') ?? rail.querySelector('.ku-tile.kick');
+    const kickTile = rail.querySelector('.ku-tile.kick');
     const bar = rail.querySelector('.pud-sidebar');
     let kick = bar?.querySelector('.pud-kick-btn');
     if (!kickTile) { kick?.remove(); return; }
@@ -57,7 +57,7 @@ export function startQuick(doc, { shared, bridge = null }) {
     /** Страница показывается сейчас: перерисовать её. */
     refresh(id) { if (hooks.current?.() === id) redraw(); },
     /** Открыть страницу: нажать её плитку в рейке. */
-    open(id) { doc.querySelector(`#ku-scene-chips .ku-tile[data-pane="${id}"]`)?.click(); },
+    open(id) { hooks.show ? hooks.show(id) : doc.querySelector(`#ku-scene-chips .ku-tile[data-pane="${id}"]`)?.click(); },
     close() {},
     isOpen: id => hooks.current?.() === id,
   };

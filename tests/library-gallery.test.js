@@ -122,9 +122,8 @@ test('«Локации»: folders on the left, pictures in the gallery, a card o
   const shadow = studio.element.shadowRoot;
   const byText = text => [...shadow.querySelectorAll('button')].find(node => node.textContent === text);
   try {
-    assert.equal(byText('+ Картинки').disabled, true, 'pictures need an open folder');
+    assert.equal(byText('+ Картинки'), undefined, 'no separate «+ Картинки» button: the only «+» is the one that creates a card');
     shadow.querySelector('.ku-lsec .ku-folder').click();
-    assert.equal(byText('+ Картинки').disabled, false);
     assert.ok(shadow.querySelector('.ku-ltile img[src="/user/images/kulisy-library/bar.png"]'), 'the picture is in the gallery');
     shadow.querySelector('.ku-ltile .ku-place-open').click();
     const name = shadow.querySelector('.ku-wcard input[aria-label="Название"]');

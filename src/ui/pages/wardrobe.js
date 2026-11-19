@@ -39,19 +39,37 @@ export function createWardrobePages(ctx) {
   let closetCat = '';
   let closetShelfPick = '';
   let closetGenderPick = '';
+  let closetWho = ''; // search by name in the list of whose closet
+  let closetFolder = ''; // '' = all folders, '__none' = no folder, else a folder id
   let closetOnly = false; // show only what is already in the closet
   const LOOKS = '__looks'; // the section «Образы»: outfits as collages of their pieces, and the board to put one together
   let editing = false; // the board of an outfit is open (a new one, or the one of `lookId`)
   let pickCat = ''; // the section of the picker on the board ('' = all)
   let pickQuery = '';
   const picked = new Set();
+  /** Who translates now, for the hints of the buttons. */
+  let whoCache = { at: 0, text: '' };
+  const modelOfTranslation = () => {
+    // asked once in a while, not on every redraw
+    if (!whoCache.text || Date.now() - whoCache.at > 15000) {
+      try { whoCache = { at: Date.now(), text: String(ctx.facade.invoke('onWhoDoes', { purpose: 'translation' }) ?? 'основная модель чата') }; } catch { whoCache = { at: Date.now(), text: 'основная модель чата' }; }
+    }
+    return whoCache.text;
+  };
+  // «Выбрать»: tick several cards to describe or translate only them (not the same as `picked`, which builds an outfit)
+  let selecting = false;
+  const chosen = new Set();
+  const preparedFolders = new Set();
   let lookId = '';
   let lookName = '';
   let target = '';
   let wearMode = 'replace';
   let openId = '';
   let askReplace = false;
-  let describeOnUpload = false;
+  const DESCRIBE_KEY = 'kulisy.describeOnUpload';
+  // «Описывать сразу» is remembered across reloads (browser storage; when it is blocked the switch just starts off).
+  let describeOnUpload = (() => { try { return globalThis.localStorage?.getItem(DESCRIBE_KEY) === '1'; } catch { return false; } })();
+  const rememberDescribe = value => { describeOnUpload = value; try { globalThis.localStorage?.setItem(DESCRIBE_KEY, value ? '1' : '0'); } catch { /* storage blocked: the choice lives until reload */ } };
   let redescribing = false;
   let translating = null; // { text } while the model translates the shown cards
   let importing = false;
@@ -252,7 +270,9 @@ export function createWardrobePages(ctx) {
   }
 
   function tile(card) {
-    const node = element('button', { type: 'button', className: `ku-tile${openId === card.id ? ' on' : ''}`, 'aria-label': `${cardLabel(card)} — открыть` });
+    const ticked = selecting && chosen.has(card.id);
+    const node = element('button', { type: 'button', className: `ku-tile${openId === card.id ? ' on' : ''}${ticked ? ' picked' : ''}`, 'aria-label': selecting ? `${cardLabel(card)} — ${ticked ? 'снять отметку' : 'отметить'}` : `${cardLabel(card)} — открыть`, ...(selecting ? { 'aria-pressed': String(ticked) } : {}) });
+    if (selecting) node.append(element('span', { className: 'ku-tick', 'aria-hidden': 'true', text: ticked ? '✓' : '' }));
     const picture = card.image
       ? element('img', { className: 'ku-pic', src: imageUrl(card.image), alt: '', loading: 'lazy', draggable: false })
       : element('span', { className: 'ku-pic ku-nopic', 'aria-hidden': 'true' }, [icon('shirt'), element('span', { text: SECTION[card.category] })]);
@@ -265,6 +285,7 @@ export function createWardrobePages(ctx) {
     if (who.length) node.append(element('span', { className: 'ku-worn', text: who.length > 1 ? `${nameOf(who[0])} +${who.length - 1}` : nameOf(who[0]) }));
     node.append(element('span', { className: 'ku-cap', text: cardLabel(card) }));
     node.addEventListener('click', () => {
+      if (selecting) { if (chosen.has(card.id)) chosen.delete(card.id); else chosen.add(card.id); render(); return; }
       openId = card.id; askReplace = false; draft = null;
       render();
     });
@@ -357,12 +378,33 @@ export function createWardrobePages(ctx) {
 
     // Who: every card of the library, those in this chat first.
     const who = element('nav', { className: 'ku-closet-who', 'aria-label': 'Чей шкаф' });
-    for (const item of ordered) {
-      const count = (item.closet?.cardIds?.length ?? 0) + (item.closet?.lookIds?.length ?? 0);
-      const node = element('button', { type: 'button', className: `ku-wsb${item.id === closetFor ? ' on' : ''}`, 'aria-current': item.id === closetFor ? 'true' : null, title: entityOf.has(item.id) ? 'Карточка включена в этом чате' : 'Карточка не включена в этом чате' }, [
-        element('span', { text: `${entityOf.has(item.id) ? '● ' : ''}${item.name}${item.persona ? ' (персона)' : ''}` }), element('i', { text: String(count) })]);
-      node.addEventListener('click', () => { closetFor = item.id; render(); });
-      who.append(node);
+    // Two groups, characters and personas, with a search by name and a filter by folder.
+    const folders = (snapshot().locationLibrary?.folders ?? []).filter(folder => !folder.hidden);
+    const folderName = id => folders.find(folder => folder.id === id)?.name ?? '';
+    const usedFolders = folders.filter(folder => library.some(item => item.folderId === folder.id));
+    const whoSearch = element('input', { type: 'search', value: closetWho, placeholder: 'Найти по имени', 'aria-label': 'Найти героя или персону', className: 'ku-search' });
+    whoSearch.addEventListener('change', () => { closetWho = whoSearch.value; render(); });
+    const whoFolder = element('select', { 'aria-label': 'Папка' }, [
+      element('option', { value: '', text: 'Все папки', selected: !closetFolder }),
+      element('option', { value: '__none', text: 'Без папки', selected: closetFolder === '__none' }),
+      ...usedFolders.map(folder => element('option', { value: folder.id, text: folder.name, selected: closetFolder === folder.id })),
+    ]);
+    whoFolder.addEventListener('change', () => { closetFolder = whoFolder.value; render(); });
+    who.append(whoSearch, whoFolder);
+    const whoText = closetWho.trim().toLocaleLowerCase('ru-RU');
+    const visibleWho = item => (!whoText || `${item.name} ${(item.aliases ?? []).join(' ')}`.toLocaleLowerCase('ru-RU').includes(whoText))
+      && (!closetFolder || (closetFolder === '__none' ? !item.folderId : item.folderId === closetFolder || item.id === closetFor));
+    for (const [title, isPersona] of [['Персонажи', false], ['Персоны', true]]) {
+      const group = ordered.filter(item => Boolean(item.persona) === isPersona && visibleWho(item));
+      who.append(element('div', { className: 'ku-closet-group', text: `${title} · ${group.length}` }));
+      if (!group.length) who.append(element('p', { className: 'muted ku-small', text: 'Никого не нашлось.' }));
+      for (const item of group) {
+        const count = (item.closet?.cardIds?.length ?? 0) + (item.closet?.lookIds?.length ?? 0);
+        const node = element('button', { type: 'button', className: `ku-wsb${item.id === closetFor ? ' on' : ''}`, 'aria-current': item.id === closetFor ? 'true' : null, title: `${entityOf.has(item.id) ? 'Карточка включена в этом чате' : 'Карточка не включена в этом чате'}${folderName(item.folderId) ? ` · папка «${folderName(item.folderId)}»` : ''}` }, [
+          element('span', { text: `${entityOf.has(item.id) ? '● ' : ''}${item.name}` }), element('i', { text: String(count) })]);
+        node.addEventListener('click', () => { closetFor = item.id; render(); });
+        who.append(node);
+      }
     }
 
     const main = element('div', { className: 'ku-closet-main' });
@@ -452,22 +494,23 @@ export function createWardrobePages(ctx) {
     if (openId && !cards.some(card => card.id === openId)) { openId = ''; draft = null; }
     if (!openId) focusedId = '';
     for (const id of [...picked]) if (!cards.some(card => card.id === id)) picked.delete(id);
+    for (const id of [...chosen]) if (!cards.some(card => card.id === id)) chosen.delete(id);
 
     const search = element('input', { type: 'search', value: query, placeholder: 'Поиск', 'aria-label': 'Поиск по гардеробу', className: 'ku-search' });
     search.addEventListener('change', () => { query = search.value; render(); });
     const auto = element('input', { type: 'checkbox', className: 'ku-switch', checked: describeOnUpload, 'aria-label': 'Описывать картинки сразу' });
-    auto.addEventListener('change', () => { describeOnUpload = auto.checked; });
+    auto.addEventListener('change', () => rememberDescribe(auto.checked));
     if (!things && !looksTab && !closetsTab) view.append(element('div', { className: 'ku-row ku-wtools' }, [
       seg(Object.entries(WARDROBE_SHELVES), shelf, 'Полка', key => { shelf = key; picked.clear(); lookId = ''; target = ''; render(); }),
       seg(Object.entries(WARDROBE_GENDERS), gender, 'Женское, унисекс или мужское', key => { gender = key; render(); }),
       search,
       sortControls(),
-      filePicker('+ Картинки', { className: 'btn primary small', onFiles: files => addPictures(files) }),
-      filePicker('+ Готовый образ', { multiple: false, onFiles: files => addPictures(files, { asOutfit: true }) }),
-      button('+ Без картинки', 'btn small', () => attempt(async () => {
+      button('+ Создать карточку', 'btn primary small', () => attempt(async () => {
         const card = await act('onWardrobeAddCard', { shelf, gender, category: section || 'top', name: 'Новая карточка' }, 'wardrobe-add');
         openId = card?.id ?? '';
-      })),
+      }), 'Новая карточка: картинку и описание добавите в ней (картинки можно и просто перетащить в галерею)'),
+      filePicker('+ Готовый образ', { multiple: false, onFiles: files => addPictures(files, { asOutfit: true }) }),
+      button(selecting ? 'Готово' : 'Выбрать', selecting ? 'btn primary small' : 'btn small', () => { selecting = !selecting; chosen.clear(); render(); }, 'Отметить галочками несколько карточек: описать или перевести только их'),
       element('label', { className: 'ku-inline ku-small', title: 'Сразу просить модель описать новые картинки (тратит запрос на каждую)' }, [auto, 'описывать сразу']),
       ...(snapshot().inbox?.available ? [button(importing ? 'Забираю…' : 'Из папки', 'btn small', importInbox, 'Забрать картинки, которые вы положили в папку «Гардероб» на компьютере')] : []),
     ]));
@@ -500,36 +543,53 @@ export function createWardrobePages(ctx) {
     if (looksTab) { body.append(renderLooksTab()); view.append(body); return view; }
     if (closetsTab) { body.append(renderClosets()); view.append(body); return view; }
 
+    // The folder for pictures of this section is made when it is opened (not all of them up front): once per section.
+    if (section && snapshot().inbox?.available) {
+      const key = `${shelf}/${gender}/${section}`;
+      if (!preparedFolders.has(key)) {
+        preparedFolders.add(key);
+        Promise.resolve(ctx.facade.invoke('onWardrobePrepareFolder', { shelf, gender, category: section })).catch(() => preparedFolders.delete(key));
+      }
+    }
     const gallery = element('div', { className: 'ku-wgal' });
     const list = visibleCards();
     const title = element('p', { className: 'section-title', text: `${query.trim() ? 'Найдено' : (section ? SECTION[section] : 'Всё')} · ${list.length}` });
     // The translation of what is shown here (the open shelf, gender and section): always on the page, even for cards without pictures.
-    const translate = Object.assign(button(translating ? 'Перевожу…' : 'Проверить на перевод и перевести непереведённые', 'btn small', () => {
-      if (translating || !list.length) return;
+    const targets = selecting && chosen.size ? list.filter(card => chosen.has(card.id)) : list;
+    const ticked = selecting && chosen.size > 0;
+    const translate = Object.assign(button(translating ? 'Перевожу…' : ticked ? `Перевести выбранные (${targets.length})` : 'Проверить на перевод и перевести непереведённые', 'btn small', () => {
+      if (translating || !targets.length) return;
       translating = { text: 'Проверяю карточки…' };
       render();
       attempt(() => act('onWardrobeTranslateMissing', {
-        cardIds: list.map(card => card.id),
+        cardIds: targets.map(card => card.id),
         onProgress: (done, total, name) => { if (translating) { translating.text = `Перевожу «${name}» (${done + 1} из ${total})…`; render(); } },
       }, 'wardrobe-translate'), result => (result === null ? '' : result?.missing
         ? `Проверено карточек: ${result.checked}, переведено: ${result.done}`
         : `Проверено карточек: ${result?.checked ?? 0}. Всё уже на английском, переводить нечего.`)).finally(() => { translating = null; render(); });
-    }, `Работает на то, что открыто сейчас: ${shelf === 'persona' ? 'полка персоны' : 'полка героев'}, ${query.trim() ? 'найденное' : section ? `раздел «${SECTION[section]}»` : 'все разделы'} (${list.length}). Что уже на английском, остаётся; русские описания переводит модель, названия не трогает`), { disabled: Boolean(translating) || !list.length });
-    const redo = list.some(card => card.image) ? (() => {
+    }, `${ticked ? `Только отмеченные карточки: ${targets.length}. ` : ''}Работает на то, что открыто сейчас: ${shelf === 'persona' ? 'полка персоны' : 'полка героев'}, ${query.trim() ? 'найденное' : section ? `раздел «${SECTION[section]}»` : 'все разделы'} (${list.length}). Что уже на английском, остаётся; русские описания переводит модель, названия не трогает. Переводит: ${modelOfTranslation()}`), { disabled: Boolean(translating) || !targets.length });
+    const redo = targets.some(card => card.image) ? (() => {
       // Every card shown here, described again from its picture: the description only.
-      const node = button(redescribing ? 'Переписываю…' : 'Переписать описания', 'btn small', () => {
+      const node = button(redescribing ? 'Переписываю…' : ticked ? `Описать выбранные (${targets.length})` : 'Переписать описания', 'btn small', () => {
         redescribing = true;
         attempt(() => act('onWardrobeRedescribe', {
-          cardIds: list.map(card => card.id),
+          cardIds: targets.map(card => card.id),
           onProgress: (done, total) => setStatus(`Переписываю описания: ${done} из ${total}…`),
         }, 'wardrobe-redescribe'), result => (result
           ? `Описания переписаны: ${result.done}${result.failed ? `, не вышло: ${result.failed}` : ''}${result.skipped ? `, без картинки пропущено: ${result.skipped}` : ''}`
           : '')).finally(() => { redescribing = false; render(); });
-      }, 'Модель заново опишет по картинкам все карточки, которые сейчас видны. Меняется только описание.');
+      }, ticked ? 'Модель заново опишет по картинкам только отмеченные карточки. Меняется только описание.' : 'Модель заново опишет по картинкам все карточки, которые сейчас видны. Меняется только описание.');
       node.disabled = redescribing;
       return node;
     })() : null;
     if (translating) gallery.append(element('div', { className: 'ku-genbadge ku-joblane', role: 'status' }, [element('span', { className: 'ku-genspin', 'aria-hidden': 'true' }), element('span', { text: translating.text })]));
+    if (selecting) {
+      gallery.append(element('div', { className: 'ku-row ku-ask' }, [
+        element('span', { className: 'ku-small', text: chosen.size ? `Отмечено: ${chosen.size}. Кнопки справа работают только на них.` : 'Отметьте карточки галочками: описать или перевести можно только их.' }),
+        button('Все показанные', 'btn small', () => { for (const card of list) chosen.add(card.id); render(); }),
+        button('Снять отметки', 'btn small', () => { chosen.clear(); render(); }),
+      ]));
+    }
     gallery.append(element('div', { className: 'ku-row' }, [title, element('span', { className: 'ku-push' }), translate, ...(redo ? [redo] : [])]));
     const grid = element('div', { className: 'ku-tiles' }, list.map(tile));
     const drop = filePicker('Перетащите картинки сюда или нажмите', { className: 'ku-tile ku-drop', onFiles: files => addPictures(files) });
@@ -613,6 +673,13 @@ export function createWardrobePages(ctx) {
     });
     describeButton.disabled = !card.image;
     if (!card.image) describeButton.title = 'Сначала добавьте картинку';
+    // This card only: saved first (what is typed is what gets translated), then the model translates the description into English.
+    const translateOne = button('Перевести на английский', 'btn small', () => attempt(async () => {
+      await saveFirst();
+      return act('onWardrobeTranslateMissing', { cardIds: [card.id] }, 'wardrobe-translate');
+    }, result => (result === null ? '' : result?.missing ? 'Описание переведено' : 'Описание уже на английском, переводить нечего')), `Перевести описание только этой карточки. Переводит: ${modelOfTranslation()}`);
+    translateOne.disabled = !description.value.trim();
+    description.addEventListener('input', () => { translateOne.disabled = !description.value.trim(); });
     const replaceRow = askReplace ? element('div', { className: 'ku-row ku-ask' }, [
       element('span', { className: 'ku-small', text: 'Описание уже есть. Заменить его новым?' }),
       button('Заменить описание', 'btn primary small', describe),
@@ -645,7 +712,7 @@ export function createWardrobePages(ctx) {
       element('div', { className: 'field' }, [element('label', { text: 'Название' }), name]),
       element('div', { className: 'ku-row ku-wselects' }, [shelfSelect, genderSelect, sectionSelect]),
       placementField,
-      element('div', { className: 'field' }, [element('div', { className: 'ku-row' }, [element('label', { text: 'Описание' }), element('span', { className: 'ku-push' }), describeButton]), description, counter]),
+      element('div', { className: 'field' }, [element('div', { className: 'ku-row' }, [element('label', { text: 'Описание' }), element('span', { className: 'ku-push' }), translateOne, describeButton]), description, counter]),
       replaceRow,
       wearBox,
       element('div', { className: 'ku-row ku-wfoot' }, [
@@ -920,6 +987,8 @@ export const WARDROBE_STYLE = `
 .ku-closet-split{display:grid;grid-template-columns:200px minmax(0,1fr);gap:14px;align-items:start}
 @container (max-width:760px){.ku-closet-split{grid-template-columns:minmax(0,1fr)}}
 .ku-closet-who{display:flex;flex-direction:column;gap:1px;max-height:70vh;overflow-y:auto}
+.ku-closet-group{margin:8px 0 2px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--k-muted)}
+.ku-closet-who select,.ku-closet-who .ku-search{width:100%;margin-bottom:4px}
 .ku-closet-main{min-width:0;display:flex;flex-direction:column;gap:8px}
 .ku-closet-looks{display:flex;flex-wrap:wrap;gap:6px}
 .ku-ctile.in{border-color:var(--k-accent);box-shadow:0 0 0 2px var(--k-accent-soft)}
@@ -946,6 +1015,8 @@ export const WARDROBE_STYLE = `
 .ku-mini img,.ku-mini span{width:20px;height:26px;border-radius:4px;object-fit:cover;background:var(--k-line)}
 .ku-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:12px;border-radius:14px}
 .ku-tiles.over{outline:2px dashed var(--k-accent);outline-offset:4px}
+.ku-tile.picked{outline:2px solid var(--k-accent);outline-offset:-2px}
+.ku-tick{position:absolute;top:6px;left:6px;z-index:2;width:22px;height:22px;display:grid;place-items:center;border-radius:6px;border:2px solid var(--k-accent);background:color-mix(in srgb,var(--k-panel) 80%,transparent);color:var(--k-accent);font-weight:700}
 .ku-tile{position:relative;padding:0;border:1px solid var(--k-line);border-radius:13px;overflow:hidden;background:var(--k-inset);color:var(--k-text);font:inherit;text-align:left;display:flex;flex-direction:column;cursor:pointer;min-width:0}
 .ku-tile:hover{border-color:var(--k-accent-line)}
 .ku-tile.on{border-color:var(--k-accent);box-shadow:0 0 0 3px var(--k-accent-soft)}
@@ -991,7 +1062,7 @@ export const WARDROBE_STYLE = `
 .ku-lkpiece-cap{display:flex;flex-direction:column;gap:1px;padding:4px 6px 5px;font-size:11px;line-height:1.2;min-width:0}
 .ku-lkpiece-cap strong{color:var(--k-accent);font-size:10.5px}
 .ku-lkpiece-cap span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ku-lkpiece-x{position:absolute;top:4px;right:4px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:50%;background:color-mix(in srgb,var(--k-bg) 80%,transparent);color:var(--k-text);cursor:pointer;opacity:0;transition:opacity .15s ease}
+.ku-lkpiece-x{position:absolute;top:4px;right:4px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:50%;background:color-mix(in srgb,var(--k-panel) 80%,transparent);color:var(--k-text);cursor:pointer;opacity:0;transition:opacity .15s ease}
 .ku-lkpiece-x .ku-ico{width:12px;height:12px}
 .ku-lkpiece:hover .ku-lkpiece-x,.ku-lkpiece-x:focus-visible{opacity:1}
 .ku-lkwear{display:flex;align-items:center;gap:8px;flex-wrap:wrap}

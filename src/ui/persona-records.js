@@ -3,18 +3,18 @@ import { button, element } from './helpers.js';
 const people = text => String(text ?? '').split(/[,;\n]/).map(part => part.trim()).filter(Boolean);
 
 /** Records as the editor holds them (people as text, so typing is never cut). */
-export const recordsToDraft = records => (records ?? []).map(record => ({ ...record, about: (record.about ?? []).join(', '), knows: (record.knows ?? []).join(', '), au: [...(record.au ?? [])] }));
+export const recordsToDraft = records => (records ?? []).map(record => ({ ...record, about: (record.about ?? []).join(', '), knows: (record.knows ?? []).join(', ') }));
 /** …and back to what the card stores. */
 export const recordsFromDraft = draft => (draft ?? []).map(record => ({ ...record, about: people(record.about), knows: people(record.knows) }));
 
 /**
- * The records about a persona: each has its text, whom it concerns, who knows it, the AU it belongs to, «секрет» and a switch.
- * `records` is the draft's own array, edited in place; `au` = the list of AU [{ id, name }]; `cards` = the cards of characters of the library
+ * The records about a persona: each has its text, whom it concerns, who knows it, «секрет» and a switch.
+ * `records` is the draft's own array, edited in place; `cards` = the cards of characters of the library
  * [{ id, name }] a record can be tied to straight (besides names typed in); `redraw` draws the window again.
  * The records are a list in the card's side column; this pane edits the `selected` one. `add()` / `remove(index)` are the card's own
  * (they also move the selection); without them the pane adds and removes by itself.
  */
-export function renderPersonaRecords({ records, au, cards = [], redraw, selected = 0, add = null, remove = null }) {
+export function renderPersonaRecords({ records, cards = [], redraw, selected = 0, add = null, remove = null }) {
   const nameOf = new Map(cards.map(card => [card.id, card.name]));
   const field = (label, node) => element('label', { className: 'field' }, [element('span', { className: 'muted ku-small', text: label }), node]);
   const input = (value, label, onInput, placeholder = '') => {
@@ -46,16 +46,15 @@ export function renderPersonaRecords({ records, au, cards = [], redraw, selected
     text.addEventListener('input', () => { record.text = text.value; });
     // the list on the left names a record by its text: it follows when the field is left
     text.addEventListener('change', () => redraw());
-    const chips = au.map(item => {
-      const on = record.au.includes(item.id);
-      const chip = element('button', { type: 'button', className: `ku-chip${on ? ' told' : ''}`, 'aria-pressed': String(on), text: item.name, title: on ? 'Запись только в этом АУ. Нажмите, чтобы убрать' : 'Привязать запись к этому АУ' });
-      chip.addEventListener('click', () => { record.au = on ? record.au.filter(id => id !== item.id) : [...record.au, item.id]; redraw(); });
-      return chip;
-    });
     const secret = element('input', { type: 'checkbox', checked: Boolean(record.secret), 'aria-label': 'Секретная запись' });
     secret.addEventListener('change', () => { record.secret = secret.checked; });
     const on = element('input', { type: 'checkbox', checked: !record.off, 'aria-label': 'Запись включена' });
     on.addEventListener('change', () => { record.off = !on.checked; });
+    // «Раскроется, когда»: for a secret record only
+    const condition = input(record.condition ?? '', 'Условие раскрытия секрета', value => { record.condition = value; }, 'например: Ран увидит шрам на её спине');
+    const conditionField = field('Раскроется, когда (необязательно)', condition);
+    conditionField.hidden = !record.secret;
+    secret.addEventListener('change', () => { conditionField.hidden = !secret.checked; });
     return element('div', { className: 'ku-prec' }, [
       text,
       element('div', { className: 'ku-row' }, [
@@ -68,7 +67,8 @@ export function renderPersonaRecords({ records, au, cards = [], redraw, selected
           tied(record, 'knowsIds', 'Кто знает'),
         ]),
       ]),
-      ...(au.length ? [element('div', { className: 'ku-row' }, [element('span', { className: 'muted ku-small', text: 'АУ:' }), ...chips, ...(record.au.length ? [] : [element('span', { className: 'muted ku-small', text: 'во всех' })])])] : []),
+      conditionField,
+      element('p', { className: 'ku-hint', hidden: !record.secret, text: 'Секретные записи сами попадают в «Секреты» сцены, когда ты открываешь чат с этой персоной. Знают их ты и те, кого впишешь в «Кто знает».' }),
       element('div', { className: 'ku-row' }, [
         element('label', { className: 'ku-inline' }, [on, 'включена']),
         element('label', { className: 'ku-inline', title: 'Знают только названные: остальные не знают и не догадываются' }, [secret, 'секрет']),
@@ -78,15 +78,14 @@ export function renderPersonaRecords({ records, au, cards = [], redraw, selected
     ]);
   });
 
-  const addRecord = () => { if (add) add(); else { records.push({ id: '', text: '', about: '', knows: '', au: [], secret: false, off: false }); redraw(); } };
+  const addRecord = () => { if (add) add(); else { records.push({ id: '', text: '', about: '', knows: '', secret: false, off: false }); redraw(); } };
   const index = Math.min(Math.max(Number(selected) || 0, 0), records.length - 1);
   return element('div', { className: 'ku-cpane' }, [
     element('div', { className: 'ku-ctitlerow' }, [
       element('h3', { className: 'ku-ctitle', text: records.length ? `Запись ${index + 1} из ${records.length}` : 'Записи о персоне' }),
       ...(records.length ? [] : [button('+ Запись', 'btn small', addRecord)]),
     ]),
-    element('p', { className: 'ku-hint', text: 'Запись идёт модели, когда на сцене кто-то из тех, кого она касается или кто о ней знает, и когда включена нужная АУ. Новая запись — плюс у названия «Записи о персоне» в списке слева.' }),
-    ...(au.length ? [] : [element('p', { className: 'ku-hint', text: 'АУ добавляются на странице «Персона».' })]),
+    element('p', { className: 'ku-hint', text: 'Запись идёт модели, когда на сцене кто-то из тех, кого она касается или кто о ней знает. Новая запись — плюс у названия «Записи о персоне» в списке слева.' }),
     ...(records.length ? [rows[index]] : [element('p', { className: 'ku-hint', text: 'Записей пока нет.' })]),
   ]);
 }

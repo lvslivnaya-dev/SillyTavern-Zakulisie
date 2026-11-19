@@ -81,6 +81,7 @@ function cleanSong(raw) {
     lyrics: prose(raw.lyrics, SONG_LIMITS.lyrics),
     off: raw.off === true,
     folderId: typeof raw.folderId === 'string' ? raw.folderId : '',
+    favorite: raw.favorite === true,
   };
 }
 
@@ -124,7 +125,7 @@ function assertFree(library, song, exceptId = '') {
   if (clash) throw new Error(`Такая песня уже есть: «${songLabel(clash)}»`);
 }
 
-const FIELDS = ['title', 'artist', 'aliases', 'keys', 'mood', 'sound', 'lyrics', 'off', 'folderId'];
+const FIELDS = ['title', 'artist', 'aliases', 'keys', 'mood', 'sound', 'lyrics', 'off', 'folderId', 'favorite'];
 
 /** → { library, song }. A song needs a title; the same title by the same artist is not added twice. */
 export function addSong(library, fields = {}) {

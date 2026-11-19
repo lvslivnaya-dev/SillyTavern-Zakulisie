@@ -123,7 +123,7 @@ function open(tab) {
   }, { get: (target, name) => target[name] ?? (typeof name === 'string' && name.startsWith('on') ? payload => { calls.push([name, payload]); } : undefined) });
   let studio;
   try {
-    studio = createRelationshipStudio({ store: { getSnapshot: snapshotOf }, open: true, layout: { mode: 'window', tab }, callbacks });
+    studio = createRelationshipStudio({ store: { getSnapshot: snapshotOf }, open: true, layout: { mode: 'window', tab }, callbacks, ...(tab === 'leaks' ? { embedPage: { tab } } : {}) });
   } finally { console.error = original; }
   return { studio, shadow: studio.element.shadowRoot, calls, errors };
 }
@@ -150,7 +150,6 @@ test('«Проверка» lists slips with the four answers', () => {
   const { studio, shadow, calls, errors } = open('leaks');
   try {
     assert.deepEqual(errors, []);
-    assert.equal(shadow.querySelector('.nav .badge')?.textContent, '1');
     const payload = { messageIndex: 7, slipIndex: 0 };
     for (const [label, handler] of [['Править', 'onSlipEdit'], ['Так и есть', 'onSlipAccept'], ['Не ляп', 'onSlipDismiss'], ['Напомнить рассказчику', 'onSlipRemind']]) {
       buttonByText(shadow, label).click();

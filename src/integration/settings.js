@@ -77,8 +77,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // The intimacy dice (core/intimacy-dice.js): groups, hidden and own options, the last rolls. Shared by all chats.
   intimacyDice: { avoidRepeat: true, groups: {}, history: [] },
   nameLibrary: { version: 1, enabled: true, entries: [] },
-  // The cards of personas and the list of AU (core/persona-card.js): shared by all chats; a chat says which AU are on.
-  personaCards: { version: 1, enabled: true, au: [], cards: [] },
+  // The switch «send the persona» (core/persona-card.js): shared by all chats.
+  personaCards: { version: 1, enabled: true, cards: [] },
   // The English nicknames of the cards were taken off once (they only confused the names).
   aliasesTidied: false,
   // The song library (core/song-library.js): mood, sound and words of songs, shared by all chats.
@@ -125,6 +125,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   sendGm: true,
   // The scene rail (the drawer at the wall of the browser): 'left' | 'right'.
   railSide: 'left',
+  castLook: 'list', // «На сцене» in the drawer: 'list' (names) or 'icons' (big faces, the name on hover)
+  // The buttons of the drawer that are switched off (ids from DRAWER_TILES in chat-overlay.js); «Сцена» is always there.
+  drawerHidden: [],
   // The reminder above the message box: «set Kulisy up for this chat» (core/setup-guide.js), while a required step is open.
   setupReminder: true,
   // The panel is a drawer: open stays open until its arrow is clicked. silenceAfter: replies
@@ -149,6 +152,16 @@ export const DEFAULT_SETTINGS = Object.freeze({
     fallbackToMain: false,
     purposes: { analysis: true, discovery: true, generation: true, translation: true, cardgen: true },
   },
+  // The model for translation into English: ONE for every translation there is (cards, wardrobe, library, lorebook entries).
+  // off = the way the other purposes go (the auxiliary model, else the chat's own).
+  translate: {
+    mode: 'off',
+    profileId: '',
+    url: '',
+    key: '',
+    model: '',
+    maxTokens: 4096,
+  },
   // Semantic choice of headcanons (see embeddings.js); off = pick by mentions.
   embeddings: {
     mode: 'off',
@@ -159,6 +172,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
     key: '',
     model: '',
     threshold: 0,
+    // How many records (memories, tensions, the library's) and older chronicle summaries are chosen by meaning; 0 = as many as the budget holds.
+    recordsLimit: 6,
+    chronicleLimit: 4,
   },
   // Studio window: 'window' (over the chat) or 'dock' (beside it), the last tab
   // and the docked panel's width in px.

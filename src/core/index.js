@@ -48,7 +48,7 @@ export {
   composeOutfit, outfitLabel, emptyWardrobe, normalizeWardrobe, removeCard, removeLook, searchCards, updateCard, updateLook, wornCards, wornLabel,
 } from './wardrobe.js';
 export {
-  PERSONA_LIMITS, PERSONA_TAG, addAu, buildPersonaPrompt, cleanRecords, emptyPersonaCards, findPersonaCard, migratePersonaCards, normalizePersonaCards, removeAu, selectPersonaRecords, splitPeople,
+  PERSONA_LIMITS, PERSONA_TAG, buildPersonaPrompt, cleanRecords, emptyPersonaCards, findPersonaCard, migratePersonaCards, normalizePersonaCards, selectPersonaRecords, splitPeople,
 } from './persona-card.js';
 export {
   NAMES_RULES, NAMES_TAG, cardNameEntry, syncNameWords, NAME_CASES, NAME_LIMITS, addName, addNameFolder, buildNamesPrompt, changeNames, emptyNames, isSending, nameLine, normalizeNames, removeName, removeNameFolder, recognitionForms, selectNames, splitWords,

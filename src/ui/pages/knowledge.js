@@ -32,8 +32,9 @@ export function createKnowledgePages(ctx) {
 
   function avatar(character, size = '') {
     const name = characterName(character);
-    return character.avatar
-      ? element('img', { className: `avatar ${size}`, src: character.avatar, alt: '' })
+    const picture = character.avatar || snapshot().entityPortraits?.[characterId(character)] || '';
+    return picture
+      ? element('img', { className: `avatar ${size}`, src: picture, alt: '', style: { objectFit: 'cover' } })
       : element('span', { className: `avatar ${size}`, text: name.slice(0, 2) });
   }
 
@@ -663,6 +664,13 @@ export function createKnowledgePages(ctx) {
         element('p', { className: 'muted ku-small', style: { margin: '2px 0 6px' }, text: `${event.lore ? `лорбук «${event.lore.book}»` : 'из чата'} · ${status}` }),
         element('div', { className: 'ku-knowers' }, chips),
       ]);
+      // When the secret comes out: in words, the model judges by meaning whether it has happened
+      const condition = element('input', { type: 'text', value: event.condition ?? '', maxLength: 300, className: 'ku-secret-cond', placeholder: 'например: Ран увидит шрам на её спине', 'aria-label': 'Условие раскрытия секрета' });
+      condition.addEventListener('change', () => act('onUpdateEvent', { eventId: event.id, changes: { condition: condition.value } }, 'secret-condition'));
+      card.append(element('div', { className: 'ku-secret-when' }, [
+        element('label', { className: 'ku-small', text: 'Раскроется, когда:' }), condition,
+        element('p', { className: 'muted ku-small', style: { margin: '2px 0 0' }, text: 'Своими словами. Модель сама решает по смыслу, случилось ли это в ответе; до тех пор секрет не раскрывается. Пусто: как обычно.' }),
+      ]));
       if (event.detail) card.append(element('details', { className: 'ku-secret-detail' }, [element('summary', { text: 'Текст секрета' }), element('p', { text: event.detail })]));
       view.append(card);
     }
@@ -739,6 +747,7 @@ button.ku-chip.told{background:var(--k-accent-soft)}
 .ku-knowers{display:flex;flex-wrap:wrap;gap:6px}
 .ku-knower{cursor:pointer;background:transparent;min-height:0}
 .ku-secret-card.off{opacity:.6}
+.ku-secret-when{display:flex;flex-direction:column;gap:4px;margin-top:8px}.ku-secret-when input{width:100%}
 .ku-secret-detail summary{cursor:pointer;font-size:12px;margin-top:8px}
 .ku-secret-detail p{white-space:pre-wrap;font-size:12px;margin:6px 0 0}
 .ku-secret{color:var(--k-warn);font-weight:700}

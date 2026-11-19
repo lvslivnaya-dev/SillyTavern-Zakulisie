@@ -66,6 +66,7 @@ export function startIconStudio(doc, { settings, save, hub, shared = {} }) {
   if (!tab) return () => { if (shared.visual?.icons === presetApi) delete shared.visual.icons; };
   const pane = tab.pane;
   let notice = '';
+  const openFolds = new Set();
   const persist = () => { try { save(); } catch (error) { report('иконки: сохранение', error); } };
 
   const tile = (scope, name) => {
@@ -90,11 +91,14 @@ export function startIconStudio(doc, { settings, save, hub, shared = {} }) {
         </div>
         ${customCount ? `<div class="pud-native-btns"><button type="button" class="menu_button" data-reset-all>Сбросить все свои иконки (${customCount})</button></div>` : ''}
       </div>
-      <h4 class="pud-icohead">Панели и окна Закулисья</h4>
-      <div class="pud-icogrid">${Object.keys(ICONS).map(name => tile('pud', name)).join('')}</div>
-      <h4 class="pud-icohead">Окна отношений, мира и библиотек</h4>
-      <p class="pud-hint">Эти иконки меняются при следующем открытии окна.</p>
-      <div class="pud-icogrid">${ICON_NAMES.map(name => tile('studio', name)).join('')}</div>`;
+      <details class="pud-palgroup" data-fold="pud"${openFolds.has('pud') ? ' open' : ''}><summary>Панели и окна Закулисья</summary>
+        <div class="pud-icogrid">${Object.keys(ICONS).map(name => tile('pud', name)).join('')}</div>
+      </details>
+      <details class="pud-palgroup" data-fold="studio"${openFolds.has('studio') ? ' open' : ''}><summary>Окна отношений, мира и библиотек</summary>
+        <p class="pud-hint">Эти иконки меняются при следующем открытии окна.</p>
+        <div class="pud-icogrid">${ICON_NAMES.map(name => tile('studio', name)).join('')}</div>
+      </details>
+      <p class="pud-hint">Значки настроений меняются во вкладке «Настроение».</p>`;
   };
   presetApi.redraw = () => { notice = ''; render(); };
   render();
@@ -115,6 +119,12 @@ export function startIconStudio(doc, { settings, save, hub, shared = {} }) {
     } catch (error) { notice = error?.message || 'Иконка не заменилась.'; }
     render();
   };
+  const onToggle = event => {
+    const fold = event.target.closest?.('details[data-fold]');
+    if (!fold) return;
+    if (fold.open) openFolds.add(fold.dataset.fold); else openFolds.delete(fold.dataset.fold);
+  };
+  pane.addEventListener('toggle', onToggle, true);
   const onClick = event => {
     const one = event.target.closest?.('[data-reset]');
     const all = event.target.closest?.('[data-reset-all]');
@@ -137,6 +147,7 @@ export function startIconStudio(doc, { settings, save, hub, shared = {} }) {
   return () => {
     if (shared.visual?.icons === presetApi) delete shared.visual.icons;
     pane.removeEventListener('change', onChange);
+    pane.removeEventListener('toggle', onToggle, true);
     pane.removeEventListener('click', onClick);
     tab.remove?.();
     applyCustomIcons(doc, {});

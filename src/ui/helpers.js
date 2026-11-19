@@ -64,6 +64,27 @@ export function infoRow(title, text, tag = 'div') {
 }
 
 const HINT_ANCHORS = 'h2,h3,h4,h5,.section-title,.ku-ctitlerow,.ku-ctitle,.ku-inforow-title,summary,label.ku-title';
+const HINT_LABELS = 'label.ku-inline,label.ku-title,.set-label';
+
+/**
+ * Where the round «?» of a long note should stand: at the end of the heading right above it; of a switch's own label;
+ * of the field's label when the note sits under the control («Ключ API [поле] / пояснение»); or, when the note opens its block,
+ * of the heading above the block. Null = nothing fits, the dot gets a line of its own.
+ */
+function hintAnchor(note) {
+  const before = note.previousElementSibling;
+  if (before?.matches?.(HINT_ANCHORS) || before?.matches?.(HINT_LABELS)) return before;
+  const parent = note.parentElement;
+  if (before && parent) {
+    const label = parent.firstElementChild;
+    if (label !== note && label?.matches?.('label') && !label.querySelector('input,select,textarea,.ku-info-dot') && parent.children.length <= 4) return label;
+  }
+  if (!before && parent) {
+    const above = parent.previousElementSibling;
+    if (above?.matches?.(HINT_ANCHORS) && !above.querySelector('.ku-info-dot')) return above;
+  }
+  return null;
+}
 
 /**
  * Every long «.ku-hint» paragraph under `root` folds into a round «?»: the dot stands at the end of the heading above the text
@@ -73,8 +94,7 @@ export function collapseHints(root, minLength = 60) {
   if (!root?.querySelectorAll) return;
   for (const note of root.querySelectorAll('p.ku-hint:not(.keep):not(.ku-info-note), p.muted.ku-small:not(.keep), p.muted[style*="font-size"]:not(.keep):not(.factors-status)')) {
     if (note.closest('.ku-info-note') || (note.textContent ?? '').trim().length < minLength) continue;
-    const before = note.previousElementSibling;
-    const anchor = before?.matches?.(HINT_ANCHORS) ? before : null;
+    const anchor = hintAnchor(note);
     const dot = infoDot(note, 'Пояснение');
     if (anchor) anchor.append(dot);
     else note.before(element('div', { className: 'ku-inforow alone' }, [dot]));

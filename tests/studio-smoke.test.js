@@ -26,7 +26,7 @@ globalThis.requestAnimationFrame = callback => setTimeout(callback, 0);
 window.requestAnimationFrame = globalThis.requestAnimationFrame;
 
 const { createRelationshipStudio } = await import('../src/ui/studio.js');
-const { NAV_TABS, PENDING_TABS } = await import('../src/ui/layout.js');
+const { NAV_TABS, PENDING_TABS, MOVED_TABS } = await import('../src/ui/layout.js');
 const { mountTopBarButton } = await import('../src/integration/shell.js');
 
 function sampleState() {
@@ -71,12 +71,15 @@ for (const mode of ['window', 'dock']) {
     test(`${mode}: tab «${label}» renders`, () => {
       let studio;
       const snapshot = sampleState();
+      const moved = Boolean(MOVED_TABS[tab]);
       const errors = captureErrors(() => {
-        studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, open: true, layout: { mode, tab } });
+        // a page that lives in the settings window of the tavern is drawn as an embedded page, not as a tab of the Studio
+        studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, open: true, layout: { mode, tab }, ...(moved ? { embedPage: { tab } } : {}) });
       });
       try {
         assert.deepEqual(errors, [], errors.join('\n'));
         const shadow = studio.element.shadowRoot;
+        if (moved) { assert.ok(shadow.querySelector('.content'), 'content area'); return; }
         const panel = shadow.querySelector('.studio');
         assert.equal(panel.classList.contains('dock'), mode === 'dock');
         assert.ok(shadow.querySelector('.content'), 'content area');
@@ -99,13 +102,13 @@ test('switching tabs and modes reports the layout and keeps rendering', () => {
       onLayoutChange: value => changes.push(value),
     });
     const shadow = studio.element.shadowRoot;
-    [...shadow.querySelectorAll('.nav button')].find(node => node.textContent.includes('История')).click();
+    [...shadow.querySelectorAll('.nav button')].find(node => node.textContent.includes('Хроника')).click();
     shadow.querySelector('.mode-toggle').click();
     shadow.querySelector('.mode-toggle').click();
   });
   try {
     assert.deepEqual(errors, [], errors.join('\n'));
-    assert.deepEqual(changes.map(({ mode, tab }) => `${mode}:${tab}`), ['window:setup', 'window:journal', 'dock:journal', 'window:journal'], 'opening is reported too');
+    assert.deepEqual(changes.map(({ mode, tab }) => `${mode}:${tab}`), ['window:setup', 'window:chronicle', 'dock:chronicle', 'window:chronicle'], 'opening is reported too');
     assert.equal(changes[0].open, true);
     studio.close();
     assert.equal(changes.at(-1).open, false, 'closing is remembered');
@@ -234,7 +237,7 @@ test('"what the model gets": one card per block in request order, each saying wh
     assert.deepEqual(errors, [], errors.join('\n'));
     const root = studio.element.shadowRoot;
     // Settings open on «Модули»: four module cards, switches instead of a save form.
-    assert.equal(root.querySelectorAll('.set-module').length, 4);
+    assert.equal(root.querySelectorAll('.set-module').length, 6);
     assert.equal(root.querySelector('form.settings'), null);
     const section = label => [...root.querySelectorAll('.set-nav button')].find(node => node.textContent === label);
     section('Что получает модель').click();
@@ -297,12 +300,12 @@ test('settings: a switch applies at once, "?" unfolds its hint, the chronicle se
     assert.deepEqual(errors, [], errors.join('\n'));
     const root = studio.element.shadowRoot;
     const section = label => [...root.querySelectorAll('.set-nav button')].find(node => node.textContent === label);
-    section('Как работает').click();
+    section('Автоматика').click();
     const first = root.querySelector('.set-item');
     const help = first.querySelector('.set-help');
-    assert.equal(first.querySelector('.set-hint').hidden, true);
-    help.click();
-    assert.equal(first.querySelector('.set-hint').hidden, false);
+    assert.ok(help.dataset.tip.length > 10, 'the explanation is in the "?" next to the name and shows when you point at it');
+    assert.equal(first.querySelector('.set-hint'), null, 'no hint line under the name');
+    assert.equal(help.parentElement.classList.contains('set-label'), true, 'the "?" stands right after the name');
     const switchInput = first.querySelector('.set-switch');
     switchInput.checked = true;
     switchInput.dispatchEvent(new window.Event('change'));
@@ -503,14 +506,14 @@ const embeddedPersona = (extra = {}, { library, options = {} } = {}) => {
   const base = sampleState();
   const card = { id: 'pc1', folderId: 'f1', name: 'Судзу', aliases: [], persona: true, avatar: 'suzu.png', sections: [], records: [], ...extra };
   const snapshot = {
-    ...base, personaBoundName: 'Судзу', personaAvatar: 'suzu.png', personaPrivate: 'Колючая', tavernPersonas: [{ avatarId: 'suzu.png', name: 'Судзу' }], personaCardId: 'pc1', personaAu: ['au1'],
+    ...base, personaBoundName: 'Судзу', personaAvatar: 'suzu.png', personaPrivate: 'Колючая', tavernPersonas: [{ avatarId: 'suzu.png', name: 'Судзу' }], personaCardId: 'pc1',
     locationLibrary: library ?? { folders: [{ id: 'f1', name: 'Персоны', persona: true }], locations: [], items: [], characters: [card] },
-    personaCards: { enabled: true, au: [{ id: 'au1', name: 'Универ' }, { id: 'au2', name: 'Мафия' }], cards: [] },
+    personaCards: { enabled: true, cards: [] },
   };
   return { snapshot, options };
 };
 
-test('persona window, the embedded card: no strip of its own, the foot says whether she is the one you wear, the AU is a button there; the hidden character lives in the card', () => {
+test('persona window, the embedded card: no strip of its own, the foot says whether she is the one you wear; the hidden character lives in the card', () => {
   const { snapshot } = embeddedPersona();
   const place = document.createElement('div');
   document.body.append(place);
@@ -525,7 +528,8 @@ test('persona window, the embedded card: no strip of its own, the foot says whet
     assert.equal(shadow.querySelector('.ku-embed-strip'), null, 'no strip over the card: the card has all the room');
     assert.equal(shadow.querySelector('select[aria-label="Персона SillyTavern для этого чата"]'), null, 'nothing to choose or tie: the worn persona is the persona of the chat');
     assert.equal(shadow.querySelector('.ku-pstate'), null, 'inside the tavern the top of the window already says whether she is worn');
-    assert.ok(shadow.querySelector('.ku-cfoot-au'), 'the AU is a button with a caption beside the names, the closet and the sizes');
+    assert.equal(shadow.querySelector('.ku-cfoot-au'), null, 'no AU button any more');
+    assert.ok(!NAV_TABS.some(([id]) => id === 'personas'), 'no page «Персоны» in the Studio any more');
     assert.equal(shadow.querySelector('textarea[aria-label="Скрытый характер персоны"]'), null, 'it lives in the card of the persona');
     studio.showWindow?.('relations');
   } finally { studio?.destroy(); place.remove(); }
@@ -537,37 +541,9 @@ test('persona window, the embedded card: no strip of its own, the foot says whet
   } finally { host?.destroy(); }
 });
 
-test('persona window: the AU of the chat are switched with the «АУ» button of the card, several at once', async () => {
-  const { snapshot } = embeddedPersona();
-  const place = document.createElement('div');
-  document.body.append(place);
-  const calls = [];
-  let studio;
-  const errors = captureErrors(() => {
-    studio = createRelationshipStudio({ store: { getSnapshot: () => snapshot }, container: place, embedCard: true, callbacks: {
-      onPersonaAuToggle: payload => { calls.push(['au', payload]); },
-    } });
-    studio.showCard('pc1');
-  });
-  try {
-    assert.deepEqual(errors, [], errors.join('\n'));
-    const shadow = studio.element.shadowRoot;
-    assert.equal(shadow.querySelector('.ku-aupop'), null, 'closed until the button is pressed');
-    shadow.querySelector('.ku-cfoot-au').click();
-    const box = shadow.querySelector('input[aria-label="АУ «Универ» включено в этом чате"]');
-    assert.equal(box.checked, true);
-    const second = shadow.querySelector('input[aria-label="АУ «Мафия» включено в этом чате"]');
-    second.checked = true;
-    second.dispatchEvent(new window.Event('change'));
-    await new Promise(resolve => setTimeout(resolve, 0));
-    assert.deepEqual(calls.at(-1), ['au', { id: 'au2', on: true }], 'several AU can be on at once');
-    assert.ok(!NAV_TABS.some(([id]) => id === 'personas'), 'no page «Персоны» in the Studio any more');
-  } finally { studio?.destroy(); place.remove(); }
-});
-
 test('persona window, the embedded card: the looks are described from a picture, the records are a part of the card and are saved with it', async () => {
   const sections = [{ id: 's1', kind: 'visual', title: 'Visual', text: 'Рыжая' }];
-  const { snapshot } = embeddedPersona({ sections, records: [{ id: 'r1', text: 'Рэн видит в ней сестру', about: ['Рэн'], knows: [], au: [] }] });
+  const { snapshot } = embeddedPersona({ sections, records: [{ id: 'r1', text: 'Рэн видит в ней сестру', about: ['Рэн'], knows: [] }] });
   const place = document.createElement('div');
   document.body.append(place);
   const calls = [];
@@ -631,7 +607,7 @@ test('calendar page: month grid with events, a day, the editor and the generator
     assert.equal(shadow.querySelectorAll('.ku-cal-cell').length, 42);
     assert.ok(shadow.querySelector('.ku-cal-cell.today.must'), 'today is marked, with a must event');
     assert.equal(shadow.querySelector('select.ku-cal-pick[aria-label="Месяц"]').selectedOptions[0].textContent, 'Апрель', 'the month and the year are chosen apart');
-    assert.equal(shadow.querySelector('select.ku-cal-pick[aria-label="Год"]').value, '2025');
+    assert.equal(shadow.querySelector('input.ku-cal-pick[aria-label="Год"]').value, '2025');
     assert.match(shadow.textContent, /10:00 · Контрольная по анатомии/);
     assert.match(shadow.textContent, /Сегодня в истории: вторник, 8 апреля 2025 \(день 2\)/);
     [...shadow.querySelectorAll('button')].find(item => item.textContent === '+ Событие').click();
@@ -1039,6 +1015,8 @@ test('own calendar: the grid follows its weekdays and months, dates are typed as
     months: [{ name: 'Льдов', days: 20, season: 'warm' }, { name: 'Цветов', days: 25, season: 'warm' }],
   });
   const calls = [];
+  const soundCalls = [];
+  const soundApi = { view: () => ({ available: true, enabled: false, volume: 35, status: '', testing: false, kinds: [{ kind: 'rain', icon: '🌧', label: 'Дождь', file: '' }] }), subscribe: () => () => {}, setEnabled: on => soundCalls.push(['enabled', on]), setVolume() {}, pick: async () => {}, remove: async () => {}, test: async () => {}, endTest() {} };
   const snapshot = {
     ...sampleState(),
     world: { clock: { day: 3, time: '14:20' } },
@@ -1059,7 +1037,7 @@ test('own calendar: the grid follows its weekdays and months, dates are typed as
     const root = studio.element.shadowRoot;
     assert.deepEqual([...root.querySelectorAll('.ku-cal-head')].map(node => node.textContent), ['Пе', 'Вт', 'Тр', 'Че', 'Пя']);
     assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Месяц"]').selectedOptions[0].textContent, 'Цветов');
-    assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Год"]').value, '14');
+    assert.equal(root.querySelector('input.ku-cal-pick[aria-label="Год"]').value, '14');
     assert.match(root.textContent, /эры Огня/);
     // Month 2 of year 14 has 25 days in a five-day week: five full rows, and day 3 is marked.
     assert.equal(root.querySelectorAll('.ku-cal-cell').length, 25);
@@ -1084,9 +1062,9 @@ test('own calendar: the grid follows its weekdays and months, dates are typed as
     // Next month of the last month goes round to the first one: the year stays, it has its own arrows.
     [...root.querySelectorAll('button')].find(item => item.getAttribute('title') === 'Следующий месяц (год не меняется)').click();
     assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Месяц"]').selectedOptions[0].textContent, 'Льдов');
-    assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Год"]').value, '14');
+    assert.equal(root.querySelector('input.ku-cal-pick[aria-label="Год"]').value, '14');
     [...root.querySelectorAll('button')].find(item => item.getAttribute('title') === 'Следующий год').click();
-    assert.equal(root.querySelector('select.ku-cal-pick[aria-label="Год"]').value, '15');
+    assert.equal(root.querySelector('input.ku-cal-pick[aria-label="Год"]').value, '15');
   } finally { studio?.destroy(); }
 });
 
@@ -1232,23 +1210,26 @@ test('quests page: steps tick, a step is pushed, ending asks for a note and the 
   } finally { studio?.destroy(); }
 });
 
-test('settings window: one flat list of pages, no group headings', async () => {
-  const saved = [];
+test('the old settings window is gone: its pages are embedded pages, a link to one asks the settings window of the tavern to open it', () => {
+  const asked = [];
+  const place = document.createElement('div');
+  document.body.append(place);
   let studio;
   const errors = captureErrors(() => {
-    studio = createRelationshipStudio({ store: { getSnapshot: () => sampleState() }, open: true, layout: { mode: 'window', tab: 'dice' }, callbacks: {
-      onLayoutChange: value => { saved.push(value); },
-    } });
+    studio = createRelationshipStudio({ store: { getSnapshot: () => sampleState() }, open: true, layout: { mode: 'window', tab: 'scene' }, onMoved: (page, extra) => { asked.push([page, extra]); return true; } });
   });
   try {
     assert.deepEqual(errors, [], errors.join('\n'));
     const root = studio.element.shadowRoot;
-    assert.equal(root.querySelectorAll('.nav-fold').length, 0, 'the settings window is one flat list: no «Мир» / «Система» headings');
     const items = [...root.querySelectorAll('.nav button .nav-label')].map(node => node.textContent);
-    assert.ok(items.includes('Имена') && items.includes('Настройки'));
-    assert.ok(!items.includes('Погода'), 'the weather moved to the calendar window');
-    assert.equal(root.querySelector('.hero .section-title'), null, 'and no eyebrow over the title');
-  } finally { studio?.destroy(); }
+    assert.ok(!items.includes('Имена') && !items.includes('Настройки') && !items.includes('Кубик'), 'no pages of the old window in the menu');
+    assert.ok(items.includes('Лорбуки') && items.includes('Настройка чата'), 'the lorebooks and the setup of the chat joined «Сцена»');
+    studio.show('dice');
+    studio.show('settings');
+    studio.openSettings('models', { focus: 'x' });
+    studio.openSettings('scene', {});
+    assert.deepEqual(asked, [['k-dice', {}], ['k-modules', {}], ['k-models', { section: 'models', focus: 'x' }], ['k-modules', { section: 'scene', focus: '' }]]);
+  } finally { studio?.destroy(); place.remove(); }
 });
 
 test('songs page: the library, the recognition check, adding a song, saving a field, the switches', async () => {
@@ -1291,14 +1272,16 @@ test('songs page: the library, the recognition check, adding a song, saving a fi
     assert.match(root.querySelector('.ku-songs-probe').textContent, /Ничего не узнано/);
     tool('Проверить узнавание').click();
     // Add a song.
-    const [title, artist] = root.querySelectorAll('.ku-songs-add input');
-    title.value = 'Дождь';
-    title.dispatchEvent(new window.Event('input'));
-    artist.value = 'Сплин';
-    artist.dispatchEvent(new window.Event('input'));
-    [...root.querySelectorAll('button')].find(item => item.textContent === 'Добавить').click();
+    const press = text => [...root.querySelectorAll('button')].find(item => item.textContent === text).click();
+    press('＋ Добавить песню'); // one button opens the whole form
+    const typeInto = (label, value) => { const control = root.querySelector(`[aria-label="${label}"]`); control.value = value; control.dispatchEvent(new window.Event('input')); };
+    typeInto('Название песни', 'Дождь');
+    typeInto('Исполнитель', 'Сплин');
+    typeInto('Слова песни', 'Дождь идёт');
+    press('Сохранить песню');
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.deepEqual(calls[0], ['add', { title: 'Дождь', artist: 'Сплин', folderId: '' }]);
+    assert.equal(calls[0][0], 'add');
+    assert.deepEqual([calls[0][1].title, calls[0][1].artist, calls[0][1].lyrics, calls[0][1].folderId], ['Дождь', 'Сплин', 'Дождь идёт', '']);
     // A text typed into a song is saved as it is; keys go as a list.
     const details = root.querySelector('.ku-names-card');
     details.open = true;
@@ -1393,4 +1376,55 @@ test('a redraw keeps where every scrolled list was (the content, and a list insi
   } finally {
     studio?.destroy();
   }
+});
+
+test('a page of the settings window of the tavern: only its own sections, nothing is drawn while it is hidden, and it is drawn when shown', () => {
+  const place = document.createElement('div');
+  document.body.append(place);
+  let visible = false;
+  let studio;
+  const errors = captureErrors(() => {
+    studio = createRelationshipStudio({ store: { getSnapshot: () => sampleState() }, container: place, embedPage: { tab: 'settings', section: 'models', sections: ['models'] }, isVisible: () => visible });
+  });
+  try {
+    assert.deepEqual(errors, [], errors.join('\n'));
+    const shadow = studio.element.shadowRoot;
+    assert.equal(shadow.querySelector('.set-shell'), null, 'hidden: nothing is drawn');
+    assert.equal(studio.isStale(), true);
+    visible = true;
+    studio.refresh();
+    assert.ok(shadow.querySelector('.set-shell'), 'shown: the page is there');
+    assert.equal(shadow.querySelector('.set-nav'), null, 'one section: no menu of sections');
+    assert.match(shadow.textContent, /Модели и API|Вспомогательн/, 'the section is the one asked for');
+    assert.equal(shadow.querySelector('.header'), null, 'no window chrome of the Studio');
+  } finally { studio?.destroy(); place.remove(); }
+  // Several sections: the cards of the modules open their pages here; «Автоматика» is the old «Как работает».
+  const second = document.createElement('div');
+  document.body.append(second);
+  let modules;
+  try {
+    modules = createRelationshipStudio({ store: { getSnapshot: () => sampleState() }, container: second, embedPage: { tab: 'settings', section: 'modules', sections: ['modules', 'behaviour', 'scene'] } });
+    const shadow = modules.element.shadowRoot;
+    // the cards are the menu: six of them, no side menu inside the page
+    assert.equal(shadow.querySelector('.set-nav'), null, 'no menu inside the page');
+    assert.deepEqual([...shadow.querySelectorAll('.set-module .set-module-title strong')].map(item => item.textContent), ['Отношения', 'Знания', 'Сцена', 'Хроника', 'Суфлёр лорбуков', 'Автоматика']);
+    // a card opens its page in the same window, with a way back
+    [...shadow.querySelectorAll('.set-module')].find(card => card.textContent.includes('Автоматика')).click();
+    assert.ok(shadow.querySelector('.set-back'), 'the way back to the cards');
+    assert.match(shadow.textContent, /Как работает/);
+    shadow.querySelector('.set-back').click();
+    assert.equal(shadow.querySelectorAll('.set-module').length, 6);
+  } finally { modules?.destroy(); second.remove(); }
+});
+
+test('«Проанализировать историю» and «Проверить последний ответ» stand only on the pages the analysis is about', () => {
+  const buttonsOn = tab => {
+    const studio = createRelationshipStudio({ store: { getSnapshot: () => sampleState() }, open: true, layout: { mode: 'window', tab } });
+    try { return [...studio.element.shadowRoot.querySelectorAll('.header button')].map(node => node.textContent).filter(text => /Проанализировать историю|Проверить последний ответ/.test(text)).length; }
+    finally { studio.destroy(); }
+  };
+  assert.equal(buttonsOn('scene'), 2);
+  assert.equal(buttonsOn('overview'), 2);
+  assert.equal(buttonsOn('wardrobe'), 0);
+  assert.equal(buttonsOn('calendar'), 0);
 });

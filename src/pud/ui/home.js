@@ -454,10 +454,50 @@ export function startHome(doc, { context, settings, save, api = tavernApi, stora
     undo.push(() => context.eventSource.removeListener?.(type, handler));
   };
   const reloadIfVisible = () => { if (shown || chatsWin.isOpen) load(); };
-  on('CHAT_CHANGED', schedule);
+
+  // ── обновление страницы: остаться там, где была (в чате — в том же чате, на главной — на главной) ──
+  // Место пишется в браузер при каждой смене чата и читается один раз при запуске. Пока запуск не закончился,
+  // «чата нет» не записывается, иначе начальное пустое состояние таверны стёрло бы запомненный чат раньше, чем он откроется.
+  const PLACE_KEY = 'zakulisie.place';
+  const placeNow = () => {
+    const ctx = live();
+    const file = ctx.getCurrentChatId?.();
+    if (file === undefined || file === null) return { kind: 'home' };
+    if (ctx.groupId) return { kind: 'group', groupId: String(ctx.groupId), file: String(file) };
+    const avatar = ctx.characters?.[ctx.characterId]?.avatar;
+    return avatar ? { kind: 'char', avatar, file: String(file) } : null; // временный чат и прочее: не запоминаем
+  };
+  const readPlace = () => { try { return JSON.parse(storage?.getItem(PLACE_KEY) ?? 'null'); } catch { return null; } };
+  const writePlace = place => { try { if (place) storage?.setItem?.(PLACE_KEY, JSON.stringify(place)); } catch { /* хранилище закрыто: просто не запомним */ } };
+  let launching = true;
+  let restoring = false;
+  const rememberPlace = () => {
+    if (launching || restoring) return;
+    try { writePlace(placeNow()); } catch (error) { report('запоминание места', error); }
+  };
+  /** Один раз после запуска: если таверна не открыла чат сама, а запомнен чат, открываем его. */
+  const restorePlace = async () => {
+    if (!launching) return;
+    restoring = true;
+    try {
+      const place = readPlace();
+      const ctx = live();
+      // Закрыла чат и обновила страницу: таверна сама могла открыть последний чат (автозагрузка), возвращаем на главную.
+      if (place?.kind === 'home' && ctx.getCurrentChatId?.() !== undefined && (ctx.characterId !== undefined || ctx.groupId)) api.closeChat?.(doc);
+      if (place && place.kind !== 'home' && place.file && isHome() && ctx.getCurrentChatId?.() === undefined) {
+        const known = place.kind === 'group' ? (ctx.groups ?? []).some(group => String(group.id) === place.groupId) : (ctx.characters ?? []).some(character => character.avatar === place.avatar);
+        if (known) await api.openChat(place.kind === 'group' ? { kind: 'group', key: `group:${place.groupId}`, groupId: place.groupId, chats: [] } : { kind: 'char', key: place.avatar, avatar: place.avatar, chats: [] }, place.file);
+      }
+    } catch (error) { report('возврат в чат после обновления страницы', error); }
+    finally { restoring = false; launching = false; schedule(); rememberPlace(); }
+  };
+  // Характеры могут ещё грузиться, когда расширение запускается: ждём APP_READY, а если его не будет, пробуем сами.
+  const launchTimer = view.setTimeout(() => { if (launching && (live().characters?.length ?? 0) > 0) restorePlace(); }, 4000);
+  undo.push(() => view.clearTimeout(launchTimer));
+  on('CHAT_CHANGED', () => { schedule(); rememberPlace(); });
   // The first load may run while the tavern is still fetching its characters (groupChats drops every chat whose owner is not in the list yet,
   // hence «0 чатов» until the manual refresh): once the app is ready the list is read again.
-  on('APP_READY', () => { schedule(); reloadIfVisible(); });
+  on('APP_READY', () => { schedule(); reloadIfVisible(); restorePlace(); });
   for (const name of ['CHAT_DELETED', 'GROUP_CHAT_DELETED', 'CHARACTER_DELETED', 'GROUP_UPDATED']) on(name, reloadIfVisible);
   on('CHAT_RENAMED', data => {
     try {

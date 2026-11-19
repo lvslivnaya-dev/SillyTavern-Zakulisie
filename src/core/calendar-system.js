@@ -32,16 +32,25 @@ const EARTH_WEEKDAYS_SHORT = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', '�
 const EARTH_MONTHS_OF = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const EARTH_MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
+/** Date.UTC reads the years 0–99 as 1900–1999; this one takes the year as it is (year 1 is year 1). */
+const utcMs = (year, monthIndex, day) => {
+  const date = new Date(0);
+  date.setUTCFullYear(year, monthIndex, day);
+  return date.getTime();
+};
+
 const earthMs = value => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
   if (!match) return null;
-  const ms = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const ms = utcMs(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
   const date = new Date(ms);
   return date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]) ? ms : null;
 };
 const earthIso = ms => {
   const date = new Date(ms);
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+  // four digits only: a day before year 0 or after year 9999 is not a date of this calendar
+  if (!(date.getUTCFullYear() >= 0 && date.getUTCFullYear() <= 9999)) return '';
+  return `${String(date.getUTCFullYear()).padStart(4, '0')}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 };
 
 function earthClock() {
@@ -56,7 +65,7 @@ function earthClock() {
     monthNames: EARTH_MONTHS,
     parse: iso => { const ms = earthMs(iso); return ms == null ? null : Math.round(ms / DAY_MS); },
     format: index => (Number.isFinite(index) ? earthIso(index * DAY_MS) : ''),
-    daysInMonth: (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate(),
+    daysInMonth: (year, month) => new Date(utcMs(year, month, 0)).getUTCDate(),
     seasonOf: () => null,
     seasons: [],
   };

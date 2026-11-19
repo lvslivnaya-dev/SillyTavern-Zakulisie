@@ -3,6 +3,7 @@
  * а любую линию можно закрепить маленьким виджетом на экране или мини-графиком в шторке сцены.
  * Данные приходят из моста Кулис (bridge.scene.lines / scales / series), состояние не меняется.
  */
+import { buildColorsPrompt, colorsFromReply } from '../core/color-ai.js';
 import { report } from '../core/guard.js';
 import { SERIES_COLORS, STICKER_PALETTE, STICKER_ROLES, STICKER_THRESHOLD, chartPath, cleanStickerColor, normalizeRelGraph, normalizeStickers, stickerCss, stickerLook, zeroY } from '../core/relgraph.js';
 import { watchRail, railHost } from './rail-extras.js';
@@ -28,6 +29,10 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
   const tab = shared.hub?.addTab?.('relgraph', 'Отношения', 'chart');
   const view = doc.defaultView;
   const pane = tab?.pane;
+  // the colours of the stickers live in the palette (a drawer «Палитра отношений»); without such a hub they stay on this page
+  const foldTab = shared.hub?.addFold?.('relpalette', 'Палитра отношений', 'palette') ?? null;
+  const stickerHost = foldTab?.pane ?? doc.createElement('div');
+  const gen = { desc: '', busy: false, note: '' };
   settings.relGraph = { ...normalizeRelGraph(settings.relGraph), positions: settings.relGraph?.positions && typeof settings.relGraph.positions === 'object' ? settings.relGraph.positions : {} };
   const cfg = () => settings.relGraph;
   const persist = () => { try { save(); } catch (error) { report('график отношений: сохранение', error); } };
@@ -215,6 +220,11 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
     return `<div class="pud-card pud-card-col pud-stickers-card">
       <b>Стикеры</b>
       <p class="pud-hint">Шкалы пары рисуются стикерами: значок шкалы в рамке, которая заполняется цветом снизу по мере роста или падения. Цвета берутся из палитры (или любой свой). Когда значение выше ${STICKER_THRESHOLD} или ниже −${STICKER_THRESHOLD}, можно поставить другой цвет.</p>
+      <div class="pud-palai">
+        <input type="text" class="text_pole" data-stk-desc maxlength="200" value="${escapeHtml(gen.desc)}" placeholder="Опиши цвета: нежные, осенние, неоновые…"${gen.busy ? ' disabled' : ''}>
+        <button type="button" class="menu_button" data-stk-gen${gen.busy ? ' disabled' : ''}>${gen.busy ? 'Подбираю…' : 'Подобрать'}</button>
+      </div>
+      ${gen.note ? `<p class="pud-hint">${escapeHtml(gen.note)}</p>` : ''}
       <div class="pud-peek-city">
         <button type="button" class="menu_button${st.mode === 'stickers' ? ' on' : ''}" data-stk-mode="stickers">Стикеры</button>
         <button type="button" class="menu_button${st.mode === 'bars' ? ' on' : ''}" data-stk-mode="bars">Полоски</button>
@@ -255,6 +265,7 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
 
   // ───────── вкладка
   function render() {
+    stickerHost.innerHTML = stickersHtml();
     if (!pane) return;
     const all = lines();
     const sc = scales();
@@ -267,7 +278,6 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
       <h3>Отношения</h3>
       <p class="pud-hint">Сводка «сейчас»: у каждой пары значения выбранных шкал и сдвиг за последние изменения (стрелка). Ниже последние сдвиги: нажмите на строку, чтобы перейти к сообщению. График по шагам спрятан в раскрывающийся блок.</p>
       ${api ? '' : '<p class="pud-lib-empty">Модуль Кулис не подключён: данных нет.</p>'}
-      ${stickersHtml()}
       <div class="pud-card pud-card-col">
         <b>Сейчас</b>
         <p class="pud-hint">Шкалы у каждой линии свои: нажмите ⚙ у линии и выберите значки. Выбрать можно сколько угодно, хоть все.</p>
@@ -285,6 +295,7 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
         </div>
       </details>
       ${c.pinned.length ? `<div class="pud-card pud-card-col"><b>Закреплено</b><ul class="pud-thread-list">${c.pinned.map(item => `<li class="pud-thread"><span class="pud-thread-text">${escapeHtml(labelOf(item.lineId))} · ${item.place === 'rail' ? 'в шторке' : 'виджет'}</span><button type="button" class="menu_button" data-act="unpin-id" data-id="${escapeHtml(item.lineId)}">Открепить</button></li>`).join('')}</ul></div>` : ''}`;
+    if (!foldTab) pane.append(stickerHost);
   }
   /** Закрепить линию наверху сводки, скрыть, вернуть или задать ей свой набор шкал. */
   function relAction(node) {
@@ -351,7 +362,37 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
     if (target.dataset?.field === 'line') { cfg().lineId = target.value; persist(); render(); }
     if (target.matches?.('[data-stk-pick]')) { stickerAction(target, target.value); render(); }
   };
+  const onInput = event => { if (event.target.matches?.('[data-stk-desc]')) gen.desc = event.target.value; };
+  /** Colours of the stickers by a description: the model picks, only valid colours are taken. */
+  async function generateStickers() {
+    if (gen.busy) return;
+    if (!gen.desc.trim()) { gen.note = 'Сначала опиши, какие цвета хочешь.'; render(); return; }
+    gen.busy = true;
+    gen.note = 'Модель подбирает цвета, это может занять до минуты.';
+    render();
+    try {
+      const st = cfg().stickers;
+      const roles = STICKER_ROLES.map(([id, label, hint]) => ({ id, label, hint, current: cleanStickerColor(st.colors[id]) }));
+      // through the auxiliary model when there is one (and it is on for generation), else the chat's own
+      const generate = (bridge?.routedContext?.('generation') ?? context)?.generateRaw ?? globalThis.SillyTavern?.getContext?.()?.generateRaw;
+      if (typeof generate !== 'function') throw new Error('модель не подключена');
+      const reply = await generate({ ...buildColorsPrompt(gen.desc, roles, 'relationship stickers: the fill colour when a scale grows or falls'), responseLength: 600 });
+      const colors = colorsFromReply(reply, STICKER_ROLES.map(([id]) => id));
+      settings.relGraph.stickers = normalizeStickers({ ...st, colors: { ...st.colors, ...colors } });
+      persist();
+      paintRail();
+      shared.quick?.refresh('relgraph');
+      gen.note = `Готово: подобрано цветов — ${Object.keys(colors).length}.`;
+    } catch (error) {
+      report('палитра отношений по описанию', error);
+      gen.note = `Не вышло: ${error?.message ?? error}. Проверь, что модель подключена, и попробуй ещё раз.`;
+    } finally {
+      gen.busy = false;
+      render();
+    }
+  }
   const onClick = event => {
+    if (event.target.closest?.('[data-stk-gen]')) { generateStickers(); return; }
     if (event.target.closest?.('[data-stk-pick]')) return;
     if (stickerAction(event.target)) { render(); return; }
     if (relAction(event.target) || toMessage(event.target)) return;
@@ -363,8 +404,9 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
     else if (target.dataset.act === 'unpin' && lineId) unpin(lineId);
     else if (target.dataset.act === 'unpin-id') unpin(target.dataset.id);
   };
-  pane?.addEventListener('change', onChange);
-  pane?.addEventListener('click', onClick);
+  const hosts = [pane, stickerHost].filter(Boolean);
+  for (const host of hosts) { host.addEventListener('change', onChange); host.addEventListener('input', onInput); host.addEventListener('click', onClick); }
+  if (!foldTab && pane) pane.append(stickerHost);
   const paneObserver = pane ? new view.MutationObserver(() => { if (!pane.hidden) render(); }) : null;
   paneObserver?.observe(pane, { attributes: true, attributeFilter: ['hidden'] });
 
@@ -381,8 +423,8 @@ export function startRelGraph(doc, { context, settings, save, shared = {}, bridg
     stopRail();
     unsubscribeScene();
     paneObserver?.disconnect();
-    pane?.removeEventListener('change', onChange);
-    pane?.removeEventListener('click', onClick);
+    for (const host of hosts) { host.removeEventListener('change', onChange); host.removeEventListener('input', onInput); host.removeEventListener('click', onClick); }
+    foldTab?.remove?.();
     doc.removeEventListener('click', onWidgetClick);
     if (types.CHAT_CHANGED) events?.removeListener?.(types.CHAT_CHANGED, refresh);
     for (const entry of widgets.values()) entry.node.remove();

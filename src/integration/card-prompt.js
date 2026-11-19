@@ -133,7 +133,6 @@ export function planCards({ state, library, config, extraNames = new Map(), pres
   const keyText = `${namedText}\n${replyText}`;
 
   const staged = new Set(present);
-  const auOn = new Set(state.ui?.au ?? []);
   const sent = [];
   const order = [...byEntity.keys()].filter(id => state.entities[id] && id !== personaId);
   for (const id of order) {
@@ -147,13 +146,10 @@ export function planCards({ state, library, config, extraNames = new Map(), pres
     for (const section of filledSections(card)) {
       const base = gate.sections[section.kind] ?? gate.sections.other;
       const rule = { when: section.when || base.when, absent: base.absent };
-      // A section written for some AU waits until one of them is on in this chat.
-      let verdict = section.au?.length && !section.au.some(item => auOn.has(item))
-        ? { action: 'drop', why: 'не для этого АУ', entrance: false }
-        : decideSection(rule, {
-          onStage, isNamed, mode, entranceDue, ago: turn - last,
-          partner: () => partnerNamed(lower(section.text), id, around),
-        });
+      let verdict = decideSection(rule, {
+        onStage, isNamed, mode, entranceDue, ago: turn - last,
+        partner: () => partnerNamed(lower(section.text), id, around),
+      });
       // «By keys» has no lorebook to leave it to: the section's own key words decide.
       if (verdict.action === 'keep') {
         const hit = entryKeysHit({ key: section.keys ?? [] }, keyText);

@@ -4,7 +4,9 @@
  * state.knowledge = {
  *   events:        [{ id, text, witnessIds[], location?, secret?, disabled?, createdAt?, lore?, own?, detail? }]
  *                  (lore: { book, uid } of a lorebook secret, detail: its text — see lore-secrets.js;
- *                   own: a secret the user made by hand, with its own detail; witnessIds = who knows it)
+ *                   own: a secret the user made by hand, with its own detail; witnessIds = who knows it;
+ *                   condition: in words, when the secret comes out — the analyzer judges by meaning whether it was met;
+ *                   personaRecord: id of the record of a persona's card this secret was made from, kept in step with it)
  *   learned:       [{ id, eventId, entityId, source: 'told'|'rumor', fromId?, disabled? }]
  *   acquaintances: { 'a|b': 'known' | 'seen' | 'strangers' }   (sorted pair key; absent = default)
  *   scene:         { presentIds[], location, locationId?, lore? }   (locationId: a card in state.world.locations;
@@ -113,6 +115,12 @@ export function applyKnowledgeMutation(next, operation) {
         const detail = cleanSecretText(item.detail);
         if (detail) event.detail = detail;
       }
+      if (event.secret) {
+        const condition = cleanText(item.condition, 300);
+        if (condition) event.condition = condition;
+        const record = cleanText(item.personaRecord, 80);
+        if (record && event.own) event.personaRecord = record;
+      }
       knowledge.events.push(event);
       break;
     }
@@ -142,6 +150,10 @@ export function applyKnowledgeMutation(next, operation) {
       // A secret made by hand: an ordinary event becomes one (with a text for those who know) or stops being one.
       if (changes.own != null && !event.lore) {
         if (changes.own) { event.own = true; event.secret = true; } else { delete event.own; delete event.detail; }
+      }
+      if (changes.condition != null && event.secret) {
+        const condition = cleanText(changes.condition, 300);
+        if (condition) event.condition = condition; else delete event.condition;
       }
       if (changes.detail != null && (event.lore || event.own)) {
         const detail = cleanSecretText(changes.detail);

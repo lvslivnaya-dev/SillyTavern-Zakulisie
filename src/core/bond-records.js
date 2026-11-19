@@ -1,13 +1,15 @@
 /**
  * Records between characters, in the library: a memory they share, a tension between them, a headcanon about how they are with each other.
  * One kind of record with a type, not three separate lists. A record is tied to cards of the library (the persona's card too), so it
- * belongs to the characters themselves and works in every chat, whatever the characters are called there; it may name the AU it is for.
+ * belongs to the characters themselves and works in every chat, whatever the characters are called there.
  *
- * It goes out when every character it is tied to is on stage and its AU is on (a record with no AU is for every AU).
- * Stored in the library: library.bonds = [{ id, type, text, cardIds[], au[], off?, intensity? (1–5), pinned? }].
+ * It goes out when at least one of the characters it is tied to is on stage (the others of a group may be away: the ones who are here
+ * must still remember it). The persona alone does not count: she is always in the scene. Only the people named in a line know it.
+ * Stored in the library: library.bonds = [{ id, type, text, cardIds[], off?, intensity? (1–5), pinned? }].
  * A pinned record always goes (past the size limit); the rest go strongest first.
  */
 import { uniqueId } from './ids.js';
+import { relativeScores } from './semantic.js';
 
 export const BOND_TYPES = Object.freeze({ memory: 'Воспоминание', tension: 'Напряжение', headcanon: 'Хедканон' });
 export const BOND_LIMITS = Object.freeze({ records: 600, text: 600, people: 8, promptCharacters: 3000 });
@@ -30,7 +32,7 @@ export function cleanBonds(raw) {
     seen.add(id);
     list.push({
       id, type: Object.hasOwn(BOND_TYPES, item.type) ? item.type : 'headcanon', text,
-      cardIds: ids(item.cardIds, BOND_LIMITS.people), au: ids(item.au, 30),
+      cardIds: ids(item.cardIds, BOND_LIMITS.people),
       ...(item.off === true ? { off: true } : {}),
       ...(Number.isFinite(Number(item.intensity)) && item.intensity !== '' && item.intensity != null ? { intensity: Math.max(1, Math.min(5, Math.round(Number(item.intensity)))) } : {}),
       ...(item.pinned === true ? { pinned: true } : {}),
@@ -78,33 +80,44 @@ export function pruneBonds(library) {
 }
 
 /**
- * The records that go out now: not switched off, of an AU that is on (or of none), with every card they are tied to on stage.
- * `presentCardIds` = the library cards of everyone on stage (the persona's included), `activeAu` = the AU ids on in this chat.
+ * The records that go out now: not switched off, with at least one of the cards they are tied to on stage.
+ * `presentCardIds` = the library cards of everyone on stage; `personaCardId` = the persona's card, which alone does not bring a record.
  */
-export function selectBonds(bonds, { presentCardIds = [], activeAu = [], knownCardIds = null } = {}) {
+export function selectBonds(bonds, { presentCardIds = [], knownCardIds = null, personaCardId = '' } = {}) {
   const here = new Set(presentCardIds);
-  const on = new Set(activeAu);
   const known = knownCardIds ? new Set(knownCardIds) : null;
   return cleanBonds(bonds).filter(record => {
     if (record.off) return false;
-    if (record.au.length && !record.au.some(id => on.has(id))) return false;
     const tied = known ? record.cardIds.filter(id => known.has(id)) : record.cardIds;
-    return tied.length > 0 && tied.every(id => here.has(id));
+    if (!tied.length) return false;
+    const others = tied.filter(id => id !== personaCardId);
+    return (others.length ? others : tied).some(id => here.has(id));
   });
 }
 
 const RULES = Object.freeze([
-  'These are facts between the characters named in each line. Both (all) of them know them as written, and behave consistently with them in every scene.',
+  'These are facts between the characters named in each line. Those named know them as written and behave consistently with them in every scene, even when the others of the group are away.',
+  'Only the people named in a line know it. Whoever else is in the scene was not part of it: they do not know it and do not refer to it as if they had been there.',
   'memory: something they went through together; they remember it, but do not have to bring it up. tension: something unresolved between them; show it in small things, never solve it by yourself. headcanon: a stable habit or fact about the two of them; treat it as always true.',
   'Never write the words, thoughts or actions of the persona because of these lines.',
 ]);
 
 /** The wrapped block, or '' when there is nothing to say. `cardNames` = Map(cardId → name). */
-export function buildBondsPrompt(bonds, { presentCardIds = [], activeAu = [], cardNames = new Map(), maxCharacters = BOND_LIMITS.promptCharacters } = {}) {
-  // Pinned first (they are kept whatever the size), then the strongest.
-  const chosen = selectBonds(bonds, { presentCardIds, activeAu, knownCardIds: [...cardNames.keys()] })
+export function buildBondsPrompt(bonds, { presentCardIds = [], personaCardId = '', cardNames = new Map(), maxCharacters = BOND_LIMITS.promptCharacters, similarity = null, semanticLimit = 0 } = {}) {
+  // Pinned first (they are kept whatever the size), then the strongest; with meaning (`similarity(record)` → closeness to the scene, embeddings)
+  // the record that answers the last posts counts about as much as a step of strength.
+  const fits = selectBonds(bonds, { presentCardIds, personaCardId, knownCardIds: [...cardNames.keys()] });
+  const near = similarity ? relativeScores(fits, similarity) : () => null;
+  // `semanticLimit`: how many unpinned records stay, the closest to the scene by meaning (0 = all that fit the budget).
+  const limit = Math.max(0, Math.floor(Number(semanticLimit) || 0));
+  const loose = fits.filter(record => !record.pinned);
+  const stay = similarity && limit && loose.length > limit && loose.some(record => near(record) != null)
+    ? new Set([...loose].sort((left, right) => (near(right) ?? -1) - (near(left) ?? -1) || (right.intensity ?? 3) - (left.intensity ?? 3)).slice(0, limit)) : null;
+  const weight = record => (record.intensity ?? 3) + 3 * (near(record) ?? 0);
+  const chosen = fits
+    .filter(record => !stay || record.pinned || stay.has(record))
     .map((record, at) => ({ record, at }))
-    .sort((left, right) => Number(Boolean(right.record.pinned)) - Number(Boolean(left.record.pinned)) || (right.record.intensity ?? 3) - (left.record.intensity ?? 3) || left.at - right.at)
+    .sort((left, right) => Number(Boolean(right.record.pinned)) - Number(Boolean(left.record.pinned)) || weight(right.record) - weight(left.record) || left.at - right.at)
     .map(item => item.record);
   const lines = chosen.map(record => {
     const people = record.cardIds.map(id => cardNames.get(id)).filter(Boolean).join(', ');

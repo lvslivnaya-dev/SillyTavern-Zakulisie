@@ -1,8 +1,9 @@
 /**
  * Which headcanons fit the scene that is about to be generated.
  *
- * Without embeddings a pair is relevant when both of its members appear in the
- * last messages (the persona always counts as present). With embeddings the
+ * Without embeddings a fact is relevant when someone who knows it (its group, or those it says know it) appears in the
+ * last messages — one of them is enough, so a group's habit still reaches the two who are there (the persona always counts as present,
+ * so she alone does not make it relevant). With embeddings the
  * semantic similarity between the scene and each fact ranks them, and pair
  * presence only adds a small bonus — see semanticScorer.
  */
@@ -32,13 +33,23 @@ export function mentionedEntities(state, text) {
   return found;
 }
 
-/** Fallback: both members present → relevant; newer facts first. */
+/** How many of those who know a fact are here, and the share: { here, total }. The persona is left out unless she is the only one. */
+export function knowersHere(state, item, pair, present) {
+  const personaId = state.ui?.personaId || '';
+  const known = [...new Set([...pair.ids, ...(item.knownBy ?? [])])];
+  const others = known.filter(id => id !== personaId);
+  const counted = others.length ? others : known;
+  return { here: counted.filter(id => present.has(id)).length, total: counted.length };
+}
+
+/** Fallback: one of those who know it is here → relevant, the more of them the better; newer facts first. */
 export function mentionScorer(state, sceneText) {
   const present = mentionedEntities(state, sceneText);
   return (item, pair) => {
-    if (!pair.ids.every(id => present.has(id))) return 0;
+    const { here, total } = knowersHere(state, item, pair, present);
+    if (!here) return 0;
     const time = Date.parse(item.createdAt ?? '') || 0;
-    return 1 + time / 1e15;
+    return 1 + here / total + time / 1e15;
   };
 }
 
@@ -56,6 +67,7 @@ export function semanticScorer(state, sceneText, similarity, threshold = 0) {
     const value = similarity(item);
     if (value == null || value < threshold) return 0;
     // Keep scores positive: selectHeadcanons skips anything <= 0.
-    return Math.max(1e-6, value + (pair.ids.every(id => present.has(id)) ? PRESENCE_BONUS : 0));
+    const { here, total } = knowersHere(state, item, pair, present);
+    return Math.max(1e-6, value + PRESENCE_BONUS * (here / total));
   };
 }

@@ -188,7 +188,10 @@ export function parseAnalysis(raw) {
   data.headcanons = (Array.isArray(data.headcanons) ? data.headcanons : [])
     .filter(item => Array.isArray(item?.participantIds) && item.participantIds.length >= 2 && item.participantIds.length <= 8 && typeof item.text === 'string' && item.text.trim())
     .slice(0, 3)
-    .map(item => ({ participantIds: item.participantIds.map(String), text: item.text.trim().slice(0, 400) }));
+    .map(item => ({
+      participantIds: item.participantIds.map(String), text: item.text.trim().slice(0, 400),
+      ...(Array.isArray(item.knownBy) ? { knownBy: [...new Set(item.knownBy.filter(id => typeof id === 'string'))].slice(0, 20) } : {}),
+    }));
   // Present only when the chronicler was asked; a model that skips it changes nothing.
   data.knowledge = data.knowledge != null ? parseKnowledge(data.knowledge) : null;
   data.world = data.world != null ? parseWorld(data.world) : null;
@@ -349,7 +352,7 @@ function formatTranscript(messages, maxCharacters) {
 
 export const MIN_CONFIDENCE = 0.35;
 
-const HEADCANON_INSTRUCTIONS = ` Also return "headcanons": [{"participantIds":["a","b"],"text":"one short Russian fact"}] — at most 3 NEW stable facts about how one of the listed pairs or groups relates (participantIds = exactly its members), clearly established in this scene: a habit, a nickname, an unspoken rule, a revealed preference, a way of showing care or hostility. One fact per item. Not an event (events are memories), not a feeling level (that is a scale), never a guess. Only the listed pairs and groups; an empty array is the normal answer.`;
+const HEADCANON_INSTRUCTIONS = ` Also return "headcanons": [{"participantIds":["a","b"],"knownBy":["a","b"],"text":"one short Russian fact"}] — at most 3 NEW stable facts about how one of the listed pairs or groups relates (participantIds = exactly its members), clearly established in this scene: a habit, a nickname, an unspoken rule, a revealed preference, a way of showing care or hostility. One fact per item. Not an event (events are memories), not a feeling level (that is a scale), never a guess. knownBy lists who knows the fact: the members of the group, plus only those who were present when it came up or were told; whoever was not there is not listed. Only the listed pairs and groups; an empty array is the normal answer.`;
 
 function headcanonBlock(state, pairs) {
   if (!pairs?.length) return '';

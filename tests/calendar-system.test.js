@@ -99,3 +99,38 @@ test('seasons become a climate for the weather forecast, month by month', () => 
   assert.equal(systemClimate(system({ seasons: [{ id: 'cold', name: 'Холод', min: -5, max: 3, kinds: { snow: 3 } }, { id: 'warm', name: 'Тепло' }] })), null);
   assert.equal(systemClimate(null), null);
 });
+
+test('early years are read as they are: year 1 is not 1901, and a day before year 0 is no date', async () => {
+  const { EARTH_CLOCK: clock } = await import('../src/core/calendar-system.js');
+  assert.equal(clock.humanDate('0001-01-01', { weekday: false }), '1 января 1');
+  assert.equal(clock.format(clock.parse('0050-03-10')), '0050-03-10');
+  assert.equal(clock.addDays('0001-01-01', -1), '0000-12-31');
+  assert.equal(clock.addDays('0000-01-01', -1), '');
+  assert.equal(clock.valid('0000-02-29'), true, 'year 0 is a leap year');
+  assert.equal(clock.daysInMonth(4, 2), 29);
+  assert.equal(clock.daysInMonth(100, 2), 28);
+});
+
+test('a field for the time of day: the colon stands from the start, digits only, «1420» is «14:20», a lone colon goes away', async () => {
+  const { JSDOM } = await import('jsdom');
+  const { attachTimeMask, timeText } = await import('../src/shared/time-mask.js');
+  const { window } = new JSDOM('<input id="t">');
+  const input = window.document.getElementById('t');
+  attachTimeMask(input);
+  input.dispatchEvent(new window.Event('focus'));
+  assert.equal(input.value, ':', 'the colon is already there');
+  input.value = '1:';
+  input.dispatchEvent(new window.Event('input'));
+  assert.equal(input.value, '1:');
+  input.value = '1:4';
+  input.dispatchEvent(new window.Event('input'));
+  input.value = '14:2';
+  input.dispatchEvent(new window.Event('input'));
+  assert.equal(input.value, '14:2');
+  assert.equal(timeText('1420'), '14:20');
+  input.value = '';
+  input.dispatchEvent(new window.Event('blur'));
+  input.value = ':';
+  input.dispatchEvent(new window.Event('blur'));
+  assert.equal(input.value, '');
+});

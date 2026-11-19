@@ -22,7 +22,7 @@ export function renderNameWords({ name, aliases, words, fill, redraw, setStatus,
       row.append(element('div', { className: 'ku-names-forms' }, NAME_CASES.map(([key, label, ask]) => {
         const input = element('input', { value: word[key] ?? '', placeholder: label, title: `${label} (${ask})`, 'aria-label': `${word.word}: ${label}` });
         input.addEventListener('input', () => { word[key] = input.value; });
-        return input;
+        return element('label', { className: 'ku-names-case' }, [element('span', { className: 'ku-names-ask', text: `${label} · ${ask}?` }), input]);
       })));
     }
     return row;

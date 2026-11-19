@@ -1,16 +1,21 @@
 /**
  * The little player of the media library. It hangs on the page itself (not inside the Studio window), so the music goes on
- * while the windows are switched or closed. While the scene drawer is there, the player is docked into it: the foot of its panel,
- * under the list; without the drawer it floats and can be dragged by its bar.
+ * while the windows are switched or closed. While the scene drawer is open, the player stands against its panel: at the top,
+ * on the free side (to the right of it, or to the left when the rail is on the right); with the drawer shut it stays out of sight
+ * (the music goes on); without the drawer at all it floats and can be dragged by its bar.
+ * A cover of the track (the picture set in the media library) can be shown with the 🖼 button: it takes the place of the video's picture.
  * A service's own embedded player (YouTube, Spotify, SoundCloud…) or the browser's own player for a direct file sits inside;
  * a link that cannot be embedded opens in a new tab.
  * Colours come from the tavern's theme (--SmartTheme…), so it looks like the rest of the page.
  */
 import { MEDIA_SERVICES, parseMediaLink } from '../core/media-library.js';
+import { imageUrl } from '../integration/wardrobe-images.js';
 
 const DOCK_ID = 'ku-media-dock';
 const STYLE_ID = 'ku-media-dock-style';
 const POS_KEY = 'ku-media-dock-pos';
+const COVER_KEY = 'ku-media-dock-cover';
+const SIDE_WIDTH = 300;
 
 const STYLE = `
 #${DOCK_ID}{position:fixed;left:12px;bottom:12px;z-index:3500;width:min(340px,calc(100vw - 24px));display:flex;flex-direction:column;border:1px solid var(--SmartThemeBorderColor);border-radius:14px;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor);box-shadow:0 8px 28px color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent);backdrop-filter:blur(12px);overflow:hidden;font-size:13px}
@@ -18,9 +23,18 @@ const STYLE = `
 #${DOCK_ID} .ku-md-bar{display:flex;align-items:center;gap:6px;padding:6px 8px 6px 12px;cursor:grab;touch-action:none;user-select:none}
 #${DOCK_ID}.ku-md-drag .ku-md-bar{cursor:grabbing}
 #${DOCK_ID}.ku-md-drag .ku-md-body{pointer-events:none}
-/* docked into the scene drawer: it is the foot of the drawer's panel, under the list, and takes the panel's width */
-#${DOCK_ID}.ku-md-docked{position:static;width:auto;flex:none;border:0;border-top:1px solid var(--SmartThemeBorderColor);border-radius:0;box-shadow:none;backdrop-filter:none}
+/* against the scene drawer's panel: at its top, on the free side (the place is set in sync()) */
+#${DOCK_ID}.ku-md-docked{width:min(${SIDE_WIDTH}px,calc(100vw - 24px))}
 #${DOCK_ID}.ku-md-docked .ku-md-bar{cursor:default}
+#${DOCK_ID}.ku-md-away{display:none}
+#${DOCK_ID} .ku-md-body{position:relative}
+#${DOCK_ID} .ku-md-cover{display:none;width:100%;aspect-ratio:16/9;max-height:220px;object-fit:cover;background:var(--SmartThemeBlurTintColor)}
+#${DOCK_ID}.ku-md-covered .ku-md-cover{display:block}
+/* the picture stands INSTEAD of the video: it lies over the picture of the embedded player (it covers it completely; the sound and the clicks go through to it, so a click on the picture is play / pause) */
+#${DOCK_ID} .ku-md-cover.ku-md-over{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;max-height:none;pointer-events:none;z-index:1}
+#${DOCK_ID} .ku-md-btn[data-md="cover"]{display:none}
+#${DOCK_ID}.ku-md-hascover .ku-md-btn[data-md="cover"]{display:grid}
+#${DOCK_ID}.ku-md-covered .ku-md-btn[data-md="cover"]{opacity:1;background:color-mix(in srgb, var(--SmartThemeBodyColor) 16%, transparent)}
 #${DOCK_ID} .ku-md-title{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
 #${DOCK_ID} .ku-md-svc{flex:0 0 auto;font-size:11px;opacity:.7}
 #${DOCK_ID} .ku-md-btn{flex:0 0 auto;width:26px;height:26px;display:grid;place-items:center;padding:0;border:0;border-radius:8px;background:transparent;color:inherit;cursor:pointer;opacity:.75;font-size:14px;line-height:1;text-decoration:none}
@@ -45,6 +59,7 @@ export function createMediaDock(doc) {
   let root = null;
   let current = null;
   let watcher = null;
+  let watchedBar = null;
 
   const readPos = () => { try { const value = JSON.parse(view.localStorage?.getItem(POS_KEY) ?? 'null'); return value && Number.isFinite(value.left) && Number.isFinite(value.top) ? value : null; } catch { return null; } };
   const savePos = pos => { try { view.localStorage?.setItem(POS_KEY, JSON.stringify(pos)); } catch { /* private window: it just does not remember */ } };
@@ -61,18 +76,27 @@ export function createMediaDock(doc) {
     return next;
   }
 
-  /** Dock into the drawer's panel when there is one (a move reloads the player, so only when the place really changes); float otherwise. */
+  /** Stand against the drawer's panel (open: at its top, on the free side), hide while it is shut, float without it. A move never reloads the player. */
   function sync() {
     if (!root) return;
-    const panel = doc.querySelector('#ku-scene-chips .ku-panel');
+    const bar = doc.getElementById('ku-scene-chips');
+    const panel = bar?.querySelector('.ku-panel');
+    if (bar && bar !== watchedBar && watcher) { watchedBar = bar; watcher.observe(bar, { attributes: true, attributeFilter: ['class'] }); }
     if (panel) {
-      if (root.parentElement === panel) return;
-      root.style.left = ''; root.style.top = ''; root.style.bottom = '';
       root.classList.add('ku-md-docked');
-      panel.append(root);
-    } else if (root.classList.contains('ku-md-docked') || !root.isConnected) {
-      root.classList.remove('ku-md-docked');
-      doc.body.append(root);
+      const open = bar.classList.contains('open');
+      root.classList.toggle('ku-md-away', !open);
+      if (!open) return;
+      const box = panel.getBoundingClientRect();
+      const width = Math.min(SIDE_WIDTH, (view.innerWidth || 1024) - 24);
+      const onRight = !bar.classList.contains('ku-side-right');
+      const left = onRight ? box.right + 8 : box.left - 8 - width;
+      root.style.left = `${Math.round(Math.max(8, Math.min(left, (view.innerWidth || 1024) - width - 8)))}px`;
+      root.style.top = `${Math.round(box.top + 6)}px`;
+      root.style.bottom = 'auto';
+    } else if (root.classList.contains('ku-md-docked') || root.classList.contains('ku-md-away')) {
+      root.classList.remove('ku-md-docked', 'ku-md-away');
+      root.style.left = ''; root.style.top = ''; root.style.bottom = '';
       const saved = readPos();
       if (saved) place(saved.left, saved.top);
     }
@@ -115,6 +139,7 @@ export function createMediaDock(doc) {
     root.innerHTML = `
       <div class="ku-md-bar" title="Тяните за эту полосу, чтобы переставить плеер">
         <span class="ku-md-title"></span><span class="ku-md-svc"></span>
+        <button type="button" class="ku-md-btn" data-md="cover" title="Показать или спрятать картинку трека (её ставят в медиатеке)" aria-label="Картинка трека">🖼</button>
         <button type="button" class="ku-md-btn" data-md="fold" title="Свернуть или развернуть (музыка не прервётся)" aria-label="Свернуть или развернуть">▾</button>
         <a class="ku-md-btn" data-md="open" target="_blank" rel="noopener noreferrer" title="Открыть на сайте сервиса" aria-label="Открыть на сайте сервиса">↗</a>
         <button type="button" class="ku-md-btn" data-md="close" title="Закрыть плеер" aria-label="Закрыть плеер">×</button>
@@ -124,13 +149,19 @@ export function createMediaDock(doc) {
       const action = event.target.closest('[data-md]')?.dataset.md;
       if (action === 'fold') { root.classList.toggle('ku-md-folded'); event.target.closest('button').textContent = root.classList.contains('ku-md-folded') ? '▴' : '▾'; }
       else if (action === 'close') stop();
+      else if (action === 'cover') { const on = root.classList.toggle('ku-md-covered'); try { view.localStorage?.setItem(COVER_KEY, on ? '1' : '0'); } catch { /* private window */ } }
     });
     root.querySelector('.ku-md-bar').addEventListener('pointerdown', startDrag);
     doc.body.append(root);
     const saved = readPos();
     if (saved) place(saved.left, saved.top);
     // the drawer comes and goes with the chat: dock when it appears, float again when it is gone
-    if (typeof view.MutationObserver === 'function') { watcher = new view.MutationObserver(sync); watcher.observe(doc.body, { childList: true }); }
+    if (typeof view.MutationObserver === 'function') {
+      watcher = new view.MutationObserver(sync);
+      watcher.observe(doc.body, { childList: true });
+      // the drawer opens, shuts and changes sides by its classes
+    }
+    view.addEventListener?.('resize', sync);
     return root;
   }
 
@@ -142,6 +173,13 @@ export function createMediaDock(doc) {
     const host = ensure();
     const body = host.querySelector('.ku-md-body');
     body.textContent = '';
+    // The picture of the track: shown above the player when the 🖼 button is on (off by default: the player looks as it always did).
+    const cover = item.image ? imageUrl(item.image) : '';
+    if (cover) { const picture = doc.createElement('img'); picture.className = parsed.kind === 'audio' ? 'ku-md-cover' : 'ku-md-cover ku-md-over'; picture.src = cover; picture.alt = ''; picture.draggable = false; body.append(picture); }
+    host.classList.toggle('ku-md-hascover', Boolean(cover));
+    let wantCover = false;
+    try { wantCover = view.localStorage?.getItem(COVER_KEY) === '1'; } catch { /* private window */ }
+    host.classList.toggle('ku-md-covered', Boolean(cover) && wantCover);
     if (parsed.kind === 'iframe') {
       const frame = doc.createElement('iframe');
       frame.src = parsed.embed;
@@ -180,6 +218,6 @@ export function createMediaDock(doc) {
     play,
     stop,
     current: () => current,
-    destroy() { watcher?.disconnect(); watcher = null; stop(); root?.remove(); root = null; doc.getElementById(STYLE_ID)?.remove(); },
+    destroy() { watcher?.disconnect(); watcher = null; watchedBar = null; view.removeEventListener?.('resize', sync); stop(); root?.remove(); root = null; doc.getElementById(STYLE_ID)?.remove(); },
   };
 }

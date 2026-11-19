@@ -99,7 +99,8 @@ export function createNamesPages(ctx) {
       const inputs = element('div', { className: 'ku-names-forms' }, NAME_CASES.map(([key, label, ask]) => {
         const input = element('input', { value: word[key] ?? '', placeholder: label, title: `${label} (${ask})`, 'aria-label': `${word.word}: ${label}` });
         input.addEventListener('change', () => attempt(() => act('onNamesUpdate', { id: entry.id, patch: { words: [{ word: word.word, [key]: input.value }] } }, 'names-word')));
-        return input;
+        // The case and its question over the field («род. · кого?»): it is clear what goes where.
+        return element('label', { className: 'ku-names-case' }, [element('span', { className: 'ku-names-ask', text: `${label} · ${ask}?` }), input]);
       }));
       row.append(inputs);
     }
@@ -257,5 +258,7 @@ export const NAMES_STYLE = `
 .ku-names-same{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--k-muted)}
 .ku-names-forms{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
 .ku-names-forms input{min-width:0;width:100%}
+.ku-names-case{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ku-names-ask{font-size:11px;line-height:1.2;color:var(--k-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @container (max-width:560px){.ku-names-add{grid-template-columns:1fr}.ku-names-forms{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;

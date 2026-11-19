@@ -222,3 +222,20 @@ test('re-analysing history keeps manual knowledge and drops what replies produce
   const rebuilt = rebuildWithoutAutomaticHistory(state);
   assert.deepEqual(rebuilt.knowledge.events.map(event => event.id), ['manual']);
 });
+
+test('a secret may have a condition of when it comes out: only a secret keeps it; it can be edited and cleared; the analyzer sees it', async () => {
+  const { applyOperations, createDefaultState, createEntity, createOperation } = await import('../src/core/index.js');
+  const { buildKnowledgeBlock } = await import('../src/integration/knowledge-analysis.js');
+  const ran = createEntity('Ран');
+  let state = applyOperations(createDefaultState(), [createOperation('entity.upsert', ran)]);
+  const add = item => { state = applyOperations(state, [createOperation('event.add', { item })]); };
+  add({ id: 'e1', text: 'Шрам на спине', witnessIds: [], secret: true, own: true, detail: 'Шрам от ножа', condition: 'Ран увидит шрам' });
+  add({ id: 'e2', text: 'Обычное дело', witnessIds: [], condition: 'не должно сохраниться' });
+  const events = state.knowledge.events;
+  assert.equal(events.find(event => event.id === 'e1').condition, 'Ран увидит шрам');
+  assert.equal(events.find(event => event.id === 'e2').condition, undefined, 'an ordinary event has no condition');
+  const block = buildKnowledgeBlock(state, 'текст', [{ event: events.find(event => event.id === 'e1'), unknownTo: [ran.id] }]);
+  assert.match(block, /REVEAL ONLY WHEN: Ран увидит шрам/);
+  state = applyOperations(state, [createOperation('event.update', { eventId: 'e1', changes: { condition: '' } })]);
+  assert.equal(state.knowledge.events.find(event => event.id === 'e1').condition, undefined, 'cleared');
+});

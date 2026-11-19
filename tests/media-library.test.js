@@ -139,25 +139,41 @@ test('вкладка шторки «Плеер»: список с поиском
   assert.deepEqual(calls.at(-1), ['stop']);
 });
 
-test('плеер: пока есть шторка, он прикреплён к её панели; шторка исчезла — плеер снова плавает', async () => {
-  const { window } = new JSDOM('<!doctype html><head></head><body><div id="ku-scene-chips"><div class="ku-rail"></div><div class="ku-panel"><div class="ku-dir-body"></div></div></div></body>', { pretendToBeVisual: true, url: 'http://localhost/' });
+test('плеер: рядом с открытой шторкой стоит у её панели, закрытая прячет, нет шторки — плавает; картинка трека по кнопке', async () => {
+  const { window } = new JSDOM('<!doctype html><head></head><body><div id="ku-scene-chips" class="open"><div class="ku-rail"></div><div class="ku-panel"><div class="ku-dir-body"></div></div></div></body>', { pretendToBeVisual: true, url: 'http://localhost/' });
   const doc = window.document;
+  const wait = () => new Promise(resolve => setTimeout(resolve, 20));
   const dock = createMediaDock(doc);
-  dock.play({ id: '1', title: 'Погоня', url: 'https://youtu.be/abc' });
+  dock.play({ id: '1', title: 'Погоня', url: 'https://youtu.be/abc', image: 'covers/a.png' });
   const root = doc.getElementById('ku-media-dock');
-  assert.equal(root.parentElement.className, 'ku-panel', 'встал в панель шторки');
-  assert.ok(root.classList.contains('ku-md-docked'));
+  assert.equal(root.parentElement, doc.body, 'плеер не переезжает внутрь шторки (звук не перезагружается)');
+  assert.ok(root.classList.contains('ku-md-docked') && !root.classList.contains('ku-md-away'));
+  assert.ok(root.style.left && root.style.top, 'встал у панели');
   root.querySelector('.ku-md-bar').dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 5, clientY: 5, button: 0 }));
   assert.equal(root.classList.contains('ku-md-drag'), false, 'прикреплённый не таскается');
-  doc.getElementById('ku-scene-chips').remove();
-  await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(root.parentElement, doc.body, 'шторки нет — плавает');
-  assert.equal(root.classList.contains('ku-md-docked'), false);
-  const bar = doc.createElement('div'); bar.id = 'ku-scene-chips';
-  const panel = doc.createElement('div'); panel.className = 'ku-panel'; bar.append(panel);
-  doc.body.append(bar);
-  await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(root.parentElement, panel, 'шторка вернулась — плеер снова в ней');
+  // the picture: there is a button, it is off until asked for
+  assert.ok(root.classList.contains('ku-md-hascover'));
+  assert.equal(root.classList.contains('ku-md-covered'), false);
+  root.querySelector('[data-md="cover"]').click();
+  assert.ok(root.classList.contains('ku-md-covered'));
+  assert.ok(root.querySelector('img.ku-md-cover'));
+  root.querySelector('[data-md="cover"]').click();
+  assert.equal(root.classList.contains('ku-md-covered'), false);
+  // a track without a picture has no button
+  dock.play({ id: '2', title: 'Тихо', url: 'https://youtu.be/def' });
+  assert.equal(root.classList.contains('ku-md-hascover'), false);
+  // the drawer shut: out of sight, the music goes on
+  const bar = doc.getElementById('ku-scene-chips');
+  bar.classList.remove('open');
+  await wait();
+  assert.ok(root.classList.contains('ku-md-away'));
+  assert.ok(root.querySelector('iframe'), 'музыка не остановлена');
+  bar.classList.add('open', 'ku-side-right');
+  await wait();
+  assert.equal(root.classList.contains('ku-md-away'), false);
+  bar.remove();
+  await wait();
+  assert.equal(root.classList.contains('ku-md-docked'), false, 'шторки нет — плавает');
   dock.destroy();
 });
 
@@ -194,4 +210,45 @@ test('вкладка «Медиа» шторки: строка «подходи�
   assert.deepEqual(calls.map(call => call[0]), ['play', 'no']);
   renderMediaPane(box, { library, suggestion: null });
   assert.equal(box.querySelector('.pud-media-offer'), null);
+});
+
+test('галерея плеера: у ссылки может быть своя картинка (только своя и только с этого сервера), её можно убрать', () => {
+  let { library, item } = addMediaItem(emptyMedia(), { url: 'https://youtu.be/abc', title: 'Погоня' });
+  assert.equal(item.image, undefined);
+  library = updateMediaItem(library, item.id, { image: '/user/images/kulisy-media/cover-1.png' });
+  assert.equal(library.items[0].image, '/user/images/kulisy-media/cover-1.png');
+  library = updateMediaItem(library, item.id, { title: 'Новое' });
+  assert.equal(library.items[0].image, '/user/images/kulisy-media/cover-1.png', 'другие правки картинку не трогают');
+  assert.equal(updateMediaItem(library, item.id, { image: 'https://evil.example/x.png' }).items[0].image, undefined, 'чужая ссылка не принимается');
+  assert.equal(updateMediaItem(library, item.id, { image: '' }).items[0].image, undefined, 'пустое убирает');
+});
+
+test('плеер в Studio: вид «Галерея» показывает плитки с картинкой, клик играет, переключатель запоминается', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true });
+  const { window } = dom;
+  const saved = {};
+  for (const name of ['window', 'document', 'getComputedStyle']) saved[name] = globalThis[name];
+  globalThis.window = window; globalThis.document = window.document; globalThis.getComputedStyle = window.getComputedStyle.bind(window);
+  for (const name of Object.getOwnPropertyNames(window)) if (/^[A-Z]/.test(name) && typeof window[name] === 'function') { try { globalThis[name] = window[name]; } catch { /* read-only */ } }
+  globalThis.requestAnimationFrame = callback => setTimeout(callback, 0);
+  try {
+    const { createMediaPages } = await import('../src/ui/pages/media.js');
+    const library = addMediaItem(addMediaItem(emptyMedia(), { url: 'https://youtu.be/abc', title: 'Погоня' }).library, { url: 'https://youtu.be/def', title: 'Тишина' }).library;
+    const withCover = { ...library, items: library.items.map((item, index) => (index === 0 ? { ...item, image: '/user/images/kulisy-media/c.png' } : item)) };
+    const calls = [];
+    let redraws = 0;
+    const ctx = { snapshot: { media: withCover, mediaNow: '' }, render: () => { redraws += 1; }, setStatus() {}, act: async (name, payload) => { calls.push([name, payload]); }, facade: { invoke: () => '' } };
+    const pages = createMediaPages(ctx);
+    let view = pages.renderPlayer();
+    assert.equal(view.querySelectorAll('.ku-media-row').length, 2, 'the list by default');
+    [...view.querySelectorAll('.ku-seg button')].find(node => node.textContent === 'Галерея').click();
+    view = pages.renderPlayer();
+    assert.equal(view.querySelectorAll('.ku-media-tile').length, 2);
+    assert.ok(view.querySelector('.ku-media-tile img[src="/user/images/kulisy-media/c.png"]'), 'the cover is on the tile');
+    view.querySelector('.ku-media-face').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(calls[0][0], 'onMediaPlay');
+  } finally {
+    for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete globalThis[name]; else globalThis[name] = value; }
+  }
 });

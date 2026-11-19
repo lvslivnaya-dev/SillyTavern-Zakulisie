@@ -1,20 +1,20 @@
 /**
  * Окно «Лорбуки чата» (лапка у поля ввода → «Лорбуки чата»): какие лорбуки работают в открытом
- * чате, через кого они подключены, и тут же поменять: глобальные, основной и доп. лорбуки
- * персонажа (каждого участника группы), лорбук надетой персоны, лорбук чата.
+ * чате и тут же поменять. Две колонки:
+ *   слева — лорбуки нарратора (карточки: основной и дополнительные) и лорбук персоны;
+ *   справа — лорбук чата и глобальные лорбуки.
  * Всё меняется сразу, родными функциями таверны; окно перерисовывается после каждой правки.
+ * Книги, которые читает само Закулисье, настраиваются в «Сцене», здесь их нет.
  */
 import { report } from '../core/guard.js';
-import { chatLoreBooks, duplicateNote } from '../core/chat-lore.js';
 import { characterApi } from '../integration/characters-api.js';
 import { loreApi } from '../integration/lorebooks-api.js';
 import { personaApi } from '../integration/personas-api.js';
 
 const escapeHtml = text => String(text ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
-const KIND_ICON = { global: 'fa-globe', card: 'fa-address-card', extra: 'fa-book-bookmark', persona: 'fa-user', chat: 'fa-passport' };
 
 /** Что таверна знает о лорбуках открытого чата. */
-function gather(persona, zak = null) {
+function gather(persona) {
   const ctx = globalThis.SillyTavern.getContext();
   const power = ctx.powerUserSettings ?? {};
   let cards = [];
@@ -31,7 +31,6 @@ function gather(persona, zak = null) {
     persona: avatar ? { avatar, name: String(power.personas?.[avatar] ?? avatar), book: String(power.persona_descriptions?.[avatar]?.lorebook ?? power.persona_description_lorebook ?? '') } : null,
     chat: persona.chatBook(),
     known: loreApi.names(),
-    zak: zak ? new Set(zak.linked()) : null,
   };
 }
 
@@ -39,63 +38,53 @@ function options(names, current, empty = 'Нет') {
   return `<option value="">${escapeHtml(empty)}</option>${names.map(name => `<option value="${escapeHtml(name)}" ${name === current ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}${current && !names.includes(current) ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)} (нет файла)</option>` : ''}`;
 }
 
-function chip(name, data) {
+function chip(name, data, missing) {
   const attrs = Object.entries(data).map(([key, value]) => `data-${key}="${escapeHtml(value)}"`).join(' ');
-  return `<span class="pud-clore-chip">${escapeHtml(name)}<button type="button" class="pud-clore-x" ${attrs} title="Отключить «${escapeHtml(name)}»" aria-label="Отключить «${escapeHtml(name)}»">×</button></span>`;
+  return `<span class="pud-clore-chip${missing ? ' missing' : ''}" title="${missing ? 'файла нет: таверна эту книгу пропустит' : ''}"><button type="button" class="pud-clore-open" data-open="${escapeHtml(name)}" title="Открыть книгу в редакторе">${escapeHtml(name)}</button><button type="button" class="pud-clore-x" ${attrs} title="Отключить «${escapeHtml(name)}»" aria-label="Отключить «${escapeHtml(name)}»">×</button></span>`;
 }
 
 function render(box, sources) {
   const names = sources.known;
-  const zak = sources.zak;
-  const books = chatLoreBooks(sources);
-  // Books only Kulisy reads (the tavern does not send them) stand in the same list, with a warning.
-  const only = zak ? [...zak].filter(name => !books.some(book => book.name === name)).map(name => ({ name, via: [], missing: names.length > 0 && !names.includes(name), zakOnly: true })) : [];
-  const zakSwitch = book => zak ? `<label class="pud-clore-zak" title="Закулисье читает эту книгу само: анализ ответов, поиск героев, секреты. Модели записи отправляет таверна, а не Закулисье."><input type="checkbox" data-zak="${escapeHtml(book.name)}" ${zak.has(book.name) ? 'checked' : ''}> читает Закулисье</label>` : '';
-  const summary = books.length || only.length
-    ? [...books, ...only].map(book => `<li class="pud-clore-book${book.missing ? ' missing' : ''}">
-        <button type="button" class="pud-clore-open" data-open="${escapeHtml(book.name)}" title="Открыть в редакторе">${escapeHtml(book.name)}</button>
-        <span class="pud-clore-via">${book.via.map(item => `<span class="pud-clore-tag"><i class="fa-solid ${KIND_ICON[item.kind]}"></i> ${escapeHtml(item.label)}</span>`).join('')}${book.zakOnly ? '<span class="pud-clore-tag warn" title="Закулисье её читает, но таверна модели не отправляет: подключите её ниже, в «Где подключены»">только Закулисье</span>' : ''}</span>
-        ${zakSwitch(book)}
-        ${book.missing ? '<span class="pud-hint">файла нет — таверна его пропустит</span>' : duplicateNote(book) ? `<span class="pud-hint">${duplicateNote(book)}</span>` : ''}
-      </li>`).join('')
-    : '<li class="pud-hint">В этом чате не работает ни один лорбук.</li>';
-  const addSelect = (act, exclude, extra = '') => `<select class="text_pole" data-add="${act}" ${extra}>${options(names.filter(name => !exclude.includes(name)), '', '+ добавить…')}</select>`;
+  const missing = name => names.length > 0 && !names.includes(name);
+  const addSelect = (act, exclude, extra = '') => `<select class="text_pole" data-add="${act}" ${extra} aria-label="Добавить лорбук">${options(names.filter(name => !exclude.includes(name)), '', '+ добавить…')}</select>`;
   const cards = sources.cards.map(card => `
-    <div class="pud-clore-row">
-      <span class="pud-clore-label"><i class="fa-solid fa-address-card"></i> ${escapeHtml(card.name)}</span>
+    <section class="pud-clore-block">
+      <h4>Лорбук нарратора${sources.cards.length > 1 ? `: ${escapeHtml(card.name)}` : ''}</h4>
       <label class="pud-clore-field"><span>основной</span><select class="text_pole" data-set="card" data-avatar="${escapeHtml(card.avatar)}">${options(names, card.world)}</select></label>
-      <div class="pud-clore-field"><span>доп.</span><span class="pud-clore-chips">${card.extras.map(name => chip(name, { drop: 'extra', avatar: card.avatar, book: name })).join('')}${addSelect('extra', [card.world, ...card.extras], `data-avatar="${escapeHtml(card.avatar)}"`)}</span></div>
-    </div>`).join('');
-  box.innerHTML = `<h3>Лорбуки этого чата</h3>
-    <ul class="pud-clore-list">${summary}</ul>
-    ${zak ? `<div class="pud-clore-row"><span class="pud-clore-label"><i class="fa-solid fa-masks-theater"></i> Читает Закулисье</span>${addSelect('zak', [...zak], '')}<span class="pud-hint">добавить книгу в чтение</span></div>` : ''}
-    <h4>Где подключены</h4>
-    <div class="pud-clore-row">
-      <span class="pud-clore-label"><i class="fa-solid fa-globe"></i> Глобально</span>
-      <span class="pud-clore-chips">${sources.global.map(name => chip(name, { drop: 'global', book: name })).join('')}${addSelect('global', sources.global)}</span>
-      <span class="pud-hint">во всех чатах</span>
-    </div>
-    ${cards || '<p class="pud-hint">Персонажа у чата нет.</p>'}
-    ${sources.persona ? `<div class="pud-clore-row">
-      <span class="pud-clore-label"><i class="fa-solid fa-user"></i> Персона «${escapeHtml(sources.persona.name)}»</span>
-      <select class="text_pole" data-set="persona">${options(names, sources.persona.book)}</select>
-      <span class="pud-hint">во всех её чатах</span>
-    </div>` : ''}
-    <div class="pud-clore-row">
-      <span class="pud-clore-label"><i class="fa-solid fa-passport"></i> Этот чат</span>
-      <select class="text_pole" data-set="chat">${options(names, sources.chat)}</select>
-      <span class="pud-hint">только здесь</span>
+      <div class="pud-clore-field"><span>дополнительные</span><span class="pud-clore-chips">${card.extras.map(name => chip(name, { drop: 'extra', avatar: card.avatar, book: name }, missing(name))).join('')}${addSelect('extra', [card.world, ...card.extras], `data-avatar="${escapeHtml(card.avatar)}"`)}</span></div>
+    </section>`).join('');
+  const personaBlock = sources.persona ? `
+    <section class="pud-clore-block">
+      <h4>Лорбук персоны «${escapeHtml(sources.persona.name)}»</h4>
+      <select class="text_pole" data-set="persona" aria-label="Лорбук персоны">${options(names, sources.persona.book)}</select>
+      <span class="pud-hint">во всех чатах этой персоны</span>
+    </section>` : '';
+  box.innerHTML = `<button type="button" class="pud-clore-close" data-close title="Закрыть" aria-label="Закрыть">×</button>
+    <h3>Лорбуки этого чата</h3>
+    <div class="pud-clore-cols">
+      <div class="pud-clore-col">${cards || '<p class="pud-hint">Персонажа у чата нет.</p>'}${personaBlock}</div>
+      <div class="pud-clore-col">
+        <section class="pud-clore-block">
+          <h4>Лорбук чата</h4>
+          <select class="text_pole" data-set="chat" aria-label="Лорбук чата">${options(names, sources.chat)}</select>
+          <span class="pud-hint">только в этом чате</span>
+        </section>
+        <section class="pud-clore-block">
+          <h4>Глобальные лорбуки</h4>
+          <span class="pud-clore-chips">${sources.global.map(name => chip(name, { drop: 'global', book: name }, missing(name))).join('')}${addSelect('global', sources.global)}</span>
+          <span class="pud-hint">во всех чатах</span>
+        </section>
+      </div>
     </div>`;
 }
 
 export async function openChatLore(doc, { persona = personaApi, chars = characterApi, lore = loreApi, shared = {} } = {}) {
-  const zak = shared.kulisyLore ?? null;
   await Promise.all([persona.ready(), chars.ready(), lore.ready()]);
   const ctx = globalThis.SillyTavern?.getContext?.();
   if (!ctx || !persona.hasChat()) { globalThis.toastr?.info?.('Сначала открой чат.', 'Закулисье'); return; }
   const box = doc.createElement('div');
   box.className = 'pud-ask pud-clore';
-  const redraw = () => render(box, gather(persona, zak));
+  const redraw = () => render(box, gather(persona));
   const run = async (what, task) => {
     try { await task(); } catch (error) { report(`лорбуки чата: ${what}`, error); globalThis.toastr?.error?.(String(error?.message ?? error), 'Закулисье'); }
     redraw();
@@ -103,8 +92,6 @@ export async function openChatLore(doc, { persona = personaApi, chars = characte
   box.addEventListener('change', event => {
     const target = event.target;
     const value = target.value;
-    if (target.dataset.zak && zak) { run('чтение Закулисья', () => (target.checked ? zak.link(target.dataset.zak) : zak.unlink(target.dataset.zak))); return; }
-    if (target.dataset.add === 'zak' && value && zak) { run('чтение Закулисья', () => zak.link(value)); return; }
     if (target.dataset.add === 'global' && value) run('глобально', () => lore.setGlobal(doc, value, true));
     else if (target.dataset.add === 'extra' && value) run('доп. лорбук', () => persona.setExtraBooks(target.dataset.avatar, [...persona.extraBooks(target.dataset.avatar), value]));
     else if (target.dataset.set === 'card') run('лорбук персонажа', () => chars.setWorld(target.dataset.avatar, value));
@@ -112,6 +99,7 @@ export async function openChatLore(doc, { persona = personaApi, chars = characte
     else if (target.dataset.set === 'chat') run('лорбук чата', () => persona.setChatBook(doc, value));
   });
   box.addEventListener('click', event => {
+    if (event.target.closest('[data-close]')) { box.closest('dialog')?.querySelector('.popup-button-ok')?.click(); return; }
     const drop = event.target.closest('[data-drop]');
     if (drop) {
       const { book, avatar } = drop.dataset;

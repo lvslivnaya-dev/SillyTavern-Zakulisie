@@ -221,8 +221,8 @@ export function createLibraryCallbacks(deps) {
   const callbacks = {
     onLibraryGet: () => ({ library: library.get(), linkedIds: [...linkedCards(getState()).keys()], linkedItemIds: [...linkedItems(getState()).keys()], linkedCharacterIds: [...cardLinks(getState()).keys()] }),
 
-    onLibraryAddFolder: ({ name, parentId = '', persona = false }) => {
-      const { library: next, folder } = addFolder(library.get(), { name, parentId, persona });
+    onLibraryAddFolder: ({ name, parentId = '' }) => {
+      const { library: next, folder } = addFolder(library.get(), { name, parentId });
       library.set(next);
       return folder;
     },
